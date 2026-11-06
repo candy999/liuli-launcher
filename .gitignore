@@ -1,0 +1,12 @@
+.gradle/
+build/
+local.properties
+.idea/
+*.iml
+.DS_Store
+# 簽章金鑰絕對不要進版控
+keystore/
+*.p12
+*.jks
+*.keystore
+__pycache__/
