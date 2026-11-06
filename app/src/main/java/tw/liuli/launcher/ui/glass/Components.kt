@@ -16,6 +16,9 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -182,9 +185,11 @@ fun GlassMenu(
     title: String,
     subtitle: String? = null,
     actions: List<MenuAction>,
-    width: Dp = 440.dp,
+    width: Dp = 460.dp,
+    focusIndex: Int = 0,
 ) {
     val first = remember { FocusRequester() }
+    val focusAt = focusIndex.coerceIn(0, (actions.size - 1).coerceAtLeast(0))
     Box(
         Modifier
             .fillMaxSize()
@@ -208,9 +213,11 @@ fun GlassMenu(
                     )
                 }
                 Spacer(Modifier.height(14.dp))
-                actions.forEachIndexed { index, item ->
-                    MenuRow(item, if (index == 0) first else null)
-                    Spacer(Modifier.height(6.dp))
+                Column(Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState())) {
+                    actions.forEachIndexed { index, item ->
+                        MenuRow(item, if (index == focusAt) first else null)
+                        Spacer(Modifier.height(6.dp))
+                    }
                 }
             }
         }
@@ -240,4 +247,63 @@ private fun MenuRow(item: MenuAction, focusRequester: FocusRequester?) {
             }
         }
     }
+}
+
+/** 玻璃文字輸入框（輸入網址用）。按遙控器確定鍵會叫出電視鍵盤。 */
+@OptIn(ExperimentalComposeUiApi::class)
+@Composable
+fun GlassInput(
+    title: String,
+    hint: String,
+    initial: String,
+    onSubmit: (String) -> Unit,
+    onCancel: () -> Unit,
+) {
+    var text by remember { mutableStateOf(initial) }
+    val field = remember { FocusRequester() }
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.40f)),
+        contentAlignment = Alignment.Center,
+    ) {
+        GlassSurface(Modifier.width(640.dp), shape = RoundedCornerShape(34.dp), blurRadius = 40.dp) {
+            Column(
+                Modifier
+                    .padding(28.dp)
+                    .focusProperties { exit = { FocusRequester.Cancel } }
+                    .focusGroup(),
+            ) {
+                GText(title, size = 22.sp, weight = FontWeight.SemiBold)
+                Spacer(Modifier.height(6.dp))
+                GText(hint, size = 14.sp, color = Color.White.copy(alpha = 0.6f), maxLines = 3)
+                Spacer(Modifier.height(16.dp))
+                var focused by remember { mutableStateOf(false) }
+                androidx.compose.foundation.text.BasicTextField(
+                    value = text,
+                    onValueChange = { text = it },
+                    singleLine = true,
+                    textStyle = TextStyle(color = Color.White, fontSize = 18.sp),
+                    cursorBrush = androidx.compose.ui.graphics.SolidColor(Color.White),
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                        keyboardType = androidx.compose.ui.text.input.KeyboardType.Uri,
+                        imeAction = androidx.compose.ui.text.input.ImeAction.Done,
+                    ),
+                    keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { onSubmit(text.trim()) }),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .focusRequester(field)
+                        .onFocusChanged { focused = it.isFocused }
+                        .background(Color.White.copy(alpha = if (focused) 0.22f else 0.10f), RoundedCornerShape(16.dp))
+                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                )
+                Spacer(Modifier.height(18.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                    GlassPill("確定", onClick = { onSubmit(text.trim()) })
+                    GlassPill("取消", onClick = onCancel)
+                }
+            }
+        }
+    }
+    LaunchedEffect(Unit) { runCatching { field.requestFocus() } }
 }

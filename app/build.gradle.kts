@@ -67,4 +67,8 @@ dependencies {
     implementation("androidx.compose.animation:animation")
     implementation("androidx.activity:activity-compose:1.9.2")
     implementation("androidx.core:core-ktx:1.13.1")
+    // 網頁桌布：以虛擬 https 網域載入內建與 zip 桌布
+    implementation("androidx.webkit:webkit:1.11.0")
+    // 農民曆（MIT，離線演算）
+    implementation("cn.6tail:lunar:1.7.4")
 }

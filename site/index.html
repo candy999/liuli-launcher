@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>琉璃桌布遊樂場</title>
+<meta name="description" content="琉璃 Launcher 網頁桌布的即時預覽：調整時間、天氣、農曆、節日，看桌布怎麼變化。">
+<style>
+  :root {
+    --bg: #0b0f1d; --panel: rgba(255,255,255,0.07); --line: rgba(255,255,255,0.14);
+    --text: #eef1f8; --dim: #9aa3b8; --accent: #8fb8ff;
+  }
+  :root[data-theme="light"] { --bg: #eef1f7; --panel: rgba(255,255,255,0.75); --line: rgba(10,20,40,0.12); --text: #141a2a; --dim: #5a6378; --accent: #2b5fd9; }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) { --bg: #eef1f7; --panel: rgba(255,255,255,0.75); --line: rgba(10,20,40,0.12); --text: #141a2a; --dim: #5a6378; --accent: #2b5fd9; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.55 system-ui, "Noto Sans TC", sans-serif; }
+  header { padding: 28px 16px 8px; max-width: 1200px; margin: 0 auto; }
+  h1 { margin: 0 0 4px; font-size: 26px; font-weight: 650; }
+  header p { margin: 0; color: var(--dim); }
+  a { color: var(--accent); }
+  main { max-width: 1200px; margin: 0 auto; padding: 16px; display: grid; grid-template-columns: 1fr 320px; gap: 20px; }
+  @media (max-width: 860px) { main { grid-template-columns: 1fr; } }
+  .screen { position: relative; aspect-ratio: 16/9; border-radius: 18px; overflow: hidden; border: 1px solid var(--line); background: #000; }
+  .screen iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 18px; padding: 16px; backdrop-filter: blur(20px); }
+  label { display: block; font-size: 13px; color: var(--dim); margin: 12px 0 4px; }
+  label:first-child { margin-top: 0; }
+  select, input[type=range] { width: 100%; }
+  select { background: transparent; color: var(--text); border: 1px solid var(--line); border-radius: 10px; padding: 8px; font: inherit; }
+  select option { color: #000; }
+  .row { display: flex; gap: 10px; align-items: center; }
+  .row output { min-width: 56px; text-align: right; font-variant-numeric: tabular-nums; }
+  .checks { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 12px; }
+  .checks label { margin: 0; color: var(--text); display: flex; gap: 6px; align-items: center; font-size: 14px; }
+  code, .url { font: 12px/1.5 ui-monospace, monospace; word-break: break-all; }
+  .url { display: block; margin-top: 12px; padding: 10px; border-radius: 10px; background: rgba(0,0,0,0.25); color: var(--dim); }
+  button { margin-top: 10px; width: 100%; padding: 10px; border-radius: 12px; border: 1px solid var(--line); background: var(--accent); color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
+  section { max-width: 1200px; margin: 0 auto; padding: 8px 16px 40px; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 14px; }
+  .card h3 { margin: 0 0 4px; font-size: 16px; }
+  .card p { margin: 0 0 8px; color: var(--dim); font-size: 13px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>琉璃桌布遊樂場</h1>
+  <p>琉璃 Launcher 會把時間、天氣、農民曆、節日帶進網頁桌布。在這裡調整情境，看桌布怎麼變化。
+    <a href="https://github.com/candy999/liuli-launcher">GitHub</a> ·
+    <a href="https://github.com/candy999/liuli-launcher/blob/main/docs/wallpaper-api.md">參數規格</a> ·
+    <a href="https://github.com/candy999/liuli-launcher/blob/main/docs/ai-wallpaper-prompt.md">用 AI 做桌布</a></p>
+</header>
+<main>
+  <div class="screen"><iframe id="frame" title="桌布預覽"></iframe></div>
+  <div class="panel">
+    <label for="wp">桌布</label>
+    <select id="wp"></select>
+
+    <label for="hour">時間</label>
+    <div class="row"><input id="hour" type="range" min="0" max="23.75" step="0.25" value="21"><output id="hourOut"></output></div>
+
+    <label for="wx">天氣</label>
+    <select id="wx">
+      <option value="clear">晴 clear</option><option value="partly">晴時多雲 partly</option>
+      <option value="cloudy">陰 cloudy</option><option value="fog">霧 fog</option>
+      <option value="drizzle">毛毛雨 drizzle</option><option value="rain">雨 rain</option>
+      <option value="thunder">雷雨 thunder</option><option value="snow">雪 snow</option>
+    </select>
+
+    <label for="cloud">雲量</label>
+    <div class="row"><input id="cloud" type="range" min="0" max="100" value="20"><output id="cloudOut"></output></div>
+
+    <label for="lday">農曆日（月相跟著變）</label>
+    <div class="row"><input id="lday" type="range" min="1" max="30" value="15"><output id="ldayOut"></output></div>
+
+    <label for="festival">節日</label>
+    <select id="festival">
+      <option value="">（無）</option><option value="spring">春節 spring</option><option value="chuxi">除夕 chuxi</option>
+      <option value="lantern">元宵 lantern</option><option value="dragonboat">端午 dragonboat</option>
+      <option value="qixi">七夕 qixi</option><option value="zhongyuan">中元 zhongyuan</option>
+      <option value="midautumn">中秋 midautumn</option><option value="dongzhi">冬至 dongzhi</option>
+      <option value="christmas">聖誕 christmas</option><option value="nye">跨年 nye</option>
+    </select>
+
+    <div class="checks">
+      <label><input id="reduce" type="checkbox"> 低效能（motion=reduce）</label>
+    </div>
+
+    <span class="url" id="url"></span>
+    <button id="copy" type="button">複製桌布網址（貼到琉璃 → 設定 → 桌布 → 輸入網頁網址）</button>
+  </div>
+</main>
+<section>
+  <h2>下載離線包</h2>
+  <div class="cards" id="cards"></div>
+</section>
+<script>
+  var WALLPAPERS = [
+    { id: 'liuli-sky', name: '琉璃天空', desc: '天空、雲、雨、雪、月相、初一十五香煙、節日燈籠，全部依情境自動變化。' },
+    { id: 'rain-glass', name: '玻璃雨滴', desc: '水珠在玻璃上滑落並倒映窗外光點，雨量跟著天氣。' },
+    { id: 'aurora', name: '光暈極光', desc: '柔和光暈慢慢流動，色調隨時段、拜拜日與節日變化。' },
+    { id: 'ocean', name: '海浪', desc: '多層海浪與日月倒影，風大、下雨時浪變大。' }
+  ];
+  var $ = function (id) { return document.getElementById(id); };
+  WALLPAPERS.forEach(function (w) {
+    var o = document.createElement('option'); o.value = w.id; o.textContent = w.name; $('wp').appendChild(o);
+    var card = document.createElement('div'); card.className = 'card';
+    card.innerHTML = '<h3></h3><p></p><a></a>';
+    card.querySelector('h3').textContent = w.name;
+    card.querySelector('p').textContent = w.desc;
+    var a = card.querySelector('a'); a.href = 'zips/' + w.id + '.zip'; a.textContent = w.id + '.zip';
+    $('cards').appendChild(card);
+  });
+
+  function periodOf(h) {
+    if (h <= 3) return 'midnight'; if (h <= 5) return 'dawn'; if (h <= 10) return 'morning';
+    if (h <= 12) return 'noon'; if (h <= 16) return 'afternoon'; if (h <= 18) return 'dusk'; return 'night';
+  }
+
+  function params() {
+    var hour = Number($('hour').value);
+    var day = hour >= 6 && hour < 18;
+    var lday = Number($('lday').value);
+    var festival = $('festival').value;
+    var p = {
+      v: '1', mode: 'preview', hour: String(Math.floor(hour)), minute: String(Math.round((hour % 1) * 60)),
+      period: periodOf(Math.floor(hour)), daylight: day ? '1' : '0', theme: day ? 'light' : 'dark',
+      sun: day ? ((hour - 6) / 12).toFixed(3) : '-1',
+      wx: $('wx').value, cloud: $('cloud').value, lday: String(lday), lmonth: festival === 'midautumn' ? '8' : '9',
+      bai: (lday === 1 || lday === 15) ? '1' : '0', moon: ((lday - 1) / 29.53).toFixed(3),
+      festival: festival, holiday: festival ? '1' : '0', motion: $('reduce').checked ? 'reduce' : 'full'
+    };
+    return new URLSearchParams(p).toString();
+  }
+
+  var timer = 0;
+  function update() {
+    var hour = Number($('hour').value);
+    $('hourOut').textContent = String(Math.floor(hour)).padStart(2, '0') + ':' + String(Math.round((hour % 1) * 60)).padStart(2, '0');
+    $('cloudOut').textContent = $('cloud').value + '%';
+    var lday = Number($('lday').value);
+    $('ldayOut').textContent = lday + (lday === 1 || lday === 15 ? '・拜拜' : '');
+    var base = new URL('wallpapers/' + $('wp').value + '/index.html', location.href).toString();
+    $('url').textContent = base;
+    clearTimeout(timer);
+    timer = setTimeout(function () { $('frame').src = 'wallpapers/' + $('wp').value + '/index.html?' + params(); }, 150);
+  }
+  ['wp', 'hour', 'wx', 'cloud', 'lday', 'festival', 'reduce'].forEach(function (id) {
+    $(id).addEventListener('input', update);
+  });
+  $('copy').addEventListener('click', function () {
+    var text = $('url').textContent;
+    (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject()).then(function () {
+      $('copy').textContent = '已複製';
+      setTimeout(function () { $('copy').textContent = '複製桌布網址（貼到琉璃 → 設定 → 桌布 → 輸入網頁網址）'; }, 1500);
+    }, function () { prompt('複製這個網址', text); });
+  });
+  update();
+</script>
+</body>
+</html>

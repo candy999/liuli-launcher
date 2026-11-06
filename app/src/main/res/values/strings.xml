@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">琉璃 Launcher</string>
+    <string name="key_service_label">琉璃 遙控器按鍵</string>
+    <string name="key_service_description">讓琉璃 Launcher 重新對應遙控器按鍵（例如把 Netflix 鍵改成開別的 App），並在原廠主畫面跳出時自動切回琉璃。只攔截按鍵與取得前景 App 名稱，不讀取畫面內容，也不會上傳任何資料。</string>
 </resources>

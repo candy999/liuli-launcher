@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>玻璃雨滴</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #0a0d18; }
+  canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script src="liuli.js"></script>
+<script>
+/*
+ * 玻璃雨滴：窗外是模糊的城市光點，水珠在玻璃上滑落，每顆水珠像小透鏡一樣倒映背景。
+ * 雨量跟著天氣：wx=rain／thunder 大雨、drizzle 小雨，不下雨時只有少量凝結水珠。
+ * 白天（daylight=1）窗外是亮的天光，晚上是城市夜景。
+ */
+(function () {
+  var canvas = document.getElementById('c');
+  var g = canvas.getContext('2d');
+  var bg = document.createElement('canvas');
+  var bgx = bg.getContext('2d');
+  var blurred = document.createElement('canvas');
+  var blx = blurred.getContext('2d');
+  var C = Liuli.ctx, W = 0, H = 0, scale = 0.5;
+  var drops = [];
+
+  function intensity() {
+    if (C.wx === 'rain' || C.wx === 'thunder') return 1;
+    if (C.wx === 'drizzle') return 0.55;
+    if (C.wx === 'cloudy' || C.wx === 'fog') return 0.25;
+    return 0.12;
+  }
+
+  function paintBackground() {
+    bg.width = W; bg.height = H;
+    var day = C.daylight;
+    var grad = bgx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, day ? '#8fa6c2' : '#0b1024');
+    grad.addColorStop(1, day ? '#d5dde6' : '#1c1530');
+    bgx.fillStyle = grad;
+    bgx.fillRect(0, 0, W, H);
+    var n = day ? 25 : 70;
+    for (var i = 0; i < n; i++) {
+      var x = Math.random() * W, y = H * (0.35 + Math.random() * 0.65), r = (Math.random() * 30 + 10) * scale * 2;
+      var hue = day ? 210 : [30, 40, 200, 330, 50][i % 5];
+      var gr = bgx.createRadialGradient(x, y, 0, x, y, r);
+      gr.addColorStop(0, 'hsla(' + hue + ',80%,' + (day ? 90 : 65) + '%,' + (day ? 0.25 : 0.5) + ')');
+      gr.addColorStop(1, 'hsla(' + hue + ',80%,60%,0)');
+      bgx.fillStyle = gr;
+      bgx.fillRect(x - r, y - r, r * 2, r * 2);
+    }
+    // 模糊只做一次（每幀做 blur 在電視上太貴）
+    blurred.width = W; blurred.height = H;
+    blx.filter = 'blur(' + (12 * scale) + 'px)';
+    blx.drawImage(bg, 0, 0);
+    blx.filter = 'none';
+    blx.fillStyle = day ? 'rgba(255,255,255,0.10)' : 'rgba(10,14,30,0.18)';
+    blx.fillRect(0, 0, W, H);
+  }
+
+  function spawn(big) {
+    return {
+      x: Math.random() * W,
+      y: big ? -10 : Math.random() * H,
+      r: big ? (Math.random() * 4 + 3) * scale * 2 : (Math.random() * 1.6 + 0.6) * scale * 2,
+      v: big ? Math.random() * 1.5 + 0.8 : 0,
+      big: big,
+      wobble: Math.random() * 6.28
+    };
+  }
+
+  function build() {
+    drops = [];
+    var k = (C.motion === 'reduce' ? 0.5 : 1) * intensity();
+    for (var i = 0; i < 260 * k + 30; i++) drops.push(spawn(false));
+    for (i = 0; i < 26 * k; i++) { var d = spawn(true); d.y = Math.random() * H; drops.push(d); }
+  }
+
+  function resize() {
+    scale = C.motion === 'reduce' ? 0.35 : 0.5;
+    W = canvas.width = Math.max(1, Math.round(innerWidth * scale));
+    H = canvas.height = Math.max(1, Math.round(innerHeight * scale));
+    paintBackground();
+    build();
+  }
+
+  function lens(d) {
+    // 水珠＝倒過來、縮小的清晰背景
+    g.save();
+    g.beginPath();
+    g.ellipse(d.x, d.y, d.r, d.r * 1.12, 0, 0, 6.283);
+    g.clip();
+    var s = d.r * 6;
+    g.translate(d.x, d.y);
+    g.scale(1, -1);
+    g.drawImage(bg, d.x - s, d.y - s, s * 2, s * 2, -d.r * 1.1, -d.r * 1.1, d.r * 2.2, d.r * 2.2);
+    g.restore();
+    g.strokeStyle = 'rgba(0,0,0,0.25)';
+    g.lineWidth = Math.max(0.6, d.r * 0.12);
+    g.beginPath(); g.ellipse(d.x, d.y + d.r * 0.05, d.r, d.r * 1.12, 0, 0.2, 2.9); g.stroke();
+    g.fillStyle = 'rgba(255,255,255,0.55)';
+    g.beginPath(); g.arc(d.x - d.r * 0.35, d.y - d.r * 0.45, d.r * 0.22, 0, 6.283); g.fill();
+  }
+
+  var last = 0, flash = 0;
+  function frame(t) {
+    requestAnimationFrame(frame);
+    if (t - last < 1000 / Liuli.fps() - 2) return;
+    last = t;
+    g.drawImage(blurred, 0, 0);
+    for (var i = 0; i < drops.length; i++) {
+      var d = drops[i];
+      if (d.big) {
+        d.wobble += 0.05;
+        d.y += d.v * scale * 2;
+        d.x += Math.sin(d.wobble) * 0.15;
+        g.fillStyle = 'rgba(255,255,255,0.05)';
+        g.fillRect(d.x - d.r * 0.3, d.y - d.r * 6, d.r * 0.6, d.r * 5);
+        if (d.y - d.r > H) drops[i] = spawn(true);
+      }
+      lens(d);
+    }
+    if (C.wx === 'thunder') {
+      if (flash <= 0 && Math.random() < 0.003) flash = 1;
+      if (flash > 0) { g.fillStyle = 'rgba(230,235,255,' + (flash * 0.4) + ')'; g.fillRect(0, 0, W, H); flash -= 0.05; }
+    }
+  }
+
+  var lastKey = '';
+  Liuli.onChange(function (c) {
+    var key = [c.wx, c.daylight, c.motion].join('|');
+    C = c;
+    if (key !== lastKey) { lastKey = key; if (W) { paintBackground(); build(); } }
+  });
+  addEventListener('resize', resize);
+  resize();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

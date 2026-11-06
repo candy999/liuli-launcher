@@ -114,3 +114,21 @@ class DockStore(context: Context) {
         }
     }
 }
+
+/**
+ * 隱藏的 App。原廠 Google TV 主畫面不列出沒有電視版入口的 App（手機版），
+ * 琉璃全部列出，再讓使用者自己決定哪些要隱藏。
+ */
+class HiddenAppsStore(context: Context) {
+    private val prefs = context.getSharedPreferences("hidden_apps", Context.MODE_PRIVATE)
+
+    fun load(): Set<String> = prefs.getStringSet(KEY, emptySet())?.toSet() ?: emptySet()
+
+    fun save(hidden: Set<String>) {
+        prefs.edit().putStringSet(KEY, HashSet(hidden)).apply()
+    }
+
+    private companion object {
+        const val KEY = "packages"
+    }
+}

@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>琉璃天空</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #050814; }
+  canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script src="liuli.js"></script>
+<script>
+/*
+ * 琉璃天空：完全由情境參數驅動的示範桌布。
+ * - 天空顏色：sun（日出→日落進度）、daylight
+ * - 雲量：cloud；雨／雷：wx；霧：wx=fog；雪：wx=snow
+ * - 夜晚：星星＋依農曆日畫出的月相（moon）
+ * - 初一、十五（bai=1）：底部暖光與裊裊香煙
+ * - 節日：春節／元宵／除夕紅燈籠、中秋大月亮、中元蓮花燈、聖誕雪花
+ * 渲染解析度預設為畫面的 0.5 倍，低效能電視（motion=reduce）再降到 0.35 倍。
+ */
+(function () {
+  var canvas = document.getElementById('c');
+  var g = canvas.getContext('2d');
+  var W = 0, H = 0, scale = 0.5;
+  var C = Liuli.ctx;
+  var rnd = mulberry(20261106);
+
+  function mulberry(a) { return function () { a |= 0; a = a + 0x6D2B79F5 | 0; var t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+  function lerp(a, b, t) { return a + (b - a) * t; }
+  function mix(c1, c2, t) { return [lerp(c1[0], c2[0], t), lerp(c1[1], c2[1], t), lerp(c1[2], c2[2], t)]; }
+  function rgb(c, a) { return 'rgba(' + (c[0] | 0) + ',' + (c[1] | 0) + ',' + (c[2] | 0) + ',' + (a == null ? 1 : a) + ')'; }
+
+  function resize() {
+    scale = C.motion === 'reduce' ? 0.35 : 0.5;
+    W = canvas.width = Math.max(1, Math.round(innerWidth * scale));
+    H = canvas.height = Math.max(1, Math.round(innerHeight * scale));
+    build();
+  }
+
+  // ── 天空配色：依太陽進度在幾組關鍵色之間內插 ──
+  var NIGHT = [[6, 10, 28], [18, 26, 58]];
+  var DAWN = [[255, 158, 120], [92, 120, 196]];
+  var DAY = [[120, 186, 245], [205, 232, 255]];
+  var DUSK = [[255, 120, 92], [72, 60, 130]];
+  function skyColors() {
+    var s = C.sun;
+    var top, bottom;
+    if (!(s >= 0)) { top = NIGHT[0]; bottom = NIGHT[1]; }
+    else if (s < 0.12) { var t = s / 0.12; top = mix(DAWN[1], DAY[0], t); bottom = mix(DAWN[0], DAY[1], t); }
+    else if (s > 0.88) { var u = (s - 0.88) / 0.12; top = mix(DAY[0], DUSK[1], u); bottom = mix(DAY[1], DUSK[0], u); }
+    else { top = DAY[0]; bottom = DAY[1]; }
+    // 陰天、下雨時天空變灰
+    var grey = Math.min(1, (C.cloud || 0) / 100 * 0.6 + (C.isRainy ? 0.35 : 0) + (C.wx === 'fog' ? 0.4 : 0));
+    var greyTop = C.daylight ? [120, 132, 150] : [22, 26, 38];
+    var greyBot = C.daylight ? [170, 178, 190] : [34, 38, 52];
+    return [mix(top, greyTop, grey), mix(bottom, greyBot, grey)];
+  }
+
+  // ── 粒子 ──
+  var stars = [], clouds = [], drops = [], flakes = [], smoke = [], lanterns = [], glassDrops = [];
+  function build() {
+    var k = C.motion === 'reduce' ? 0.5 : 1;
+    stars = []; for (var i = 0; i < 160 * k; i++) stars.push({ x: rnd() * W, y: rnd() * H * 0.7, r: rnd() * 1.1 + 0.2, p: rnd() * 6.28 });
+    clouds = []; var nc = Math.round(((C.cloud || 0) / 100) * 9 + (C.isRainy ? 4 : 0));
+    for (i = 0; i < nc; i++) clouds.push({ x: rnd() * W * 1.4 - W * 0.2, y: rnd() * H * 0.45, s: rnd() * 0.6 + 0.6, v: rnd() * 0.15 + 0.05 });
+    drops = []; var nd = C.isRainy ? (C.wx === 'drizzle' ? 120 : 320) * k : 0;
+    for (i = 0; i < nd; i++) drops.push({ x: rnd() * W, y: rnd() * H, l: rnd() * 10 + 8, v: rnd() * 4 + 6 });
+    glassDrops = []; var ng = C.isRainy ? 40 * k : 0;
+    for (i = 0; i < ng; i++) glassDrops.push({ x: rnd() * W, y: rnd() * H, r: rnd() * 3 + 1.5, v: rnd() * 0.4 });
+    flakes = []; var nf = (C.wx === 'snow' || C.hasFestival('christmas') || C.hasFestival('xmaseve')) ? 140 * k : 0;
+    for (i = 0; i < nf; i++) flakes.push({ x: rnd() * W, y: rnd() * H, r: rnd() * 1.8 + 0.6, v: rnd() * 0.6 + 0.3, p: rnd() * 6.28 });
+    smoke = [];
+    lanterns = [];
+    var red = C.hasFestival('spring') || C.hasFestival('chuxi') || C.hasFestival('lantern') || C.hasFestival('spring2');
+    var lotus = C.hasFestival('zhongyuan');
+    if (red || lotus) for (i = 0; i < 9; i++) lanterns.push({ x: rnd() * W, y: H * (0.25 + rnd() * 0.6), s: rnd() * 0.5 + 0.7, p: rnd() * 6.28, lotus: lotus });
+  }
+
+  function drawSky(t) {
+    var cols = skyColors();
+    var grad = g.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, rgb(cols[0]));
+    grad.addColorStop(1, rgb(cols[1]));
+    g.fillStyle = grad;
+    g.fillRect(0, 0, W, H);
+
+    if (C.isNight) {
+      for (var i = 0; i < stars.length; i++) {
+        var s = stars[i];
+        var a = (0.5 + 0.5 * Math.sin(t * 0.001 + s.p)) * (1 - Math.min(1, (C.cloud || 0) / 90));
+        g.fillStyle = 'rgba(255,255,255,' + a.toFixed(3) + ')';
+        g.fillRect(s.x, s.y, s.r, s.r);
+      }
+      drawMoon();
+    } else if (C.sun >= 0) {
+      // 太陽沿弧線移動
+      var sx = W * (0.1 + 0.8 * C.sun), sy = H * (0.62 - 0.5 * Math.sin(Math.PI * C.sun));
+      var sun = g.createRadialGradient(sx, sy, 0, sx, sy, H * 0.35);
+      var dim = C.isRainy || C.cloud > 80 ? 0.25 : 0.9;
+      sun.addColorStop(0, 'rgba(255,250,230,' + dim + ')');
+      sun.addColorStop(0.08, 'rgba(255,236,190,' + dim * 0.6 + ')');
+      sun.addColorStop(1, 'rgba(255,220,160,0)');
+      g.fillStyle = sun;
+      g.fillRect(0, 0, W, H);
+    }
+  }
+
+  function drawMoon() {
+    var big = C.hasFestival('midautumn');
+    var r = H * (big ? 0.12 : 0.06);
+    var mx = W * 0.78, my = H * 0.22;
+    var glow = g.createRadialGradient(mx, my, r * 0.8, mx, my, r * (big ? 5 : 3.5));
+    glow.addColorStop(0, 'rgba(255,240,200,' + (big ? 0.35 : 0.18) + ')');
+    glow.addColorStop(1, 'rgba(255,240,200,0)');
+    g.fillStyle = glow;
+    g.fillRect(0, 0, W, H);
+    // 月相：moon 0＝新月、0.5＝滿月、1＝回到新月
+    var phase = isNaN(C.moon) ? 0.5 : C.moon;
+    // 亮面整圓，再用一個錯位的暗圓蓋住：上半月（漸盈）暗圓往左移，下半月（漸虧）從右邊蓋回來
+    var dx = (phase <= 0.5 ? -1 : 1) * 2.05 * r * Math.sin(Math.PI * phase);
+    g.save();
+    g.beginPath(); g.arc(mx, my, r, 0, Math.PI * 2); g.clip();
+    g.fillStyle = '#fff4d8';
+    g.fillRect(mx - r, my - r, r * 2, r * 2);
+    g.fillStyle = 'rgba(28,34,60,0.92)';
+    g.beginPath(); g.arc(mx + dx, my, r * 1.02, 0, Math.PI * 2); g.fill();
+    g.restore();
+  }
+
+  function drawClouds(t) {
+    var c = C.daylight ? [255, 255, 255] : [70, 78, 100];
+    for (var i = 0; i < clouds.length; i++) {
+      var k = clouds[i];
+      k.x += k.v * scale; if (k.x > W * 1.2) k.x = -W * 0.3;
+      var r = H * 0.16 * k.s;
+      for (var j = 0; j < 4; j++) {
+        var cx = k.x + j * r * 0.7, cy = k.y + Math.sin(j * 1.7) * r * 0.2;
+        var grd = g.createRadialGradient(cx, cy, 0, cx, cy, r);
+        grd.addColorStop(0, rgb(c, C.isRainy ? 0.32 : 0.22));
+        grd.addColorStop(1, rgb(c, 0));
+        g.fillStyle = grd;
+        g.fillRect(cx - r, cy - r, r * 2, r * 2);
+      }
+    }
+  }
+
+  var flash = 0;
+  function drawWeather(t) {
+    if (drops.length) {
+      g.strokeStyle = C.daylight ? 'rgba(220,235,255,0.35)' : 'rgba(170,190,230,0.30)';
+      g.lineWidth = 1;
+      g.beginPath();
+      for (var i = 0; i < drops.length; i++) {
+        var d = drops[i];
+        d.y += d.v * scale * 2; d.x -= 0.6 * scale;
+        if (d.y > H) { d.y = -d.l; d.x = rnd() * W * 1.1; }
+        g.moveTo(d.x, d.y); g.lineTo(d.x - 1.2, d.y + d.l);
+      }
+      g.stroke();
+      // 玻璃上的水珠
+      for (i = 0; i < glassDrops.length; i++) {
+        var q = glassDrops[i];
+        q.y += q.v * scale; if (q.y > H + 5) { q.y = -5; q.x = rnd() * W; }
+        var gr = g.createRadialGradient(q.x - q.r * 0.3, q.y - q.r * 0.3, 0, q.x, q.y, q.r);
+        gr.addColorStop(0, 'rgba(255,255,255,0.55)');
+        gr.addColorStop(1, 'rgba(255,255,255,0.05)');
+        g.fillStyle = gr;
+        g.beginPath(); g.arc(q.x, q.y, q.r, 0, 6.283); g.fill();
+      }
+    }
+    if (C.wx === 'thunder') {
+      if (flash <= 0 && rnd() < 0.004) flash = 1;
+      if (flash > 0) { g.fillStyle = 'rgba(230,235,255,' + (flash * 0.5).toFixed(3) + ')'; g.fillRect(0, 0, W, H); flash -= 0.06; }
+    }
+    if (flakes.length) {
+      g.fillStyle = 'rgba(255,255,255,0.85)';
+      for (var f = 0; f < flakes.length; f++) {
+        var s = flakes[f];
+        s.y += s.v * scale * 1.5; s.x += Math.sin(t * 0.001 + s.p) * 0.3 * scale;
+        if (s.y > H) { s.y = -3; s.x = rnd() * W; }
+        g.beginPath(); g.arc(s.x, s.y, s.r, 0, 6.283); g.fill();
+      }
+    }
+    if (C.wx === 'fog') {
+      var fog = g.createLinearGradient(0, H * 0.4, 0, H);
+      fog.addColorStop(0, 'rgba(200,205,215,0)');
+      fog.addColorStop(1, 'rgba(200,205,215,0.55)');
+      g.fillStyle = fog; g.fillRect(0, 0, W, H);
+    }
+  }
+
+  // ── 初一、十五：底部暖光＋香煙 ──
+  function drawBaiBai(t) {
+    if (!C.bai) return;
+    var glow = g.createRadialGradient(W * 0.5, H * 1.05, 0, W * 0.5, H * 1.05, H * 0.75);
+    glow.addColorStop(0, 'rgba(255,170,80,0.45)');
+    glow.addColorStop(0.5, 'rgba(255,120,60,0.15)');
+    glow.addColorStop(1, 'rgba(255,120,60,0)');
+    g.fillStyle = glow; g.fillRect(0, 0, W, H);
+    if (smoke.length < 70 && rnd() < 0.5) {
+      smoke.push({ x: W * (0.47 + rnd() * 0.06), y: H, a: 0.35, r: 2, p: rnd() * 6.28 });
+    }
+    for (var i = smoke.length - 1; i >= 0; i--) {
+      var s = smoke[i];
+      s.y -= 0.6 * scale * 2; s.r += 0.05; s.a -= 0.0025;
+      s.x += Math.sin(t * 0.0012 + s.p + s.y * 0.02) * 0.5 * scale;
+      if (s.a <= 0) { smoke.splice(i, 1); continue; }
+      g.fillStyle = 'rgba(235,225,215,' + s.a.toFixed(3) + ')';
+      g.beginPath(); g.arc(s.x, s.y, s.r, 0, 6.283); g.fill();
+    }
+  }
+
+  function drawLanterns(t) {
+    for (var i = 0; i < lanterns.length; i++) {
+      var L = lanterns[i];
+      var y = L.y + Math.sin(t * 0.0008 + L.p) * 6 * scale;
+      var r = H * 0.035 * L.s;
+      var glow = g.createRadialGradient(L.x, y, 0, L.x, y, r * 3);
+      glow.addColorStop(0, L.lotus ? 'rgba(255,220,150,0.55)' : 'rgba(255,90,60,0.6)');
+      glow.addColorStop(1, 'rgba(255,90,60,0)');
+      g.fillStyle = glow; g.fillRect(L.x - r * 3, y - r * 3, r * 6, r * 6);
+      g.fillStyle = L.lotus ? 'rgba(255,200,200,0.9)' : 'rgba(220,40,30,0.95)';
+      g.beginPath(); g.ellipse(L.x, y, r * 0.8, r, 0, 0, 6.283); g.fill();
+      g.fillStyle = 'rgba(255,215,120,0.9)';
+      g.fillRect(L.x - r * 0.35, y - r * 1.05, r * 0.7, r * 0.18);
+    }
+  }
+
+  var last = 0;
+  function frame(t) {
+    requestAnimationFrame(frame);
+    if (t - last < 1000 / Liuli.fps() - 2) return;
+    last = t;
+    drawSky(t);
+    drawClouds(t);
+    drawBaiBai(t);
+    drawLanterns(t);
+    drawWeather(t);
+  }
+
+  var lastKey = '';
+  Liuli.onChange(function (c) {
+    var key = [c.wx, c.cloud, c.festival.join(), c.bai, c.daylight, c.motion].join('|');
+    C = c;
+    if (key !== lastKey) { lastKey = key; if (W) build(); }
+  });
+  addEventListener('resize', resize);
+  resize();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

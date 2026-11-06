@@ -24,6 +24,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.drawOutline
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -32,6 +33,7 @@ import androidx.compose.ui.layout.findRootCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.toSize
 
@@ -64,6 +66,10 @@ fun detectGlassLevel(context: Context): GlassLevel {
 class Backdrop(
     val level: GlassLevel,
     val phase: State<Float>,
+    /** 目前是原生流動桌布（可直接重畫）還是網頁桌布（只能用截圖）。 */
+    val isLiquid: Boolean = true,
+    /** 網頁桌布的低解析度截圖；還沒有截圖時為 null，玻璃改用不模糊的半透明樣式。 */
+    val snapshot: State<ImageBitmap?>? = null,
 )
 
 val LocalBackdrop = staticCompositionLocalOf<Backdrop> { error("Backdrop 未提供") }
@@ -85,7 +91,8 @@ fun GlassSurface(
     val backdrop = LocalBackdrop.current
     var origin by remember { mutableStateOf(Offset.Zero) }
     var rootSize by remember { mutableStateOf(Size.Zero) }
-    val useBlur = blur && backdrop.level != GlassLevel.LOW
+    val snap = backdrop.snapshot?.value
+    val useBlur = blur && backdrop.level != GlassLevel.LOW && (backdrop.isLiquid || snap != null)
 
     Box(
         modifier
@@ -98,7 +105,15 @@ fun GlassSurface(
         if (useBlur) {
             Canvas(Modifier.matchParentSize().blur(blurRadius, BlurredEdgeTreatment.Rectangle)) {
                 translate(-origin.x, -origin.y) {
-                    drawLiquidWallpaper(backdrop.phase.value, rootSize)
+                    val image = backdrop.snapshot?.value
+                    if (backdrop.isLiquid || image == null) {
+                        drawLiquidWallpaper(backdrop.phase.value, rootSize)
+                    } else {
+                        drawImage(
+                            image,
+                            dstSize = IntSize(rootSize.width.toInt(), rootSize.height.toInt()),
+                        )
+                    }
                 }
             }
         }

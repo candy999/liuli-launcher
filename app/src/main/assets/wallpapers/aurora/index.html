@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>光暈極光</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #04060f; }
+  canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script src="liuli.js"></script>
+<script>
+/*
+ * 光暈極光：幾團柔和的光在畫面上慢慢流動、交疊。
+ * 色調依時段變化（清晨粉橘、白天青藍、黃昏金紫、深夜藍綠），
+ * 初一、十五偏暖金色；節日加入節慶色（春節紅金、中秋暖黃、聖誕紅綠）。
+ */
+(function () {
+  var canvas = document.getElementById('c');
+  var g = canvas.getContext('2d');
+  var C = Liuli.ctx, W = 0, H = 0, scale = 0.4;
+
+  var PALETTES = {
+    dawn: [340, 20, 200], morning: [190, 210, 160], noon: [195, 175, 230], afternoon: [200, 260, 170],
+    dusk: [30, 300, 260], night: [160, 220, 280], midnight: [170, 240, 300]
+  };
+  function hues() {
+    if (C.hasFestival('spring') || C.hasFestival('chuxi') || C.hasFestival('lantern')) return [0, 40, 350];
+    if (C.hasFestival('midautumn')) return [40, 30, 260];
+    if (C.hasFestival('christmas') || C.hasFestival('xmaseve')) return [0, 130, 45];
+    if (C.bai) return [38, 20, 50];
+    return PALETTES[C.period] || PALETTES.night;
+  }
+
+  var blobs = [];
+  for (var i = 0; i < 5; i++) blobs.push({ a: Math.random() * 6.28, b: Math.random() * 6.28, sa: 0.00011 + Math.random() * 0.0001, sb: 0.00009 + Math.random() * 0.0001 });
+
+  function resize() {
+    scale = C.motion === 'reduce' ? 0.3 : 0.4;
+    W = canvas.width = Math.max(1, Math.round(innerWidth * scale));
+    H = canvas.height = Math.max(1, Math.round(innerHeight * scale));
+  }
+
+  var last = 0;
+  function frame(t) {
+    requestAnimationFrame(frame);
+    if (t - last < 1000 / Math.min(30, Liuli.fps()) - 2) return; // 慢速動畫 30fps 就夠
+    last = t;
+    var light = C.daylight;
+    g.globalCompositeOperation = 'source-over';
+    g.fillStyle = light ? '#1a2238' : '#04060f';
+    g.fillRect(0, 0, W, H);
+    g.globalCompositeOperation = 'lighter';
+    var hs = hues();
+    for (var i = 0; i < blobs.length; i++) {
+      var b = blobs[i];
+      var x = W * (0.5 + 0.38 * Math.sin(t * b.sa + b.a));
+      var y = H * (0.5 + 0.34 * Math.cos(t * b.sb + b.b));
+      var r = Math.max(W, H) * (0.42 + 0.08 * Math.sin(t * 0.0002 + i));
+      var hue = hs[i % hs.length] + 12 * Math.sin(t * 0.00015 + i);
+      var gr = g.createRadialGradient(x, y, 0, x, y, r);
+      gr.addColorStop(0, 'hsla(' + hue + ',85%,' + (light ? 62 : 52) + '%,0.42)');
+      gr.addColorStop(0.5, 'hsla(' + hue + ',85%,45%,0.12)');
+      gr.addColorStop(1, 'hsla(' + hue + ',85%,40%,0)');
+      g.fillStyle = gr;
+      g.fillRect(0, 0, W, H);
+    }
+    if (C.isRainy) {
+      g.globalCompositeOperation = 'source-over';
+      g.fillStyle = 'rgba(40,60,90,0.25)';
+      g.fillRect(0, 0, W, H);
+    }
+  }
+
+  Liuli.onChange(function (c) { C = c; });
+  addEventListener('resize', resize);
+  resize();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

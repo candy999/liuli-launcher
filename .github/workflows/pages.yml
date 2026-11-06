@@ -1,0 +1,51 @@
+name: 發布桌布網站
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "app/src/main/assets/wallpapers/**"
+      - "wallpaper-sdk/**"
+      - "site/**"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 組合網站與 zip 離線包
+        run: |
+          set -e
+          mkdir -p _site/wallpapers _site/zips
+          cp site/* _site/
+          for dir in app/src/main/assets/wallpapers/*/; do
+            name=$(basename "$dir")
+            # SDK 以 wallpaper-sdk/liuli.js 為準
+            cp wallpaper-sdk/liuli.js "$dir"
+            cp -r "$dir" "_site/wallpapers/$name"
+            (cd "$dir" && zip -qr "$GITHUB_WORKSPACE/_site/zips/$name.zip" .)
+          done
+          cp wallpaper-sdk/liuli.js _site/liuli.js
+          ls -R _site
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deployment
+        uses: actions/deploy-pages@v4
