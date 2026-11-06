@@ -39,8 +39,10 @@ sealed class KeyAction(val label: String) {
             raw == "recents" -> Recents
             raw == "notifications" -> Notifications
             raw == "block" -> Block
-            raw.startsWith("app:") -> raw.removePrefix("app:").split("|", limit = 2)
-                .let { OpenApp(it[0], it.getOrElse(1) { it[0] }) }
+            raw.startsWith("app:") -> {
+                val parts = raw.removePrefix("app:").split("|", limit = 2)
+                OpenApp(parts[0], parts.getOrNull(1) ?: parts[0])
+            }
             else -> null
         }
     }
