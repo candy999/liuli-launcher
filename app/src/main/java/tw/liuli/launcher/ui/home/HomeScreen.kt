@@ -268,12 +268,12 @@ fun HomeScreen(
         open(SheetSpec(
             "背景樣式", "上下移動即時預覽；確定套用，返回取消。",
             BgStyle.entries.map { st ->
-                SheetItem(st.label, st.note, selected = st == before, onFocus = { engine.setStyle(st) }) {
-                    settings.updateBgStyle(st.id); engine.setStyle(st); close()
+                SheetItem(st.label, st.note, selected = st == before, onFocus = { engine.applyStyle(st) }) {
+                    settings.updateBgStyle(st.id); engine.applyStyle(st); close()
                 }
             },
             focusIndex = before.ordinal,
-            onCancel = { engine.setStyle(before) },
+            onCancel = { engine.applyStyle(before) },
         ), gearReq)
     }
 
@@ -366,7 +366,7 @@ fun HomeScreen(
                 SheetItem("背景樣式", engine.style.label) { styleSheet() },
                 SheetItem("背景色系", if (engine.follow) "跟隨焦點" else "固定深藍") {
                     val on = !engine.follow
-                    settings.updateBgFollow(on); engine.setFollow(on); close()
+                    settings.updateBgFollow(on); engine.applyFollow(on); close()
                     toast("背景色系：" + if (on) "跟隨焦點" else "固定深藍")
                 },
                 SheetItem("顯示／隱藏 App", if (hidden.isEmpty()) null else "已隱藏 ${hidden.size} 個") { visibilitySheet(0) },

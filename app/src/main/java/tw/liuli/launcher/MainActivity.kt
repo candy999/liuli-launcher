@@ -94,8 +94,8 @@ fun LiuliApp(lensing: Boolean, homePresses: Int, externalAction: Pair<Int, Strin
     val home by rememberHomeContext(Cities.byId(settings.cityId))
     val engine = remember {
         BackgroundEngine().apply {
-            setStyle(BgStyle.byId(settings.bgStyle))
-            setFollow(settings.bgFollow)
+            applyStyle(BgStyle.byId(settings.bgStyle))
+            applyFollow(settings.bgFollow)
         }
     }
     val scope = rememberCoroutineScope()

@@ -125,7 +125,7 @@ class BackgroundEngine {
     private var dwellJob: Job? = null
     private val wake = Channel<Unit>(Channel.CONFLATED)
 
-    fun setStyle(s: BgStyle) {
+    fun applyStyle(s: BgStyle) {
         style = s
         charge = max(charge, 0.35f)
         rippleTarget += 1f
@@ -133,7 +133,7 @@ class BackgroundEngine {
         wake.trySend(Unit)
     }
 
-    fun setFollow(f: Boolean) {
+    fun applyFollow(f: Boolean) {
         follow = f
         if (!f) { tH = 228f; tS = 0.5f }
         wake.trySend(Unit)
