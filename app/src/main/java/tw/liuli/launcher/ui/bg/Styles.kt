@@ -6,7 +6,7 @@ import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.PointMode
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
@@ -297,8 +297,7 @@ private fun DrawScope.silk(st: BgState) {
             for (k in xs.indices.reversed()) pathL.lineTo(xs[k], bots[k])
             pathL.close()
             // 柔和陰影：往下錯開兩層半透明黑
-            translate(0f, 5f) { drawPath(pathL, Color.Black.copy(alpha = .08f)) }
-            translate(0f, 2.5f) { drawPath(pathL, Color.Black.copy(alpha = .1f)) }
+            translate(0f, 3.5f) { drawPath(pathL, Color.Black.copy(alpha = .16f)) }
             drawPath(
                 pathL,
                 Brush.verticalGradient(
@@ -314,9 +313,10 @@ private fun DrawScope.silk(st: BgState) {
 
 // ───────────── 7. 光軌 ─────────────
 
+private const val TRAIL_SEG = 40
+
 private fun DrawScope.trails(st: BgState) {
-    val sc = scratch.get()!!
-    val pathL = sc.path
+    val pts = ArrayList<Offset>(TRAIL_SEG + 1)
     drawRect(st.c(0f, .6f, .035f), size = FULL); focusGlow(st, W * .5f, .12f)
     val lx = st.fx * W; val ly = st.fy * H; val sx = st.fx - .5f; val sy = st.fy - .5f
     for (i in 0 until 14) {
@@ -331,17 +331,24 @@ private fun DrawScope.trails(st: BgState) {
             0f to st.c(hOff, .9f, .6f, 0f), .5f to st.c(hOff, .95f, .7f, .55f + .35f * st.pulse), 1f to st.c(hOff + 15, .9f, .6f, 0f),
             startX = -40f, endX = W + 40f,
         )
-        pathL.reset(); pathL.moveTo(-40f, yl); pathL.cubicTo(c1x, c1y, c2x, c2y, W + 40f, yr)
-        drawPath(pathL, brush, alpha = .12f, style = Stroke(thick * 6, cap = StrokeCap.Round), blendMode = BlendMode.Plus)
-        drawPath(pathL, brush, style = Stroke(thick, cap = StrokeCap.Round), blendMode = BlendMode.Plus)
+        // 三次貝茲取樣成 TRAIL_SEG 段折線
+        pts.clear()
+        for (k in 0..TRAIL_SEG) {
+            val t = k / TRAIL_SEG.toFloat(); val u = 1 - t
+            val bx = u * u * u * -40f + 3 * u * u * t * c1x + 3 * u * t * t * c2x + t * t * t * (W + 40f)
+            val by = u * u * u * yl + 3 * u * u * t * c1y + 3 * u * t * t * c2y + t * t * t * yr
+            pts.add(Offset(bx, by))
+        }
+        drawPoints(pts, PointMode.Polygon, brush, strokeWidth = thick * 4f, alpha = .14f, blendMode = BlendMode.Plus)
+        drawPoints(pts, PointMode.Polygon, brush, strokeWidth = thick, blendMode = BlendMode.Plus)
     }
     vignette(.4f)
 }
 
 // ───────────── 8. 等高線 ─────────────
 
-private const val CNX = 96
-private const val CNY = 54
+private const val CNX = 80
+private const val CNY = 45
 private val bumps = arrayOf(floatArrayOf(.12f, .2f, .7f, .22f), floatArrayOf(.85f, .25f, .55f, .2f), floatArrayOf(.7f, .85f, .6f, .25f), floatArrayOf(.25f, .9f, .45f, .2f), floatArrayOf(.5f, .45f, -.35f, .3f))
 
 private fun DrawScope.contour(st: BgState) {
@@ -375,7 +382,7 @@ private fun DrawScope.contour(st: BgState) {
             if (n == 8) { pathL.moveTo(px[4], px[5]); pathL.lineTo(px[6], px[7]) }
         }
         drawPath(pathL, st.c(lev * 26, .85f, .38f + lev * .16f, .22f + min(.5f, lev * .25f)), style = Stroke(if (li % 4 == 0) 1.3f else .7f))
-        lev += .1f; li++
+        lev += .12f; li++
     }
     vignette(.4f)
 }
@@ -401,8 +408,7 @@ private fun DrawScope.paper(st: BgState) {
         }
         pathL.lineTo(W, H); pathL.close()
         // 紙張的陰影落在上一層：往上錯開
-        translate(0f, -4f) { drawPath(pathL, Color.Black.copy(alpha = .14f)) }
-        translate(0f, -2f) { drawPath(pathL, Color.Black.copy(alpha = .16f)) }
+        translate(0f, -3f) { drawPath(pathL, Color.Black.copy(alpha = .26f)) }
         drawPath(pathL, st.c(i * 6 - 10f, .7f, .1f + i * .045f))
     }
     vignette(.3f)
@@ -425,9 +431,9 @@ private fun DrawScope.aurora(st: BgState) {
                     0f to st.c(hc, .95f, .75f, 0f), .05f to st.c(hc, .95f, .68f, .55f), .3f to st.c(hc + 22, .9f, .5f, .22f), 1f to st.c(hc + 30, .9f, .45f, 0f),
                     startY = yTop, endY = yTop + hgt,
                 ),
-                Offset(x, yTop), Size(3.2f, hgt), alpha = alpha, blendMode = BlendMode.Plus,
+                Offset(x, yTop), Size(5.2f, hgt), alpha = alpha, blendMode = BlendMode.Plus,
             )
-            x += 3f
+            x += 5f
         }
     }
     vignette(.35f)
