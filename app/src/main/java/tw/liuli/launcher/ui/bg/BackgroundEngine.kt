@@ -264,7 +264,6 @@ class BackgroundEngine {
             var checkDivFrom = 0f
             if (forced) interval = 16.7f * debugEvery.coerceIn(1, 8)
             var done = false
-            var prevT = 0L
             var lastBgT = 0L
             var yielded = false
             var bgTicks = 0
@@ -277,13 +276,9 @@ class BackgroundEngine {
             var nextRampT = 0L
             while (!done) {
                 withFrameMillis<Unit> { t ->
-                    if (prevT != 0L) {
-                        if (skipMeasure > 0) skipMeasure-- else { winSum += (t - prevT).toFloat(); winN++ }
-                    }
-                    prevT = t
                     // 讓路中：不畫背景（也不算進效能量測，這段時間的幀是 UI 的）
                     if (android.os.SystemClock.uptimeMillis() < yieldUntil) {
-                        yielded = true; winSum = 0f; winN = 0; skipMeasure = 2
+                        yielded = true
                         return@withFrameMillis
                     }
                     if (lastBgT != 0L && t - lastBgT < interval - 6f) return@withFrameMillis
@@ -292,6 +287,9 @@ class BackgroundEngine {
                         lastT = t - interval.toLong()
                         speed = min(speed, 0.5f)
                         yielded = false
+                    } else if (lastBgT != 0L) {
+                        // 量測：兩格背景之間實際隔多久（GPU 跟不上時會比排定的間隔長）
+                        if (skipMeasure > 0) skipMeasure-- else { winSum += (t - lastBgT).toFloat(); winN++ }
                     }
                     lastBgT = t
                     if (holdMs > 0) { holdUntil = t + holdMs; holdMs = 0 }
@@ -322,26 +320,29 @@ class BackgroundEngine {
                     frame++
                 }
                 if (!forced && !ramping && winN >= ADAPT_WINDOW) {
-                    // 主執行緒每格的平均間隔：GPU 跟不上時繪製佇列塞滿，主執行緒會被拖慢
+                    // 背景格與格之間的平均間隔，和排定的間隔比：準時＝撐得住，明顯延遲＝要降
                     val avg = winSum / winN
+                    val slowMs = interval * SLOW_RATIO
+                    val verySlowMs = interval * VERY_SLOW_RATIO
+                    val fastMs = interval * FAST_RATIO
                     winSum = 0f; winN = 0
                     val now = android.os.SystemClock.uptimeMillis()
                     val oldDiv = div
                     val oldIv = iv
                     if (checkDivFrom > 0f) {
                         // 降解析度後幾乎沒變快：這個樣式卡在 CPU，解析度還原、改降更新率
-                        if (avg > checkDivFrom * 0.85f) {
+                        if (avg > checkDivFrom * 0.85f && avg > fastMs) {
                             cpuBound[styleIdx] = true
                             div = max(1, div - 1)
-                            if (avg > SLOW_MS && iv < INTERVALS.lastIndex) iv++
+                            if (avg > slowMs && iv < INTERVALS.lastIndex) iv++
                             Log.i(TAG, "${style.id} cpu-bound (${checkDivFrom.toInt()}ms -> ${avg.toInt()}ms), use fps instead")
                         }
                         checkDivFrom = 0f
                     } else {
                         when {
-                            avg > SLOW_MS -> {
+                            avg > slowMs -> {
                                 fastWins = 0
-                                if (++slowWins >= 2 || avg > VERY_SLOW_MS) {
+                                if (++slowWins >= 2 || avg > verySlowMs) {
                                     slowWins = 0
                                     if (!cpuBound[styleIdx] && div < MAX_DIV) {
                                         div++
@@ -354,7 +355,7 @@ class BackgroundEngine {
                                     upBlockedUntil = now + upBackoff
                                 }
                             }
-                            avg < FAST_MS -> {
+                            avg < fastMs -> {
                                 slowWins = 0
                                 if (++fastWins >= 2 && now >= upBlockedUntil && (iv > 0 || div > 1)) {
                                     fastWins = 0
@@ -509,12 +510,12 @@ class BackgroundEngine {
         private const val TAU_SPEED = 800f
         /** 按鍵後背景讓路的時間。 */
         private const val YIELD_MS = 320L
+        /** 每幾格背景評估一次（30fps 約 0.27 秒）。 */
         private const val ADAPT_WINDOW = 8
-        /** 主執行緒平均每格超過 22ms＝GPU 跟不上 → 降檔；低於 17.5ms 連續三次（且過了冷卻期）才升檔。 */
-        private const val SLOW_MS = 22f
-        /** 一個窗平均超過這個值（約 30fps 以下）就直接降，不等第二個窗。 */
-        private const val VERY_SLOW_MS = 30f
-        private const val FAST_MS = 17.5f
+        /** 背景格間隔超過排定的 1.25 倍＝跟不上（連續兩窗才降）；超過 1.8 倍直接降；在 1.1 倍內＝準時，可以試著升。 */
+        private const val SLOW_RATIO = 1.25f
+        private const val VERY_SLOW_RATIO = 1.8f
+        private const val FAST_RATIO = 1.1f
 
         private fun rc(tau: Float, dt: Float) = 1f - exp(-dt / tau)
         private fun hueDelta(from: Float, to: Float) = ((to - from + 540f) % 360f) - 180f
