@@ -276,7 +276,7 @@ fun HomeScreen(
         open(SheetSpec(
             "背景樣式", "上下移動即時預覽；確定套用，返回取消。",
             BgStyle.entries.map { st ->
-                SheetItem(st.label, st.note, selected = st == before, onFocus = { engine.applyStyle(st) }) {
+                SheetItem(st.label, subtitle = st.note, selected = st == before, onFocus = { engine.applyStyle(st) }) {
                     settings.updateBgStyle(st.id); engine.applyStyle(st); close()
                 }
             },

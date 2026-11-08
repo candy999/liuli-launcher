@@ -39,10 +39,16 @@ import tw.liuli.launcher.ui.theme.GText
 import tw.liuli.launcher.ui.theme.Ink
 import tw.liuli.launcher.ui.theme.SheetSpring
 
-/** 面板裡的一列。[detail] 顯示在右側；[selected] 顯示勾選記號。 */
+/**
+ * 面板裡的一列。
+ * [detail] 短字串，顯示在右側當數值（例如「臺北市」「開」）。
+ * [subtitle] 較長的說明，顯示在標題下方一行（例如背景樣式的介紹），不會擠壓標題。
+ * [selected] 顯示勾選記號。
+ */
 data class SheetItem(
     val label: String,
     val detail: String? = null,
+    val subtitle: String? = null,
     val selected: Boolean = false,
     /** 焦點移到這一列時執行（例如即時預覽背景樣式）。 */
     val onFocus: (() -> Unit)? = null,
@@ -137,13 +143,24 @@ private fun SheetRow(item: SheetItem, requester: FocusRequester?) {
                     .background(if (onLight) Ink.OnLight else Ink.Gold, RoundedCornerShape(3.dp)),
             )
         }
-        GText(
-            item.label,
-            Modifier.weight(1f),
-            size = 17.sp,
-            weight = if (item.selected) FontWeight.Medium else FontWeight.Normal,
-            color = if (onLight) Ink.OnLight else Ink.Primary,
-        )
+        Column(Modifier.weight(1f)) {
+            GText(
+                item.label,
+                size = 17.sp,
+                weight = if (item.selected) FontWeight.Medium else FontWeight.Normal,
+                color = if (onLight) Ink.OnLight else Ink.Primary,
+            )
+            // 長說明放在標題下方一行，不會擠壓標題
+            if (item.subtitle != null) {
+                Spacer(Modifier.height(2.dp))
+                GText(
+                    item.subtitle,
+                    size = 12.sp,
+                    maxLines = 2,
+                    color = if (onLight) Ink.OnLight.copy(alpha = 0.6f) else Ink.Tertiary,
+                )
+            }
+        }
         if (item.detail != null) {
             Spacer(Modifier.width(10.dp))
             GText(
