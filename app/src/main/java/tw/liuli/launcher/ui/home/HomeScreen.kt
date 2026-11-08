@@ -48,6 +48,7 @@ import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.foundation.ExperimentalFoundationApi
 import tw.liuli.launcher.ui.components.KeepVisibleSpec
+import tw.liuli.launcher.ui.components.focusRow
 import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.foundation.focusGroup
 import androidx.compose.ui.graphics.BlurEffect
@@ -438,7 +439,8 @@ fun HomeScreen(
                                 .padding(horizontal = 36.dp)
                                 .fillMaxWidth()
                                 .liquidGlass(RoundedCornerShape(Dimens.ShelfRadius))
-                                .focusRestorer(),
+                                .focusRestorer()
+                                .focusRow(),
                             contentPadding = PaddingValues(horizontal = 22.dp, vertical = 18.dp),
                             horizontalArrangement = Arrangement.spacedBy(18.dp),
                         ) {
@@ -482,7 +484,8 @@ fun HomeScreen(
                     Row(
                         Modifier
                             .padding(horizontal = Dimens.SafeH)
-                            .padding(bottom = 22.dp),
+                            .padding(bottom = 22.dp)
+                            .focusRow(),
                         horizontalArrangement = Arrangement.spacedBy(gap),
                     ) {
                         for (app in rows[r]) {

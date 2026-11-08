@@ -13,6 +13,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.foundation.focusGroup
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
@@ -117,3 +119,20 @@ fun Modifier.focusTarget(
         }
     }
     .tvClickable(onClick, onLongClick)
+
+/**
+ * 一列（常用列、App 格線的一列）：左右鍵不會離開這一列，到底就停住；
+ * 上下鍵照常移到別列。避免在列尾按右鍵時焦點跳到下一列的某個 App。
+ */
+@OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+fun Modifier.focusRow(): Modifier = this
+    .focusProperties {
+        exit = { dir ->
+            if (dir == androidx.compose.ui.focus.FocusDirection.Left || dir == androidx.compose.ui.focus.FocusDirection.Right) {
+                FocusRequester.Cancel
+            } else {
+                FocusRequester.Default
+            }
+        }
+    }
+    .focusGroup()
