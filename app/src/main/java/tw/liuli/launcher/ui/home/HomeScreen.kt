@@ -43,6 +43,11 @@ import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.foundation.ExperimentalFoundationApi
+import tw.liuli.launcher.ui.components.KeepVisibleSpec
 import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.foundation.focusGroup
 import androidx.compose.ui.graphics.BlurEffect
@@ -86,7 +91,7 @@ private data class OpenSheet(val spec: SheetSpec, val returnTo: FocusRequester?)
 
 private const val GRID_COLUMNS = 5
 
-@OptIn(ExperimentalComposeUiApi::class)
+@OptIn(ExperimentalComposeUiApi::class, ExperimentalFoundationApi::class)
 @Composable
 fun HomeScreen(
     home: HomeContext,
@@ -101,6 +106,7 @@ fun HomeScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val list = rememberLazyListState()
+    val keepVisible = remember { KeepVisibleSpec() }
     val dockStore = remember { DockStore(context) }
     val hiddenStore = remember { HiddenAppsStore(context) }
 
@@ -392,12 +398,22 @@ fun HomeScreen(
             val gap = 20.dp
             val tileWidth = (contentWidth - gap * (GRID_COLUMNS - 1)) / GRID_COLUMNS
 
+            // 焦點在頂列、小工具、常用列時，整頁固定在最上面（時鐘一直看得到）
+            val pinTop = Modifier.onFocusChanged {
+                if (it.hasFocus && (list.firstVisibleItemIndex != 0 || list.firstVisibleItemScrollOffset != 0)) {
+                    scope.launch { list.animateScrollToItem(0) }
+                }
+            }
+            val dockTileWidth = ((contentWidth + Dimens.SafeH * 2 - 72.dp - 44.dp - 18.dp * 4) / 5).coerceAtMost(168.dp)
+
+            CompositionLocalProvider(LocalBringIntoViewSpec provides keepVisible) {
             LazyColumn(
                 state = list,
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(top = Dimens.SafeV, bottom = 48.dp),
             ) {
                 item(key = "top") {
+                    Box(pinTop) {
                     TopBar(
                         home = home,
                         inputsButton = inputsButton,
@@ -406,14 +422,17 @@ fun HomeScreen(
                         onInputs = ::inputsSheet,
                         onSettings = ::openSettings,
                     )
+                    }
                 }
                 item(key = "widgets") {
-                    Spacer(Modifier.height(26.dp))
-                    Widgets(home, calendarCard, weatherCard, openCalendar, openWeather)
+                    Column(pinTop) {
+                        Spacer(Modifier.height(26.dp))
+                        Widgets(home, calendarCard, weatherCard, openCalendar, openWeather)
+                    }
                 }
                 item(key = "dock") {
                     Spacer(Modifier.height(24.dp))
-                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth().then(pinTop)) {
                         LazyRow(
                             modifier = Modifier
                                 .padding(horizontal = 36.dp)
@@ -435,7 +454,7 @@ fun HomeScreen(
                             itemsIndexed(dockApps, key = { _, a -> a.packageName }) { i, app ->
                                 AppTile(
                                     app = app,
-                                    width = 168.dp,
+                                    width = dockTileWidth,
                                     showLabel = false,
                                     requester = if (i == 0) firstDock else null,
                                     onFocused = { dockLabel = app.label },
@@ -479,6 +498,7 @@ fun HomeScreen(
                         }
                     }
                 }
+            }
             }
         }
 
