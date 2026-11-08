@@ -121,6 +121,7 @@ fun LiuliApp(lensing: Boolean, homePresses: Int, externalAction: Pair<Int, Strin
             .background(Color.Black)
             .onPreviewKeyEvent { e ->
                 if (e.type == KeyEventType.KeyDown) {
+                    engine.noteInput() // 背景讓路：按鍵後短暫停止背景更新，GPU 全給 UI 動畫
                     lastDir = when (e.nativeKeyEvent.keyCode) {
                         KeyEvent.KEYCODE_DPAD_LEFT -> -1
                         KeyEvent.KEYCODE_DPAD_RIGHT -> 1
