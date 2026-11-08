@@ -36,6 +36,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
@@ -59,6 +60,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import tw.liuli.launcher.adb.SelfAdb
 import tw.liuli.launcher.BuildConfigInfo
 import tw.liuli.launcher.MainActivity
 import tw.liuli.launcher.context.Cities
@@ -110,6 +113,7 @@ fun HomeScreen(
     onOpenWeather: () -> Unit,
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val dockStore = remember { DockStore(context) }
     val hiddenStore = remember { HiddenAppsStore(context) }
     val keepVisible = remember { KeepVisibleSpec() }
@@ -335,13 +339,40 @@ fun HomeScreen(
         }
     }
 
+    // 透過本機網路 ADB 自我授權開啟無障礙服務（電視常常沒有無障礙設定選單）
+    fun selfGrant() {
+        open(SheetSpec(
+            "自我授權啟用",
+            "第一次會在電視畫面跳出「允許 USB 偵錯？」，請用遙控器選「一律允許」，再回來按一次。需先在開發人員選項開啟網路 ADB 偵錯。",
+            listOf(
+                SheetItem("開始（連線本機 ADB）") {
+                    toast("連線中…請注意電視是否跳出授權對話框")
+                    scope.launch {
+                        when (val r = SelfAdb.enableAccessibility(context)) {
+                            SelfAdb.Result.Success -> {
+                                KeyRemapService.instance?.reload()
+                                close(); toast("已啟用按鍵服務")
+                            }
+                            SelfAdb.Result.NeedsAuthorization ->
+                                toast("請在電視上按「一律允許」後，再按一次開始")
+                            is SelfAdb.Result.NotConnectable ->
+                                toast("連不上本機 ADB，請確認已開啟網路 ADB 偵錯（${r.detail}）")
+                            is SelfAdb.Result.Failed -> toast("失敗：${r.detail}")
+                        }
+                    }
+                },
+                SheetItem("改用無障礙設定") {
+                    close()
+                    if (!SystemActions.launch(context, Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))) toast("找不到無障礙設定")
+                },
+            ),
+        ), gearReq)
+    }
+
     fun keysSheet() {
         val enabled = KeyMapStore.isServiceEnabled(context)
         val items = buildList {
-            if (!enabled) add(SheetItem("啟用按鍵服務", "無障礙設定") {
-                close()
-                if (!SystemActions.launch(context, Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))) toast("找不到無障礙設定，請用 ADB 啟用")
-            })
+            if (!enabled) add(SheetItem("啟用按鍵服務", "自我授權，不需電腦") { selfGrant() })
             add(SheetItem("新增按鍵對應", if (enabled) null else "需先啟用") {
                 if (enabled) learnKey() else toast("請先啟用按鍵服務")
             })
