@@ -28,9 +28,6 @@ jobs:
         with:
           gradle-version: "8.9"
 
-      - name: 同步桌布 SDK
-        run: for d in app/src/main/assets/wallpapers/*/; do cp wallpaper-sdk/liuli.js "$d"; done
-
       - name: 還原簽章金鑰
         if: env.KEYSTORE_BASE64 != ''
         run: |

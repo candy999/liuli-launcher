@@ -1,30 +1,28 @@
 # 琉璃 Launcher
 
-**Liquid Glass 風格的 Google TV／Android TV 主畫面，桌布是會「看情境」自己變化的網頁。**
+**真正的 Liquid Glass 風格 Google TV／Android TV 主畫面，以流暢為第一優先。**
 
-白天亮、晚上暗；下雨了，桌布就變成玻璃上的雨滴；初一、十五底部亮起暖光與香煙；春節掛燈籠、中秋出大月亮。Launcher 不需要任何切換規則：琉璃把**時間、天氣、農民曆、節日、大約位置**帶進網頁的網址參數，網頁自己決定怎麼變化。任何人都能用 AI 寫一張網頁特效，設成自己的電視桌布。
+時鐘、農民曆（初一十五、節氣、宜忌）、天氣、常用 App、訊號源切換，全部放在一片片液態玻璃裡。玻璃後面是程式產生的同色系桌布，**只在換色時模糊一次**，玻璃直接取用模糊好的背景，Android 13 以上再加上邊緣透鏡折射。畫面靜止時 GPU 完全閒置，焦點動畫只動圖層屬性。
 
-- 🎨 **桌布遊樂場（即時預覽、下載離線包）**：<https://candy999.github.io/liuli-launcher/>
-- 📐 **網頁桌布參數規格**：[docs/wallpaper-api.md](docs/wallpaper-api.md)
-- 🤖 **用 AI 做桌布的提示詞**：[docs/ai-wallpaper-prompt.md](docs/ai-wallpaper-prompt.md)
+- 🧭 **UX 設計與效能分析**：[docs/ux-design.md](docs/ux-design.md)
+- 🖼️ **視覺原型**（用瀏覽器開啟）：[design/prototype.html](design/prototype.html)
 - 📋 **完整規格表**：[規格表.md](規格表.md)
 
-> ⚠️ 目前是早期開發版（0.1），還沒在實機上完整測試。歡迎回報問題。
+> ⚠️ 目前是早期開發版（0.1），還沒在多款實機上測試。歡迎回報問題。
 
 ## 功能
 
 | | |
 |---|---|
-| **網頁桌布** | 線上網址或離線 zip 包；自動帶入 60 多個情境參數；遙控器按鍵也會以事件送進網頁 |
-| **內建桌布** | 琉璃天空（日夜、天氣、月相、拜拜日、節日全自動）、玻璃雨滴、光暈極光、海浪 |
-| **農民曆** | 農曆日期、干支生肖、節氣、宜忌、沖煞，完全離線計算（[lunar-java](https://github.com/6tail/lunar-java)） |
-| **台灣節日** | 春節、元宵、清明、端午、中元、中秋、冬至、尾牙、除夕等 30 多個，離線計算 |
-| **天氣** | [Open-Meteo](https://open-meteo.com/)，免金鑰；只用縣市中心座標，不讀取裝置定位 |
-| **App 列表** | 常用列＋全部 App；手機版 App（原廠主畫面不顯示的）也會列出，可自己決定顯示或隱藏 |
+| **Liquid Glass** | 預先模糊的桌布取樣＋薄霧＋光澤＋邊緣內光＋高光邊；Android 13+ 邊緣透鏡折射與細微色散 |
+| **桌布** | 深海、暮光、晴空、夜林四組同色系配色，或依時間自動切換（白天、傍晚、晚上） |
+| **農民曆** | 農曆日期、干支生肖、節氣、宜忌、沖煞，完全離線計算（[lunar-java](https://github.com/6tail/lunar-java)）；月曆頁可查任何一天 |
+| **台灣節日** | 春節、元宵、清明、端午、中元、中秋、冬至、尾牙、除夕等 30 多個，離線計算；初一十五以暖金色標示 |
+| **天氣** | [Open-Meteo](https://open-meteo.com/)，免金鑰；天氣頁有逐 3 小時與 7 日預報。只用縣市中心座標，不讀取裝置定位 |
+| **App** | 常用列（玻璃層架）＋全部 App；手機版 App 也會列出，可自己決定顯示或隱藏 |
 | **訊號源切換** | HDMI／AV／電視直播（電視機才有，電視盒通常沒有） |
 | **遙控器按鍵** | 無障礙服務重新對應任何按鍵的短按或長按，例如把 Netflix 鍵改成開別的 App |
 | **主畫面保護** | 攔截 Home 鍵，原廠主畫面跳出來時自動切回琉璃 |
-| **Liquid Glass** | 背景模糊、高光邊、彈簧焦點動畫；依電視效能自動分成高、中、低三級 |
 
 ## 安裝
 
@@ -59,16 +57,6 @@ adb shell settings put secure enabled_accessibility_services tw.liuli.launcher/.
 
 這個服務只會做兩件事：攔截按鍵，以及取得前景 App 的套件名稱（用來偵測原廠主畫面）。它不讀取畫面內容，也不連網。
 
-## 自己做桌布
-
-1. 把 [docs/ai-wallpaper-prompt.md](docs/ai-wallpaper-prompt.md) 的提示詞貼給 AI，描述你想要的效果。
-2. 把 AI 產生的 `index.html` 和 [`liuli.js`](wallpaper-sdk/liuli.js) 放進同一個資料夾，在電腦瀏覽器開啟測試，例如在網址後面加上 `?wx=rain&bai=1&hour=21`。
-3. 擇一種方式套用到電視：
-   - **用網址**：把網頁放到任何網址，在電視選「設定 → 桌布 → 輸入網頁網址」。
-   - **用 zip 離線包**：把資料夾壓成 zip，在電視選「從網址下載 zip 離線包」，或用 ADB 推到電視後選「匯入資料夾裡的 zip」。
-
-做好的桌布歡迎發 PR 加進 `app/src/main/assets/wallpapers/`。
-
 ## 從原始碼建置（不用安裝開發環境）
 
 Fork 這個 repo，**Actions** 會自動用雲端機器編出 APK。想自己簽章的話：
@@ -87,16 +75,20 @@ python tools/make_keystore.py
 
 ```
 app/src/main/java/tw/liuli/launcher/
-├── MainActivity.kt            進入點、Home 鍵、按鍵轉送給桌布
-├── context/                   情境：農民曆、節日、天氣、網址參數
-├── wallpaper/                 網頁桌布（WebView）、zip 離線包、設定
+├── MainActivity.kt            進入點、桌布、頁面切換、Home 鍵
+├── context/                   農民曆、節日、天氣
+├── settings/                  啟動器設定
 ├── keys/                      無障礙按鍵服務、按鍵對應
 ├── data/                      App 清單、常用列、隱藏清單、訊號源
 ├── system/                    系統設定捷徑
-└── ui/glass, ui/home          液態玻璃元件、主畫面
-app/src/main/assets/wallpapers/  內建網頁桌布
-wallpaper-sdk/liuli.js           網頁桌布 SDK
-site/                            GitHub Pages 遊樂場
+└── ui/
+    ├── glass/                 桌布產生與預模糊、Liquid Glass 材質（含 AGSL 折射）
+    ├── components/            焦點、App 圖塊、側邊面板
+    ├── theme/                 顏色、字體、圖示
+    ├── home/                  主畫面
+    ├── calendar/              月曆＋農民曆
+    └── weather/               天氣預報
+design/prototype.html          視覺原型
 ```
 
 ## 授權
