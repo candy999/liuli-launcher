@@ -180,6 +180,7 @@ class BackgroundEngine {
     private var holdUntil = 0L
     private var first = true
     private var dwellJob: Job? = null
+    private var pendingSince = 0L
     private val wake = Channel<Unit>(Channel.CONFLATED)
 
     fun applyStyle(s: BgStyle) {
@@ -214,8 +215,14 @@ class BackgroundEngine {
             return
         }
         dwellJob?.cancel()
+        // 停留延遲是「去抖動」：快速掃過不會每個都換色。但連續按著方向時不能一直不動——
+        // 從第一次變化起最多等 MAX_WAIT 就套用目前的焦點，背景跟著走（約每 0.45 秒更新一次目標）。
+        val now = android.os.SystemClock.uptimeMillis()
+        if (pendingSince == 0L) pendingSince = now
+        val wait = if (now - pendingSince >= MAX_WAIT) 0L else DWELL
         dwellJob = scope.launch {
-            delay(DWELL)
+            delay(wait)
+            pendingSince = 0L
             if (follow && color != null) {
                 val hs = colorToHs(color)
                 tH = hs[0]; tS = hs[1]
@@ -229,7 +236,7 @@ class BackgroundEngine {
         }
     }
 
-    /** 使用者按了鍵：接下來 [YIELD_MS] 內背景不更新，GPU 全部讓給 UI（焦點彈簧、捲動）。 */
+    /** 使用者按了鍵：接下來 [YIELD_MS] 內背景改用省力模式（÷3、15fps），GPU 留給 UI（焦點彈簧、捲動）。 */
     fun noteInput() {
         yieldUntil = android.os.SystemClock.uptimeMillis() + YIELD_MS
     }
@@ -265,7 +272,8 @@ class BackgroundEngine {
             if (forced) interval = 16.7f * debugEvery.coerceIn(1, 8)
             var done = false
             var lastBgT = 0L
-            var yielded = false
+            var wasBusy = false
+            var nextRestoreT = 0L
             var bgTicks = 0
             var skipMeasure = 2
             var winSum = 0f
@@ -276,17 +284,19 @@ class BackgroundEngine {
             var nextRampT = 0L
             while (!done) {
                 withFrameMillis<Unit> { t ->
-                    // 讓路中：不畫背景（也不算進效能量測，這段時間的幀是 UI 的）
-                    if (android.os.SystemClock.uptimeMillis() < yieldUntil) {
-                        yielded = true
-                        return@withFrameMillis
-                    }
-                    if (lastBgT != 0L && t - lastBgT < interval - 6f) return@withFrameMillis
-                    if (yielded) {
-                        // 讓路結束：當作只過了一格的時間，並從半速緩緩加速接回
-                        lastT = t - interval.toLong()
-                        speed = min(speed, 0.5f)
-                        yielded = false
+                    // 操作中（按鍵後一小段時間）：背景照常動，但降到 ÷3、15fps，把 GPU 留給 UI。
+                    // 速度不變（每格推進 1/15 秒），所以不會停住、也不會變慢。
+                    val busy = android.os.SystemClock.uptimeMillis() < yieldUntil
+                    val due = if (busy) max(interval, BUSY_INTERVAL) else interval
+                    if (lastBgT != 0L && t - lastBgT < due - 6f) return@withFrameMillis
+                    if (busy) {
+                        wasBusy = true
+                        if (!forced && renderDiv < BUSY_DIV) renderDiv = BUSY_DIV // 降解析度立即生效
+                    } else if (wasBusy) {
+                        // 操作結束：重新量測，解析度之後逐檔拉回
+                        wasBusy = false
+                        skipMeasure = 2
+                        nextRestoreT = t + RAMP_STEP_MS
                     } else if (lastBgT != 0L) {
                         // 量測：兩格背景之間實際隔多久（GPU 跟不上時會比排定的間隔長）
                         if (skipMeasure > 0) skipMeasure-- else { winSum += (t - lastBgT).toFloat(); winN++ }
@@ -298,8 +308,15 @@ class BackgroundEngine {
                     st.nowMs = t
                     st.record(t)
 
+                    // 操作結束後：解析度逐檔拉回到這段轉場的檔位（不一下子變清楚）
+                    if (!forced && !busy && !ramping && renderDiv > div && t >= nextRestoreT) {
+                        renderDiv--
+                        nextRestoreT = t + RAMP_STEP_MS
+                        skipMeasure = 2
+                    }
+
                     // 提前對焦：剩餘時間只夠「每 RAMP_STEP_MS 升一檔」升回原生時，就開始逐檔升
-                    if (!forced && !done && renderDiv > 1) {
+                    if (!forced && !busy && !done && renderDiv > 1) {
                         if (!ramping) {
                             val rem = max(remainingMs() / max(speed, 0.2f), (holdUntil - t).toFloat())
                             if (rem < (renderDiv - 1) * RAMP_STEP_MS + RAMP_LEAD_MS) {
@@ -319,7 +336,7 @@ class BackgroundEngine {
                     if (glassDirty) { glassDirty = false; glassVersion++ }
                     frame++
                 }
-                if (!forced && !ramping && winN >= ADAPT_WINDOW) {
+                if (!forced && !ramping && renderDiv == div && winN >= ADAPT_WINDOW) {
                     // 背景格與格之間的平均間隔，和排定的間隔比：準時＝撐得住，明顯延遲＝要降
                     val avg = winSum / winN
                     val slowMs = interval * SLOW_RATIO
@@ -474,6 +491,7 @@ class BackgroundEngine {
         const val GLASS_W = 240
         const val GLASS_H = 135
         private const val DWELL = 180L
+        private const val MAX_WAIT = 450L
         private const val TAU1 = 380f
         private const val TAU2 = 460f
         private const val TAU_PULSE_IN = 260f
@@ -508,8 +526,11 @@ class BackgroundEngine {
         private const val MAX_STEP_MS = 66.7f
         /** 播放速度回升的時間常數（越大越慢）。 */
         private const val TAU_SPEED = 800f
-        /** 按鍵後背景讓路的時間。 */
+        /** 按鍵後背景省力的時間。 */
         private const val YIELD_MS = 320L
+        /** 操作中的背景：至少 ÷3、15fps（動作照常，只是比較粗、比較少格）。 */
+        private const val BUSY_DIV = 3
+        private const val BUSY_INTERVAL = 66.7f
         /** 每幾格背景評估一次（30fps 約 0.27 秒）。 */
         private const val ADAPT_WINDOW = 8
         /** 背景格間隔超過排定的 1.25 倍＝跟不上（連續兩窗才降）；超過 1.8 倍直接降；在 1.1 倍內＝準時，可以試著升。 */

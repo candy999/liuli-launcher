@@ -268,6 +268,14 @@ fun HomeScreen(
 
     // 按鍵服務要求「訊號源」：焦點移到訊號源列
     LaunchedEffect(externalAction) {
+        // 量測用（adb）：直接切換背景樣式
+        // adb shell am start -n tw.liuli.launcher/.MainActivity --es tw.liuli.launcher.ACTION style:contour
+        val styleId = externalAction.second?.removePrefix("style:")
+        if (externalAction.first > 0 && externalAction.second?.startsWith("style:") == true && styleId != null) {
+            val st = BgStyle.byId(styleId)
+            settings.updateBgStyle(st.id); engine.applyStyle(st)
+            return@LaunchedEffect
+        }
         if (externalAction.first > 0 && externalAction.second == MainActivity.ACTION_INPUTS) {
             sheet = null; drawerOpen = false
             delay(32)
