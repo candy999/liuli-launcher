@@ -109,7 +109,16 @@ fun LiuliApp(lensing: Boolean, homePresses: Int, externalAction: Pair<Int, Strin
     var lastDir by remember { mutableIntStateOf(0) }
 
     LaunchedEffect(homePresses) { screen = Screen.Home }
-    LaunchedEffect(externalAction) { if (externalAction.second == MainActivity.ACTION_INPUTS) screen = Screen.Home }
+    // 量測用（adb）：ACTION=calendar:2029-12-02 直接打開月曆到那一天
+    var calendarStart by remember { mutableStateOf<java.time.LocalDate?>(null) }
+    LaunchedEffect(externalAction) {
+        val a = externalAction.second
+        if (a == MainActivity.ACTION_INPUTS) screen = Screen.Home
+        if (a != null && a.startsWith("calendar:")) {
+            calendarStart = runCatching { java.time.LocalDate.parse(a.removePrefix("calendar:")) }.getOrNull()
+            screen = Screen.Calendar
+        }
+    }
     BackHandler(enabled = screen != Screen.Home) { screen = Screen.Home }
 
     // 子頁面開啟時：桌布模糊、App 隱藏；背景換成該頁的主題色
@@ -156,14 +165,14 @@ fun LiuliApp(lensing: Boolean, homePresses: Int, externalAction: Pair<Int, Strin
                 homePresses = homePresses,
                 externalAction = externalAction,
                 active = screen == Screen.Home,
-                onOpenCalendar = { screen = Screen.Calendar },
+                onOpenCalendar = { calendarStart = null; screen = Screen.Calendar },
                 onOpenWeather = { screen = Screen.Weather },
             )
             AnimatedVisibility(visible = screen != Screen.Home, enter = fadeIn(tween(240)), exit = fadeOut(tween(160))) {
                 var shown by remember { mutableStateOf(screen) }
                 if (screen != Screen.Home) shown = screen
                 when (shown) {
-                    Screen.Calendar -> CalendarScreen(home.now.toLocalDate())
+                    Screen.Calendar -> CalendarScreen(home.now, calendarStart ?: home.now.toLocalDate())
                     Screen.Weather -> WeatherScreen(home)
                     Screen.Home -> Unit
                 }

@@ -89,7 +89,7 @@ fun rememberHomeContext(city: City): State<HomeContext> {
 
     // 農曆一天算一次就好（不是 Compose state，避免在組合期間寫入狀態）
     val cache = remember { LunarCache() }
-    fun lunarFor(date: LocalDate): Pair<LunarInfo, List<Festival>> = cache.get(date)
+    fun lunarFor(now: LocalDateTime): Pair<LunarInfo, List<Festival>> = cache.get(now)
 
     return produceState(
         initialValue = build(LocalDateTime.now(), city, weather, networkOf(context), ::lunarFor),
@@ -104,14 +104,17 @@ fun rememberHomeContext(city: City): State<HomeContext> {
 }
 
 private class LunarCache {
-    private var date: LocalDate? = null
+    private var key: Pair<LocalDate, LocalDate>? = null
     private var value: Pair<LunarInfo, List<Festival>>? = null
 
-    fun get(d: LocalDate): Pair<LunarInfo, List<Festival>> {
+    /** 農曆依子時換日（23:00 起算下一天），國曆節日依國曆日期。 */
+    fun get(now: LocalDateTime): Pair<LunarInfo, List<Festival>> {
+        val solar = now.toLocalDate()
+        val k = solar to LunarCalc.lunarDateOf(now)
         val cached = value
-        if (cached != null && d == date) return cached
-        val info = LunarCalc.of(d)
-        return (info to Festivals.of(d, info)).also { date = d; value = it }
+        if (cached != null && k == key) return cached
+        val info = LunarCalc.of(k.second)
+        return (info to Festivals.of(solar, info)).also { key = k; value = it }
     }
 }
 
@@ -120,9 +123,9 @@ private fun build(
     city: City,
     weather: Weather?,
     network: NetworkStatus,
-    lunarFor: (LocalDate) -> Pair<LunarInfo, List<Festival>>,
+    lunarFor: (LocalDateTime) -> Pair<LunarInfo, List<Festival>>,
 ): HomeContext {
-    val (lunar, festivals) = lunarFor(now.toLocalDate())
+    val (lunar, festivals) = lunarFor(now)
     return HomeContext(now, lunar, festivals, weather, city, network)
 }
 

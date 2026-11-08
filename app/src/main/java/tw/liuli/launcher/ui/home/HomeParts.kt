@@ -128,10 +128,11 @@ fun TodayGroup(home: HomeContext, requester: FocusRequester, onClick: () -> Unit
     val time = now.format(DateTimeFormatter.ofPattern(if (is24h) "HH:mm" else "h:mm", zh))
     val ampm = if (is24h) null else if (now.hour < 12) "上午" else "下午"
     val l = home.lunar
-    val tomorrow = remember(home.now.toLocalDate()) {
-        val d = home.now.toLocalDate().plusDays(1)
-        val info = LunarCalc.of(d)
-        info to Festivals.of(d, info)
+    // 「明天」：農曆以子時換日，所以 23:00 以後的「明天」是再下一個農曆日
+    val lunarToday = LunarCalc.lunarDateOf(home.now)
+    val tomorrow = remember(lunarToday) {
+        val info = LunarCalc.of(lunarToday.plusDays(1))
+        info to Festivals.of(home.now.toLocalDate().plusDays(1), info)
     }
     val tag = home.highlight ?: run {
         val (tl, tf) = tomorrow
@@ -152,7 +153,7 @@ fun TodayGroup(home: HomeContext, requester: FocusRequester, onClick: () -> Unit
             Row(verticalAlignment = Alignment.CenterVertically) {
                 GText(now.format(DateTimeFormatter.ofPattern("M月d日 EEEE", zh)), size = 18.sp, color = Ink.Secondary, shadow = true)
                 Box(Modifier.padding(horizontal = 12.dp).size(3.dp).background(Ink.Tertiary, CircleShape))
-                GText("農曆" + l.monthText + l.dayText, size = 18.sp, color = Ink.Secondary, shadow = true)
+                GText("農曆" + l.monthText + l.dayText + "・" + LunarCalc.shiChen(now.hour), size = 18.sp, color = Ink.Secondary, shadow = true)
                 if (tag != null) {
                     Spacer(Modifier.width(12.dp))
                     GText(

@@ -79,8 +79,9 @@ private val zh = Locale.TAIWAN
  * 上下左右選日期；越過月初、月底自動翻到上一個或下一個月；頻道鍵也能換月。
  */
 @Composable
-fun CalendarScreen(today: LocalDate) {
-    var sel by remember { mutableStateOf(today) }
+fun CalendarScreen(now: java.time.LocalDateTime, initial: LocalDate = now.toLocalDate()) {
+    val today = now.toLocalDate()
+    var sel by remember(initial) { mutableStateOf(initial) }
     val month = YearMonth.from(sel)
     val root = remember { FocusRequester() }
     LaunchedEffect(Unit) { runCatching { root.requestFocus() } }
@@ -106,7 +107,7 @@ fun CalendarScreen(today: LocalDate) {
             .padding(horizontal = Dimens.SafeH, vertical = 36.dp),
         horizontalArrangement = Arrangement.spacedBy(44.dp),
     ) {
-        Column(Modifier.weight(1.55f).fillMaxHeight()) {
+        Column(Modifier.weight(1.4f).fillMaxHeight()) {
             AnimatedContent(
                 targetState = month,
                 transitionSpec = {
@@ -119,7 +120,7 @@ fun CalendarScreen(today: LocalDate) {
             }
         }
         Column(Modifier.weight(1f).fillMaxHeight()) {
-            DayDetail(sel, today)
+            DayDetail(sel, today, now)
         }
     }
 }
@@ -220,18 +221,23 @@ private fun DayCell(info: DayInfo, selected: Boolean, isToday: Boolean) {
 }
 
 @Composable
-private fun ColumnScope.DayDetail(date: LocalDate, today: LocalDate) {
+private fun ColumnScope.DayDetail(date: LocalDate, today: LocalDate, now: java.time.LocalDateTime) {
     val l = remember(date) { LunarCalc.of(date) }
     val fest = remember(date, l) { Festivals.of(date, l) }
-    Row(verticalAlignment = Alignment.Bottom) {
-        GText(date.dayOfMonth.toString(), size = 76.sp, weight = FontWeight.ExtraLight, shadow = true)
-    }
+    GText(date.dayOfMonth.toString(), size = 60.sp, weight = FontWeight.ExtraLight, shadow = true)
     GText(date.format(DateTimeFormatter.ofPattern("yyyy年M月 EEEE", zh)), size = 15.sp, color = Ink.Secondary)
-    Spacer(Modifier.height(18.dp))
-    GText("農曆${if (l.isLeapMonth) "閏" else ""}${l.monthText}${l.dayText}", size = 22.sp, weight = FontWeight.Medium)
+    Spacer(Modifier.height(14.dp))
+    // monthText 已含「閏」（例如 閏六月），不要再另外加
+    GText("農曆${l.monthText}${l.dayText}", size = 22.sp, weight = FontWeight.Medium)
     GText("${l.ganZhiYear}年・生肖${l.zodiac}", size = 14.sp, color = Ink.Tertiary)
+    val isToday = date == today
     val tags = buildList {
-        if (date == today) add("今天")
+        if (isToday) {
+            add("今天")
+            add("現在" + LunarCalc.shiChen(now.hour))
+            // 23:00 起已進入子時：農曆算下一天
+            if (now.hour >= 23) add("子時起農曆" + LunarCalc.of(date.plusDays(1)).dayText)
+        }
         addAll(fest.map { it.name })
         l.solarTerm?.let { add(it) }
         if (l.isBaiBai) add(l.dayText + "拜拜")
@@ -243,19 +249,49 @@ private fun ColumnScope.DayDetail(date: LocalDate, today: LocalDate) {
             GText(it, Modifier.background(Ink.GoldSoft, RoundedCornerShape(11.dp)).padding(horizontal = 11.dp, vertical = 2.dp), size = 13.sp, color = Ink.Gold)
         }
     }
-    Spacer(Modifier.height(18.dp))
-    Field("宜", l.yi.joinToString("　").ifBlank { "—" })
-    Field("忌", l.ji.joinToString("　").ifBlank { "—" })
-    Field("沖煞", "${l.chong}　${l.sha}")
-    Field("下個節氣", "${l.nextSolarTerm}　${l.nextSolarTermDate.monthValue}月${l.nextSolarTermDate.dayOfMonth}日")
-    Spacer(Modifier.weight(1f))
+    Spacer(Modifier.height(14.dp))
+    // 宜忌字數差很多（1901～2099 最長：宜 31 項 95 字、宜＋忌合計 107 字）：依總字數選字級，詞不拆行
+    val total = (l.yi + l.ji).sumOf { it.length + 1 }
+    val termSize = when {
+        total <= 50 -> 15.sp
+        total <= 78 -> 14.sp
+        total <= 100 -> 13.sp
+        else -> 12.sp
+    }
+    Column(Modifier.weight(1f)) {
+        TermField("宜", l.yi, termSize)
+        TermField("忌", l.ji, termSize)
+        Field("吉時", l.goodHours.joinToString("　").ifBlank { "—" })
+        Field("沖煞", "${l.chong}　${l.sha}")
+        Field("下個節氣", "${l.nextSolarTerm}　${l.nextSolarTermDate.monthValue}月${l.nextSolarTermDate.dayOfMonth}日")
+    }
     GText("↑↓←→ 選日期，越過邊界自動翻月　返回鍵回主畫面", size = 12.sp, color = Ink.Faint)
+}
+
+/** 宜／忌：一個詞一個單位自動換行，詞本身不會被拆成兩行。 */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun TermField(title: String, terms: List<String>, size: androidx.compose.ui.unit.TextUnit) {
+    Row(Modifier.padding(bottom = 8.dp)) {
+        GText(title, Modifier.width(56.dp).padding(top = 2.dp), size = 13.sp, color = Ink.Tertiary)
+        if (terms.isEmpty()) {
+            GText("—", size = size)
+        } else {
+            androidx.compose.foundation.layout.FlowRow(
+                Modifier.weight(1f),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement = Arrangement.spacedBy(3.dp),
+            ) {
+                terms.forEach { GText(it, size = size) }
+            }
+        }
+    }
 }
 
 @Composable
 private fun Field(title: String, body: String) {
-    Row(Modifier.padding(bottom = 10.dp)) {
-        GText(title, Modifier.width(64.dp).padding(top = 2.dp), size = 13.sp, color = Ink.Tertiary)
-        GText(body, Modifier.weight(1f), size = 15.sp, maxLines = 3)
+    Row(Modifier.padding(bottom = 8.dp)) {
+        GText(title, Modifier.width(56.dp).padding(top = 2.dp), size = 13.sp, color = Ink.Tertiary)
+        GText(body, Modifier.weight(1f), size = 15.sp, maxLines = 2)
     }
 }
