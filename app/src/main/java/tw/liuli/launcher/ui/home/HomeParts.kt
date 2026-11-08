@@ -263,8 +263,11 @@ private fun InputChip(src: TvSource, requester: FocusRequester?, onClick: () -> 
         LIcon(if (src.type == TvInputInfo.TYPE_TUNER) LIcons.Input else LIcons.Hdmi, 20.dp, if (dark) Ink.OnLight else Color.White)
         Spacer(Modifier.width(8.dp))
         GText(src.label, size = 15.sp, color = if (dark) Ink.OnLight else Ink.Primary)
-        Spacer(Modifier.width(6.dp))
-        GText(src.typeTag, size = 12.sp, color = if (dark) Ink.OnLight.copy(alpha = 0.55f) else Ink.Tertiary)
+        // 名稱已經包含類型（HDMI1、AV）時不再重複顯示
+        if (!src.label.replace(" ", "").contains(src.typeTag, ignoreCase = true)) {
+            Spacer(Modifier.width(6.dp))
+            GText(src.typeTag, size = 12.sp, color = if (dark) Ink.OnLight.copy(alpha = 0.55f) else Ink.Tertiary)
+        }
     }
 }
 
