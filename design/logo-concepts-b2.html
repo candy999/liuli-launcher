@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>琉璃 Logo B+</title>
+<style>
+  :root { --bg:#0b0d14; --panel:#12151f; --ink:#f2f3f7; --ink2:#a9adbb; --ink3:#6c7183; --gold:#e9c27a; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font-family:"Noto Sans TC","Microsoft JhengHei",system-ui,sans-serif; }
+  header { padding:40px 48px 8px; }
+  h1 { font-weight:300; font-size:30px; margin:0 0 8px; letter-spacing:.04em; }
+  .lead { color:var(--ink2); font-size:15px; line-height:1.8; max-width:900px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(440px,1fr)); gap:28px; padding:28px 48px 56px; }
+  .card { background:var(--panel); border-radius:24px; padding:28px; }
+  .card h2 { font-weight:400; font-size:22px; margin:0 0 4px; }
+  .card h2 small { color:var(--gold); font-size:14px; margin-left:8px; letter-spacing:.1em; }
+  .card p { color:var(--ink2); font-size:14px; line-height:1.8; margin:12px 0 0; }
+  .row { display:flex; gap:22px; align-items:flex-end; margin:18px 0 6px; flex-wrap:wrap; }
+  .lbl { color:var(--ink3); font-size:12px; text-align:center; margin-top:6px; }
+  .big { width:216px; height:216px; border-radius:48px; overflow:hidden; }
+  .ci { width:120px; height:120px; border-radius:50%; overflow:hidden; }
+  .sm { width:48px; height:48px; border-radius:12px; overflow:hidden; }
+  .banner { width:400px; height:225px; border-radius:16px; overflow:hidden; }
+  svg { display:block; width:100%; height:100%; }
+  .wm { font-family:"Noto Sans TC","Microsoft JhengHei",sans-serif; }
+</style>
+</head>
+<body>
+<header>
+  <h1>琉璃 Logo・B+ 浪中琉璃</h1>
+  <div class="lead">
+    以 B 的三道釉色浪為底，中間的光暈換成一塊 App 磚：<b>後浪 → 磚落在浪上的影子 → 磚 → 前浪從磚的下緣前面流過</b>，
+    磚就在浪裡，層次靠「前後遮擋」與影子，不靠框線。磚本身是磨砂玻璃：裡面是被模糊過的浪色、左上角過曝、加上主畫面焦點的斜向光澤。
+    全部只用漸層，這裡看到的就是 Android 向量圖示實際的樣子。
+  </div>
+</header>
+
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <linearGradient id="night" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0a0e1c"/><stop offset="1" stop-color="#171c38"/>
+    </linearGradient>
+    <linearGradient id="w1" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#3d5bff" stop-opacity=".78"/><stop offset="1" stop-color="#8f5cff" stop-opacity=".62"/>
+    </linearGradient>
+    <linearGradient id="w2" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#b44bd8" stop-opacity=".78"/><stop offset="1" stop-color="#ff6f7d" stop-opacity=".7"/>
+    </linearGradient>
+    <linearGradient id="w3" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ff7a6b" stop-opacity=".86"/><stop offset="1" stop-color="#ffc56a" stop-opacity=".9"/>
+    </linearGradient>
+    <radialGradient id="vig" cx="54" cy="54" r="56" gradientUnits="userSpaceOnUse">
+      <stop offset=".6" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".55"/>
+    </radialGradient>
+    <!-- 浪後方的天光：讓磚上半部有東西可以「透」 -->
+    <radialGradient id="sky" cx="58" cy="50" r="40" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#6d5cff" stop-opacity=".35"/><stop offset="1" stop-color="#6d5cff" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- 磚：磨砂玻璃（模糊過的浪色）＋過曝＋斜向光澤＋落在浪上的影子 -->
+    <linearGradient id="t-base" x1="30" y1="44" x2="78" y2="72" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ddd6ff" stop-opacity=".9"/>
+      <stop offset=".5" stop-color="#b394f0" stop-opacity=".84"/>
+      <stop offset="1" stop-color="#ff9a96" stop-opacity=".86"/>
+    </linearGradient>
+    <radialGradient id="t-inner" cx="66" cy="68" r="26" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#7d4dff" stop-opacity=".62"/><stop offset="1" stop-color="#7d4dff" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="t-over" cx="34" cy="44" r="24" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#fff" stop-opacity=".88"/><stop offset=".45" stop-color="#fff" stop-opacity=".22"/><stop offset="1" stop-color="#fff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="t-sheen" x1="30" y1="44" x2="62" y2="76" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#fff" stop-opacity=".45"/><stop offset=".45" stop-color="#fff" stop-opacity="0"/>
+    </linearGradient>
+    <radialGradient id="t-shadow" cx="56" cy="74" r="28" gradientUnits="userSpaceOnUse" gradientTransform="translate(0 55.5) scale(1 .25)">
+      <stop offset="0" stop-color="#05061a" stop-opacity=".65"/><stop offset="1" stop-color="#05061a" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- 變化 1：磚半浸在浪裡 -->
+    <g id="v1">
+      <rect width="108" height="108" fill="url(#night)"/>
+      <circle cx="58" cy="50" r="40" fill="url(#sky)"/>
+      <path d="M0 64 C18 56 30 58 44 62 S70 70 84 60 S100 50 108 54 V108 H0Z" fill="url(#w1)"/>
+      <g transform="translate(0 3)">
+      <ellipse cx="56" cy="74" rx="28" ry="7" fill="url(#t-shadow)"/>
+      <rect x="30" y="44" width="48" height="27" rx="7" fill="url(#t-base)"/>
+      <rect x="30" y="44" width="48" height="27" rx="7" fill="url(#t-inner)"/>
+      <rect x="30" y="44" width="48" height="27" rx="7" fill="url(#t-over)"/>
+      <rect x="30" y="44" width="48" height="27" rx="7" fill="url(#t-sheen)"/>
+      </g>
+      <path d="M0 74 C16 70 30 66 46 70 S68 76 82 68 S98 62 108 66 V108 H0Z" fill="url(#w2)"/>
+      <path d="M0 86 C20 80 34 78 50 82 S74 88 88 80 S102 76 108 78 V108 H0Z" fill="url(#w3)"/>
+      <rect width="108" height="108" fill="url(#vig)"/>
+    </g>
+
+    <!-- 變化 2：磚浮在浪頭上，下緣被浪頭輕輕托住 -->
+    <g id="v2">
+      <rect width="108" height="108" fill="url(#night)"/>
+      <circle cx="58" cy="46" r="40" fill="url(#sky)"/>
+      <path d="M0 66 C18 58 30 60 44 64 S70 72 84 62 S100 52 108 56 V108 H0Z" fill="url(#w1)"/>
+      <g transform="translate(0 -6)">
+        <ellipse cx="56" cy="74" rx="28" ry="7" fill="url(#t-shadow)"/>
+        <rect x="30" y="44" width="48" height="27" rx="7" fill="url(#t-base)"/>
+        <rect x="30" y="44" width="48" height="27" rx="7" fill="url(#t-inner)"/>
+        <rect x="30" y="44" width="48" height="27" rx="7" fill="url(#t-over)"/>
+        <rect x="30" y="44" width="48" height="27" rx="7" fill="url(#t-sheen)"/>
+      </g>
+      <path d="M0 70 C14 66 26 62 40 64 S62 68 76 62 S98 58 108 62 V108 H0Z" fill="url(#w2)" opacity=".9"/>
+      <path d="M0 84 C20 78 34 76 50 80 S74 86 88 78 S102 74 108 76 V108 H0Z" fill="url(#w3)"/>
+      <rect width="108" height="108" fill="url(#vig)"/>
+    </g>
+  </defs>
+</svg>
+
+<div class="grid">
+  <section class="card">
+    <h2>變化 1　半浸在浪裡 <small>推薦</small></h2>
+    <div class="row">
+      <div><div class="big"><svg viewBox="0 0 108 108"><use href="#v1"/></svg></div><div class="lbl">方形遮罩</div></div>
+      <div><div class="ci"><svg viewBox="0 0 108 108"><use href="#v1"/></svg></div><div class="lbl">圓形遮罩</div></div>
+      <div><div class="sm"><svg viewBox="0 0 108 108"><use href="#v1"/></svg></div><div class="lbl">48px</div></div>
+    </div>
+    <div class="row"><div class="banner"><svg viewBox="0 0 320 180">
+      <rect width="320" height="180" fill="url(#night)"/>
+      <g transform="translate(150 11) scale(1.6)">
+        <circle cx="58" cy="50" r="40" fill="url(#sky)"/>
+        <ellipse cx="56" cy="74" rx="28" ry="7" fill="url(#t-shadow)"/>
+      </g>
+      <g transform="scale(2.963 1.667)"><path d="M0 64 C18 56 30 58 44 62 S70 70 84 60 S100 50 108 54 V108 H0Z" fill="url(#w1)"/></g>
+      <g transform="translate(150 11) scale(1.6)">
+        <rect x="30" y="44" width="48" height="27" rx="7" fill="url(#t-base)"/>
+        <rect x="30" y="44" width="48" height="27" rx="7" fill="url(#t-inner)"/>
+        <rect x="30" y="44" width="48" height="27" rx="7" fill="url(#t-over)"/>
+        <rect x="30" y="44" width="48" height="27" rx="7" fill="url(#t-sheen)"/>
+      </g>
+      <g transform="scale(2.963 1.667)"><path d="M0 74 C16 70 30 66 46 70 S68 76 82 68 S98 62 108 66 V108 H0Z" fill="url(#w2)"/><path d="M0 86 C20 80 34 78 50 82 S74 88 88 80 S102 76 108 78 V108 H0Z" fill="url(#w3)"/></g>
+      <text x="30" y="70" class="wm" font-size="42" font-weight="300" fill="#f2f3f7" letter-spacing="6">琉璃</text>
+      <text x="32" y="92" class="wm" font-size="10" fill="#c9cbd6" letter-spacing="3">LIULI LAUNCHER</text>
+    </svg></div></div>
+    <p>前浪從磚的左下緣前面流過、右下露出——磚被浪包住一半，最有「在浪潮之中」的感覺。磚面的紫色是被模糊的後浪透上來的顏色。</p>
+  </section>
+
+  <section class="card">
+    <h2>變化 2　浮在浪頭上</h2>
+    <div class="row">
+      <div><div class="big"><svg viewBox="0 0 108 108"><use href="#v2"/></svg></div><div class="lbl">方形遮罩</div></div>
+      <div><div class="ci"><svg viewBox="0 0 108 108"><use href="#v2"/></svg></div><div class="lbl">圓形遮罩</div></div>
+      <div><div class="sm"><svg viewBox="0 0 108 108"><use href="#v2"/></svg></div><div class="lbl">48px</div></div>
+    </div>
+    <p>磚整塊浮起，只在下緣被浪頭輕輕托住，影子落在後浪上。比較輕盈，接近「選中的那一格浮起來」；浸在浪裡的感覺比變化 1 弱。</p>
+  </section>
+</div>
+</body>
+</html>
