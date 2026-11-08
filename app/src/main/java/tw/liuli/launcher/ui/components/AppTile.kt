@@ -65,7 +65,7 @@ fun AppTile(
                 .aspectRatio(16f / 9f)
                 .focusScale(focus, 1.10f)
                 .graphicsLayer {
-                    shadowElevation = 18.dp.toPx() * focus.value()
+                    shadowElevation = 8.dp.toPx() * focus.value()
                     shape = tileShape
                     clip = false
                 }

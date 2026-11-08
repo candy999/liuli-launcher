@@ -128,6 +128,7 @@ class BackgroundEngine {
     private var dirT = 0f
     private var lastT = 0L
     private var holdMs = 0L
+    private var glassTick = 0
     private var holdUntil = 0L
     private var first = true
     private var dwellJob: Job? = null
@@ -194,7 +195,8 @@ class BackgroundEngine {
                     if (done) snapToTarget()
                     st.nowMs = t
                     st.record(t)
-                    renderGlass()
+                    // 玻璃的高斯模糊在電視 CPU 上約 10ms：轉場中每 3 幀更新一次，停下時再更新一次
+                    if (done || glassTick++ % 3 == 0) renderGlass()
                     frame++
                 }
             }

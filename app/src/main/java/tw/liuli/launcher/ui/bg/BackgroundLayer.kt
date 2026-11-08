@@ -30,7 +30,7 @@ import kotlin.math.roundToInt
 fun BackgroundLayer(engine: BackgroundEngine, blurred: () -> Float, modifier: Modifier = Modifier) {
     LaunchedEffect(engine) { engine.run() }
     BoxWithConstraints(modifier.fillMaxSize(), contentAlignment = Alignment.TopStart) {
-        // 轉場中用 960×540 畫（在動，看不出差別），停下來再用全解析度畫一次（靜止畫面清楚）
+        // 轉場中用 768×432 畫（在動，看不出差別），停下來再用全解析度畫一次（靜止畫面清楚）
         val renderScale = if (engine.moving) MOVING_SCALE else 1f
         Box(
             Modifier
@@ -57,5 +57,5 @@ fun BackgroundLayer(engine: BackgroundEngine, blurred: () -> Float, modifier: Mo
     }
 }
 
-/** 轉場期間背景的繪製解析度比例（1080p → 960×540）。 */
-private const val MOVING_SCALE = 0.5f
+/** 轉場期間背景的繪製解析度比例（1080p → 768×432；PowerVR BXE 等入門 GPU 實測需要這麼低）。 */
+private const val MOVING_SCALE = 0.4f
