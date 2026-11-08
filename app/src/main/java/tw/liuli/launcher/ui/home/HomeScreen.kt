@@ -133,6 +133,9 @@ fun HomeScreen(
     val weatherReq = remember { FocusRequester() }
     val gearReq = remember { FocusRequester() }
     val tileCenters = remember { HashMap<String, Float>() }
+    // 常用列每個 App 的 FocusRequester：關抽屜、關面板時焦點回到上次停留的那一個
+    val dockRequesters = remember { HashMap<String, FocusRequester>() }
+    var lastDockPkg by remember { mutableStateOf<String?>(null) }
 
     // ── App 清單：安裝、移除、更新時自動重新載入 ──
     LaunchedEffect(reloadKey) {
@@ -206,9 +209,11 @@ fun HomeScreen(
         sheet = OpenSheet(spec, returnTo ?: sheet?.returnTo)
     }
 
+    fun dockReturnTarget(): FocusRequester = lastDockPkg?.let { dockRequesters[it] } ?: firstDock
+
     fun closeDrawer() {
         drawerOpen = false
-        pendingFocus = dockGroup
+        pendingFocus = dockReturnTarget()
     }
 
     fun launchApp(app: AppEntry) {
@@ -454,12 +459,14 @@ fun HomeScreen(
                         }
                     }
                     itemsIndexed(dockApps, key = { _, a -> a.packageName }) { i, app ->
+                        val req = if (i == 0) firstDock else dockRequesters.getOrPut(app.packageName) { FocusRequester() }
                         AppTile(
                             app = app,
                             width = 150.dp,
                             showLabel = false,
-                            requester = if (i == 0) firstDock else null,
+                            requester = req,
                             onFocused = {
+                                lastDockPkg = app.packageName
                                 dockLabel = app.label
                                 labelX = tileCenters[app.packageName] ?: 0f
                             },
