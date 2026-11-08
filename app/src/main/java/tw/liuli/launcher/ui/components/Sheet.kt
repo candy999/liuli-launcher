@@ -31,6 +31,9 @@ import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -52,6 +55,10 @@ data class SheetItem(
     val selected: Boolean = false,
     /** 焦點移到這一列時執行（例如即時預覽背景樣式）。 */
     val onFocus: (() -> Unit)? = null,
+    /** 會即時變動的右側數值（在組合時讀取，狀態一變就跟著更新）；有值時取代 [detail]。 */
+    val liveDetail: (() -> String)? = null,
+    /** 可左右調整的數值列：左鍵 -1、右鍵 +1（按住會連續調整）。 */
+    val onAdjust: ((Int) -> Unit)? = null,
     val action: () -> Unit,
 )
 
@@ -119,6 +126,17 @@ private fun SheetRow(item: SheetItem, requester: FocusRequester?) {
     Row(
         Modifier
             .fillMaxWidth()
+            .let { m ->
+                val adjust = item.onAdjust ?: return@let m
+                m.onPreviewKeyEvent { e ->
+                    if (e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                    when (e.nativeKeyEvent.keyCode) {
+                        android.view.KeyEvent.KEYCODE_DPAD_LEFT -> { adjust(-1); true }
+                        android.view.KeyEvent.KEYCODE_DPAD_RIGHT -> { adjust(1); true }
+                        else -> false
+                    }
+                }
+            }
             .focusTarget(focus, requester, onFocused = item.onFocus, onClick = item.action)
             .drawBehind {
                 val v = focus.value()
@@ -160,10 +178,11 @@ private fun SheetRow(item: SheetItem, requester: FocusRequester?) {
                 )
             }
         }
-        if (item.detail != null) {
+        val detail = item.liveDetail?.invoke() ?: item.detail
+        if (detail != null) {
             Spacer(Modifier.width(10.dp))
             GText(
-                item.detail,
+                if (item.onAdjust != null) "‹  $detail  ›" else detail,
                 size = 13.sp,
                 color = if (onLight) Ink.OnLight.copy(alpha = 0.6f) else Ink.Tertiary,
             )

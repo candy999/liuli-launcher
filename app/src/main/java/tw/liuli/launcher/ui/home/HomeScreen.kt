@@ -14,6 +14,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
+import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -128,6 +129,10 @@ fun HomeScreen(
     var dockLabel by remember { mutableStateOf("") }
     var labelX by remember { mutableFloatStateOf(0f) }
     var dockHasFocus by remember { mutableStateOf(true) }
+    // 移動常用 App：被抓住的套件名稱，以及開始前的順序（返回鍵取消時還原）
+    var movingPkg by remember { mutableStateOf<String?>(null) }
+    var moveOrigin by remember { mutableStateOf<List<String>>(emptyList()) }
+    val dockListState = androidx.compose.foundation.lazy.rememberLazyListState()
 
     val firstDock = remember { FocusRequester() }
     val firstInput = remember { FocusRequester() }
@@ -235,17 +240,16 @@ fun HomeScreen(
     }
 
     // ───────────── App 選項 ─────────────
-    fun appSheet(app: AppEntry, returnTo: FocusRequester) {
+    fun appSheet(app: AppEntry, returnTo: FocusRequester, fromDrawer: Boolean = false) {
         val inDock = app.packageName in dock
-        val idx = dock.indexOf(app.packageName)
         val items = buildList {
             add(SheetItem("開啟") { close(); launchApp(app) })
             if (inDock) {
-                if (idx > 0) add(SheetItem("往左移") {
-                    setDock(dock.toMutableList().apply { add(idx - 1, removeAt(idx)) }); close()
-                })
-                if (idx < dock.lastIndex) add(SheetItem("往右移") {
-                    setDock(dock.toMutableList().apply { add(idx + 1, removeAt(idx)) }); close()
+                // 只有在常用列上長按才能移動（抽屜裡看不到常用列的位置）
+                if (!fromDrawer && dock.size > 1) add(SheetItem("移動位置", "左右移動，確定放下") {
+                    close()
+                    moveOrigin = dock
+                    movingPkg = app.packageName
                 })
                 add(SheetItem("從常用移除") { setDock(dock - app.packageName); close() })
             } else {
@@ -282,6 +286,22 @@ fun HomeScreen(
             },
             focusIndex = before.ordinal,
             onCancel = { engine.applyStyle(before) },
+        ), gearReq)
+    }
+
+    fun frameSheet() {
+        fun dp(v: Int) = if (v == 0) "關" else "$v dp"
+        open(SheetSpec(
+            "邊框", "左右鍵調整，即時預覽。黑框蓋在背景與捲動列上，不會遮住時鐘、天氣等固定介面。",
+            listOf(
+                SheetItem("黑框粗細", liveDetail = { dp(settings.frameThickness) },
+                    onAdjust = { d -> settings.updateFrame(thickness = (settings.frameThickness + d * 4).coerceIn(0, 120)) }) { close() },
+                SheetItem("圓角半徑", liveDetail = { "${settings.frameRadius} dp" },
+                    onAdjust = { d -> settings.updateFrame(radius = (settings.frameRadius + d * 4).coerceIn(0, 200)) }) { close() },
+                SheetItem("漸變範圍", liveDetail = { dp(settings.frameFeather) },
+                    onAdjust = { d -> settings.updateFrame(feather = (settings.frameFeather + d * 4).coerceIn(0, 240)) }) { close() },
+                SheetItem("全部關閉") { settings.updateFrame(thickness = 0, feather = 0); close() },
+            ),
         ), gearReq)
     }
 
@@ -416,6 +436,7 @@ fun HomeScreen(
                     settings.updateBgFollow(on); engine.applyFollow(on); close()
                     toast("背景色系：" + if (on) "跟隨焦點" else "固定深藍")
                 },
+                SheetItem("邊框", if (settings.frameThickness == 0 && settings.frameFeather == 0) "關" else "粗 ${settings.frameThickness}・圓 ${settings.frameRadius}・漸 ${settings.frameFeather}") { frameSheet() },
                 SheetItem("顯示／隱藏 App", if (hidden.isEmpty()) null else "已隱藏 ${hidden.size} 個") { visibilitySheet(0) },
                 SheetItem("遙控器按鍵", "改綁、防誤入原廠主畫面") { keysSheet() },
                 SheetItem("系統設定") { close(); SystemActions.systemSettings(context) },
@@ -429,6 +450,7 @@ fun HomeScreen(
     // 返回鍵：面板 → 抽屜 → 回到第一個 App（主畫面不會離開）
     BackHandler(enabled = active) {
         when {
+            movingPkg != null -> { dock = moveOrigin; movingPkg = null }
             sheet != null -> close(cancel = true)
             drawerOpen -> closeDrawer()
             else -> runCatching { firstDock.requestFocus() }
@@ -447,29 +469,17 @@ fun HomeScreen(
                 .focusProperties { enter = { if (active) FocusRequester.Default else FocusRequester.Cancel } }
                 .focusGroup(),
         ) {
-            // ── 主畫面內容：抽屜或面板開啟時往後退 ──
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .graphicsLayer {
-                        val k = recede.value
-                        alpha = 1f - 0.4f * k
-                        scaleX = 1f - 0.045f * k
-                        scaleY = 1f - 0.045f * k
-                    },
-            ) {
-                TodayGroup(home, todayReq, openCalendar, Modifier.padding(start = 28.dp, top = 22.dp))
-                WeatherGroup(home, weatherReq, openWeather, Modifier.align(Alignment.TopEnd).padding(end = 96.dp, top = 30.dp))
-                // 右上角：網路狀態 + 設定，直向疊放
-                Column(
-                    Modifier.align(Alignment.TopEnd).padding(end = 28.dp, top = 34.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    NetworkButton(home.network, null, { SystemActions.networkSettings(context) })
-                    GearButton(gearReq, ::openSettings)
+            // ── 主畫面內容：抽屜或面板開啟時往後退。分成兩層，中間夾黑框 ──
+            val recedeLayer = Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    val k = recede.value
+                    alpha = 1f - 0.4f * k
+                    scaleX = 1f - 0.045f * k
+                    scaleY = 1f - 0.045f * k
                 }
-
+            // 第 1 層：會左右捲動的列（訊號源、常用 App、名稱）——在黑框之下，捲到邊緣會被框蓋住
+            Box(recedeLayer) {
                 if (sources.isNotEmpty()) {
                     InputsRow(
                         sources = sources,
@@ -481,13 +491,34 @@ fun HomeScreen(
 
                 // 常用 App：直接放在桌布上，不加框；按下鍵展開所有 App
                 LazyRow(
+                    state = dockListState,
                     modifier = Modifier
                         .padding(top = 290.dp)
                         .fillMaxWidth()
                         .height(116.dp)
                         .onFocusChanged { dockHasFocus = it.hasFocus }
                         .onPreviewKeyEvent { e ->
-                            if (e.type == KeyEventType.KeyDown && e.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
+                            val code = e.nativeKeyEvent.keyCode
+                            val mp = movingPkg
+                            if (mp != null) {
+                                // 移動模式：左右直接搬動、確定放下；其他鍵（返回除外）都不讓焦點離開
+                                if (e.type == KeyEventType.KeyDown) when (code) {
+                                    KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                                        val i = dock.indexOf(mp)
+                                        val j = i + if (code == KeyEvent.KEYCODE_DPAD_LEFT) -1 else 1
+                                        if (i >= 0 && j in dock.indices) {
+                                            dock = dock.toMutableList().apply { add(j, removeAt(i)) }
+                                            scope.launch { keepDockItemVisible(dockListState, j, context) }
+                                        }
+                                    }
+                                    KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER -> {
+                                        setDock(dock)
+                                        movingPkg = null
+                                    }
+                                }
+                                return@onPreviewKeyEvent code != KeyEvent.KEYCODE_BACK
+                            }
+                            if (e.type == KeyEventType.KeyDown && code == KeyEvent.KEYCODE_DPAD_DOWN) {
                                 drawerOpen = true
                                 true
                             } else false
@@ -521,21 +552,61 @@ fun HomeScreen(
                             onClick = { launchApp(app) },
                             onLongClick = { fr -> appSheet(app, fr) },
                             extra = Modifier
-                                .onGloballyPositioned { tileCenters[app.packageName] = it.boundsInRoot().center.x }
+                                .onGloballyPositioned {
+                                    val cx = it.boundsInRoot().center.x
+                                    tileCenters[app.packageName] = cx
+                                    // 列捲動或移動位置後，名稱跟著焦點圖塊的實際位置走
+                                    if (app.packageName == lastDockPkg) labelX = cx
+                                }
+                                .graphicsLayer {
+                                    val mp = movingPkg
+                                    translationY = if (mp == app.packageName) -14.dp.toPx() else 0f
+                                    alpha = if (mp != null && mp != app.packageName) 0.55f else 1f
+                                }
                                 .bgTarget(app.themeColor),
                         )
                     }
                 }
 
                 // 焦點 App 名稱：在焦點圖塊正下方
+                // 寬度固定、單行，並限制在畫面內（常用列很長、捲到邊緣時也不會跑版）
+                val screenW = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp.dp
                 Box(
                     Modifier
                         .padding(top = 412.dp)
-                        .width(300.dp)
-                        .offset { IntOffset((labelX - 150.dp.toPx()).roundToInt(), 0) }
+                        .width(LABEL_W)
+                        .offset {
+                            val half = LABEL_W.toPx() / 2f
+                            val minX = 16.dp.toPx()
+                            val maxX = (screenW - LABEL_W - 16.dp).toPx()
+                            IntOffset((labelX - half).coerceIn(minX, maxOf(minX, maxX)).roundToInt(), 0)
+                        }
                         .graphicsLayer { alpha = if (dockHasFocus) 1f else 0f },
                 ) {
-                    GText(dockLabel, Modifier.fillMaxWidth(), size = 16.sp, weight = FontWeight.Medium, shadow = true, align = TextAlign.Center)
+                    GText(
+                        if (movingPkg != null) "‹  左右移動  ›　確定放下・返回取消" else dockLabel,
+                        Modifier.fillMaxWidth(),
+                        size = 16.sp, weight = FontWeight.Medium, shadow = true, align = TextAlign.Center, maxLines = 1,
+                    )
+                }
+
+            }
+
+            // 第 2 層：黑框（原生解析度，不受背景降解析度影響）
+            FrameOverlay(settings.frameThickness, settings.frameRadius, settings.frameFeather)
+
+            // 第 3 層：固定介面（時鐘、天氣、右上按鈕、抽屜提示）——在黑框之上，不會被遮住
+            Box(recedeLayer) {
+                TodayGroup(home, todayReq, openCalendar, Modifier.padding(start = 28.dp, top = 22.dp))
+                WeatherGroup(home, weatherReq, openWeather, Modifier.align(Alignment.TopEnd).padding(end = 96.dp, top = 30.dp))
+                // 右上角：網路狀態 + 設定，直向疊放
+                Column(
+                    Modifier.align(Alignment.TopEnd).padding(end = 28.dp, top = 34.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    NetworkButton(home.network, null, { SystemActions.networkSettings(context) })
+                    GearButton(gearReq, ::openSettings)
                 }
 
                 // 抽屜提示
@@ -556,7 +627,7 @@ fun HomeScreen(
                     apps = visibleApps,
                     onClose = ::closeDrawer,
                     onLaunch = ::launchApp,
-                    onLongClick = { app, fr -> appSheet(app, fr) },
+                    onLongClick = { app, fr -> appSheet(app, fr, fromDrawer = true) },
                 )
             }
 
@@ -565,5 +636,24 @@ fun HomeScreen(
             }
             sheet?.let { s -> key(s.spec) { GlassSheet(s.spec) } }
         }
+    }
+}
+
+private val LABEL_W = 420.dp
+
+/** 移動常用 App 時，讓被抓住的圖塊保持在可見範圍內（留一點邊距給放大效果）。 */
+private suspend fun keepDockItemVisible(state: androidx.compose.foundation.lazy.LazyListState, index: Int, context: Context) {
+    val margin = 40f * context.resources.displayMetrics.density
+    val info = state.layoutInfo
+    val item = info.visibleItemsInfo.firstOrNull { it.index == index }
+    if (item == null) {
+        state.animateScrollToItem(index)
+        return
+    }
+    val start = info.viewportStartOffset + margin
+    val end = info.viewportEndOffset - margin
+    when {
+        item.offset < start -> state.animateScrollBy(item.offset - start)
+        item.offset + item.size > end -> state.animateScrollBy(item.offset + item.size - end)
     }
 }

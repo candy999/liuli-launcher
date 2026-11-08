@@ -2,6 +2,7 @@ package tw.liuli.launcher.settings
 
 import android.content.Context
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 
@@ -19,6 +20,19 @@ class LauncherSettings(context: Context) {
 
     var cityId by mutableStateOf(prefs.getString("city", "taipei") ?: "taipei")
         private set
+
+    /** 畫面黑框：粗細、內側圓角半徑、往內漸變範圍（dp；粗細與漸變都是 0＝關閉）。 */
+    var frameThickness by mutableIntStateOf(prefs.getInt("frame_thickness", 0))
+        private set
+    var frameRadius by mutableIntStateOf(prefs.getInt("frame_radius", 32))
+        private set
+    var frameFeather by mutableIntStateOf(prefs.getInt("frame_feather", 0))
+        private set
+
+    fun updateFrame(thickness: Int = frameThickness, radius: Int = frameRadius, feather: Int = frameFeather) {
+        frameThickness = thickness; frameRadius = radius; frameFeather = feather
+        prefs.edit().putInt("frame_thickness", thickness).putInt("frame_radius", radius).putInt("frame_feather", feather).apply()
+    }
 
     fun updateBgStyle(id: String) {
         bgStyle = id
