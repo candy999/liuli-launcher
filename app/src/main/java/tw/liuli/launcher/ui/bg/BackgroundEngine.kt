@@ -234,6 +234,8 @@ class BackgroundEngine {
             var q = learnedQ[styleIdx]
             var bgEvery = QUALITY[q].second
             renderLevel = QUALITY[q].first
+            val forced = debugLevel in 1..FULL_LEVEL
+            if (forced) { renderLevel = debugLevel; bgEvery = debugEvery.coerceIn(1, 8) }
             var done = false
             var prevT = 0L
             var vsync = 0
@@ -259,7 +261,7 @@ class BackgroundEngine {
                     if (done || bgTicks++ % 2 == 0) requestGlass()
                     frame++
                 }
-                if (winN >= ADAPT_WINDOW) {
+                if (!forced && winN >= ADAPT_WINDOW) {
                     val avg = winSum / winN
                     winSum = 0f; winN = 0
                     var nq = q
@@ -370,6 +372,13 @@ class BackgroundEngine {
         private const val BLUR_R = 5
 
         private const val TAG = "LiuliBg"
+
+        /**
+         * 量測用（adb）：強制背景解析度檔位與更新間隔，0＝自動。
+         * adb shell am start -n tw.liuli.launcher/.MainActivity --ei bgLevel 6 --ei bgEvery 2
+         */
+        @Volatile var debugLevel = 0
+        @Volatile var debugEvery = 2
         const val FULL_LEVEL = 8
 
         /**
