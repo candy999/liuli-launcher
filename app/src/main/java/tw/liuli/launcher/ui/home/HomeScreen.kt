@@ -178,8 +178,9 @@ fun HomeScreen(
         runCatching { firstDock.requestFocus() }
     }
     LaunchedEffect(sheet, drawerOpen, pendingFocus) {
+        // 面板關閉後還原焦點。即使抽屜還開著也要還原（長按開選單的 returnTo 是抽屜裡的圖塊）
         val target = pendingFocus
-        if (sheet == null && !drawerOpen && target != null) {
+        if (sheet == null && target != null) {
             delay(16)
             runCatching { target.requestFocus() }
             pendingFocus = null
@@ -308,6 +309,7 @@ fun HomeScreen(
     fun chooseKeyAction(code: Int, long: Boolean) {
         val label = KeyMapStore.keyName(code) + if (long) "・長按" else "・短按"
         fun save(action: KeyAction) {
+            if (KeyRemapService.isProtected(code)) { close(); toast("這是基本鍵，不能改綁"); return }
             KeyMapStore.put(context, KeyBinding(code, long, action))
             KeyRemapService.instance?.reload()
             close()
@@ -323,19 +325,30 @@ fun HomeScreen(
     }
 
     fun learnKey() {
-        open(SheetSpec("按下要設定的鍵", "15 秒內按下遙控器上任何一顆鍵，包括 Netflix、YouTube 等快捷鍵。",
-            listOf(SheetItem("取消") { close() })), gearReq)
+        if (KeyRemapService.instance == null) {
+            toast("按鍵服務尚未啟動，請稍候幾秒再試")
+            return
+        }
+        open(SheetSpec(
+            "按下要改綁的鍵",
+            "15 秒內按一下遙控器上要改綁的鍵，例如 Netflix、YouTube 或彩色鍵。方向鍵、確定、返回、音量、電源等基本鍵受保護，不能改綁（按了會用來取消）。",
+            listOf(SheetItem("取消") { close() }),
+        ), gearReq)
         KeyRemapService.learner = { code ->
-            open(SheetSpec(KeyMapStore.keyName(code), "要設定短按還是長按？", listOf(
-                SheetItem("短按") { chooseKeyAction(code, false) },
-                SheetItem("長按（按住約半秒）") { chooseKeyAction(code, true) },
-            )), gearReq)
+            if (KeyRemapService.isProtected(code)) {
+                toast("${KeyMapStore.keyName(code)} 是基本鍵，受保護不能改綁")
+            } else {
+                open(SheetSpec(KeyMapStore.keyName(code), "要設定短按還是長按？", listOf(
+                    SheetItem("短按") { chooseKeyAction(code, false) },
+                    SheetItem("長按（按住約半秒）") { chooseKeyAction(code, true) },
+                )), gearReq)
+            }
         }
     }
     LaunchedEffect(sheet?.spec?.title) {
-        if (sheet?.spec?.title == "按下要設定的鍵") {
+        if (sheet?.spec?.title == "按下要改綁的鍵") {
             delay(15_000)
-            if (KeyRemapService.learner != null && sheet?.spec?.title == "按下要設定的鍵") close()
+            if (KeyRemapService.learner != null && sheet?.spec?.title == "按下要改綁的鍵") close()
         }
     }
 

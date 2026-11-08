@@ -48,6 +48,9 @@ class KeyRemapService : AccessibilityService() {
 
         // 學習模式：下一顆按下的鍵交給設定畫面
         learner?.let { callback ->
+            // 受保護的基本鍵（方向、確定、返回、音量、電源）一律放行：
+            // 不能被改綁，也讓使用者還能用它們導航／取消設定畫面
+            if (code in PROTECTED_KEYS) return false
             if (event.action == KeyEvent.ACTION_UP) {
                 learner = null
                 handler.post { callback(code) }
@@ -150,6 +153,21 @@ class KeyRemapService : AccessibilityService() {
             "com.tcl.waterfall.overseas",             // TCL
             "com.android.tv.launcher",
         )
+
+        /**
+         * 受保護的基本鍵：不開放改綁。改綁其中任何一顆都會讓遙控器失去基本操作（無法移動、確定、返回、
+         * 調音量），所以學習模式會放行這些鍵，儲存時也會拒絕。
+         */
+        val PROTECTED_KEYS = setOf(
+            KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN,
+            KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT,
+            KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER,
+            KeyEvent.KEYCODE_BACK, KeyEvent.KEYCODE_HOME,
+            KeyEvent.KEYCODE_VOLUME_UP, KeyEvent.KEYCODE_VOLUME_DOWN, KeyEvent.KEYCODE_VOLUME_MUTE,
+            KeyEvent.KEYCODE_POWER, KeyEvent.KEYCODE_SLEEP, KeyEvent.KEYCODE_WAKEUP,
+        )
+
+        fun isProtected(code: Int) = code in PROTECTED_KEYS
 
         @Volatile
         var instance: KeyRemapService? = null

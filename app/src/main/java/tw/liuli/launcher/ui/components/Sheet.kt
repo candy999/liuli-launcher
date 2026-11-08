@@ -15,10 +15,12 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import kotlinx.coroutines.delay
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
@@ -66,8 +68,16 @@ fun GlassSheet(spec: SheetSpec) {
     val first = remember { FocusRequester() }
     val slide = remember { Animatable(1f) }
     LaunchedEffect(Unit) { slide.animateTo(0f, SheetSpring) }
-    LaunchedEffect(spec) { runCatching { first.requestFocus() } }
     val focusAt = spec.focusIndex.coerceIn(0, (spec.items.size - 1).coerceAtLeast(0))
+    // 讓目標列一開始就被組合（遠一點的項目才不會因還沒放好而拿不到焦點）
+    val listState = rememberLazyListState(initialFirstVisibleItemIndex = focusAt)
+    // 延遲並重試幾次：面板比較重時，requestFocus 搶太早會落空（例如從 App 抽屜長按開啟時）
+    LaunchedEffect(spec) {
+        repeat(3) {
+            delay(16)
+            runCatching { first.requestFocus() }
+        }
+    }
 
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.CenterEnd) {
         Column(
@@ -89,7 +99,7 @@ fun GlassSheet(spec: SheetSpec) {
                 GText(spec.subtitle, Modifier.padding(horizontal = 12.dp), size = 13.sp, color = Ink.Tertiary, maxLines = 3)
             }
             Spacer(Modifier.height(16.dp))
-            LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            LazyColumn(Modifier.weight(1f), state = listState, verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 itemsIndexed(spec.items) { index, item ->
                     SheetRow(item, if (index == focusAt) first else null)
                 }
