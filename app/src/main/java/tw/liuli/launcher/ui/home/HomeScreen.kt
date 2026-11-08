@@ -258,13 +258,35 @@ fun HomeScreen(
                     movingPkg = app.packageName
                 })
                 add(SheetItem("從常用移除") {
-                    // 被移除的圖塊會消失：焦點改落在相鄰的那一個（左邊；移除的是第一個就落在新的第一個）
-                    val i = dock.indexOf(app.packageName)
-                    setDock(dock - app.packageName)
+                    val pkg = app.packageName
+                    if (fromDrawer) {
+                        // 從抽屜移除：焦點留在抽屜，不用處理
+                        setDock(dock - pkg); close()
+                    } else {
+                    // 從常用列移除：先把焦點移到相鄰圖塊（兩個都還在），再移除；
+                    // 若直接移除，焦點會在圖塊消失時掉到別處（例如時鐘）
+                    val i = dock.indexOf(pkg)
+                    val neighbor = dock.getOrNull(i + 1) ?: dock.getOrNull(i - 1)
                     close()
-                    pendingFocus = if (i <= 0) firstDock else dock.getOrNull(i - 1)?.let { pkg ->
-                        if (i - 1 == 0) firstDock else dockRequesters[pkg]
-                    } ?: firstDock
+                    pendingFocus = null
+                    scope.launch {
+                        delay(32)
+                        if (neighbor != null) {
+                            val ni = dock.indexOf(neighbor)
+                            val req = if (ni == 0) firstDock else dockRequesters[neighbor]
+                            runCatching { req?.requestFocus() }
+                            lastDockPkg = neighbor
+                            delay(32)
+                        }
+                        setDock(dock - pkg)
+                        // 確認焦點真的還在常用列（移除最後一個時要落到「加入常用」磚）
+                        repeat(10) {
+                            delay(48)
+                            if (dockHasFocus) return@launch
+                            runCatching { firstDock.requestFocus() }
+                        }
+                    }
+                    }
                 })
             } else {
                 add(SheetItem("加入常用", if (dock.size >= DockStore.MAX) "已滿" else null) {
