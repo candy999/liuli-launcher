@@ -134,8 +134,14 @@ class BackgroundEngine {
     var renderDiv by mutableIntStateOf(1)
         private set
 
-    /** 每種樣式各自學到的背景更新率檔位（樣式之間的繪圖成本差很多），索引對應 [QUALITY_MS]。 */
-    private val learnedQ = IntArray(BgStyle.entries.size) { DEFAULT_Q }
+    /**
+     * 每種樣式各自學到的兩個旋鈕（樣式之間的繪圖成本差很多）：
+     * 解析度除數 1～5，以及背景更新間隔檔位（索引對應 [INTERVALS]：30／20／15fps）。
+     */
+    private val learnedDiv = IntArray(BgStyle.entries.size) { DEFAULT_DIV }
+    private val learnedIv = IntArray(BgStyle.entries.size)
+    /** 這個樣式降解析度沒有用（瓶頸在 CPU 不在 GPU）：只調更新率，解析度保持原生。 */
+    private val cpuBound = BooleanArray(BgStyle.entries.size)
     /** 升檔退避：降檔後要等這麼久才允許再試著升檔；試探失敗就加倍。 */
     private var upBackoff = BASE_BACKOFF_MS
     private var upBlockedUntil = 0L
@@ -248,11 +254,14 @@ class BackgroundEngine {
             speed = 1f
             moving = true
             val styleIdx = style.ordinal
-            var q = learnedQ[styleIdx]
-            var interval = QUALITY_MS[q]
+            var div = learnedDiv[styleIdx]
+            var iv = learnedIv[styleIdx]
+            var interval = INTERVALS[iv]
             val forced = debugDiv in 1..MAX_DIV
             // 降解析度立即生效（在動，看不出切換）
-            renderDiv = if (forced) debugDiv else QUALITY_DIV[q]
+            renderDiv = if (forced) debugDiv else div
+            // 剛降過解析度：下一個量測窗要確認有沒有變快（沒變快＝CPU 瓶頸）
+            var checkDivFrom = 0f
             if (forced) interval = 16.7f * debugEvery.coerceIn(1, 8)
             var done = false
             var prevT = 0L
@@ -317,34 +326,52 @@ class BackgroundEngine {
                     val avg = winSum / winN
                     winSum = 0f; winN = 0
                     val now = android.os.SystemClock.uptimeMillis()
-                    var nq = q
-                    when {
-                        avg > SLOW_MS -> {
-                            fastWins = 0
-                            if (++slowWins >= 2 || avg > VERY_SLOW_MS) {
-                                slowWins = 0
-                                if (q < QUALITY_MS.lastIndex) nq = q + 1
-                                // 剛升檔就變慢＝試探失敗：退避時間加倍
-                                upBackoff = if (now - lastUpgradeAt < 1500) min(upBackoff * 2, MAX_BACKOFF_MS) else BASE_BACKOFF_MS
-                                upBlockedUntil = now + upBackoff
-                            }
+                    val oldDiv = div
+                    val oldIv = iv
+                    if (checkDivFrom > 0f) {
+                        // 降解析度後幾乎沒變快：這個樣式卡在 CPU，解析度還原、改降更新率
+                        if (avg > checkDivFrom * 0.85f) {
+                            cpuBound[styleIdx] = true
+                            div = max(1, div - 1)
+                            if (avg > SLOW_MS && iv < INTERVALS.lastIndex) iv++
+                            Log.i(TAG, "${style.id} cpu-bound (${checkDivFrom.toInt()}ms -> ${avg.toInt()}ms), use fps instead")
                         }
-                        avg < FAST_MS -> {
-                            slowWins = 0
-                            if (++fastWins >= 2 && q > 0 && now >= upBlockedUntil) {
+                        checkDivFrom = 0f
+                    } else {
+                        when {
+                            avg > SLOW_MS -> {
                                 fastWins = 0
-                                nq = q - 1
-                                lastUpgradeAt = now
+                                if (++slowWins >= 2 || avg > VERY_SLOW_MS) {
+                                    slowWins = 0
+                                    if (!cpuBound[styleIdx] && div < MAX_DIV) {
+                                        div++
+                                        checkDivFrom = avg
+                                    } else if (iv < INTERVALS.lastIndex) {
+                                        iv++
+                                    }
+                                    // 剛升檔就變慢＝試探失敗：退避時間加倍
+                                    upBackoff = if (now - lastUpgradeAt < 1500) min(upBackoff * 2, MAX_BACKOFF_MS) else BASE_BACKOFF_MS
+                                    upBlockedUntil = now + upBackoff
+                                }
                             }
+                            avg < FAST_MS -> {
+                                slowWins = 0
+                                if (++fastWins >= 2 && now >= upBlockedUntil && (iv > 0 || div > 1)) {
+                                    fastWins = 0
+                                    // 先把更新率加回來，再加解析度
+                                    if (iv > 0) iv-- else div--
+                                    lastUpgradeAt = now
+                                }
+                            }
+                            else -> { fastWins = 0; slowWins = 0 }
                         }
-                        else -> { fastWins = 0; slowWins = 0 }
                     }
-                    if (nq != q) {
-                        Log.i(TAG, "${style.id} q $q -> $nq (div ${QUALITY_DIV[nq]}, ${(1000f / QUALITY_MS[nq]).toInt()}fps) avg=${avg.toInt()}ms")
-                        q = nq
-                        learnedQ[styleIdx] = q
-                        interval = QUALITY_MS[q]
-                        renderDiv = QUALITY_DIV[q]
+                    if (div != oldDiv || iv != oldIv) {
+                        Log.i(TAG, "${style.id} div $oldDiv->$div, ${(1000f / INTERVALS[oldIv]).toInt()}->${(1000f / INTERVALS[iv]).toInt()}fps avg=${avg.toInt()}ms")
+                        learnedDiv[styleIdx] = div
+                        learnedIv[styleIdx] = iv
+                        interval = INTERVALS[iv]
+                        renderDiv = div
                         skipMeasure = 2
                     }
                 }
@@ -464,13 +491,12 @@ class BackgroundEngine {
         const val MAX_DIV = 5
 
         /**
-         * 畫質階梯（由好到差）：解析度除數 ＋ 背景更新間隔。
-         * 先保 30fps、依序降解析度到 ÷5；還不夠才把背景降到 20、15fps，再慢就靠慢速播放。
+         * 背景更新間隔檔位：30／20／15fps。
+         * 太慢時先降解析度（GPU 瓶頸）；降解析度沒有用的樣式（CPU 瓶頸）改降更新率；再慢就靠慢速播放。
          */
-        private val QUALITY_DIV = intArrayOf(1, 2, 3, 4, 5, 5, 5)
-        private val QUALITY_MS = floatArrayOf(33.3f, 33.3f, 33.3f, 33.3f, 33.3f, 50f, 66.7f)
-        /** AOC 電視實測：÷2 的背景一幀 GPU 約 18ms，可以穩定 30fps。 */
-        private const val DEFAULT_Q = 1
+        private val INTERVALS = floatArrayOf(33.3f, 50f, 66.7f)
+        /** 起始解析度除數（AOC 電視實測：÷2 的背景一幀 GPU 約 18ms，可以穩定 30fps）。 */
+        private const val DEFAULT_DIV = 2
         /** 提前對焦／靜止後：每隔多久升一檔解析度。 */
         private const val RAMP_STEP_MS = 200L
         /** 提前對焦多留一點時間，讓最後一檔在停下之前就到位。 */

@@ -91,26 +91,27 @@ private fun DrawScope.focusGlow(st: BgState, r: Float, a: Float) {
     drawRect(Brush.radialGradient(listOf(st.c(0f, .9f, .5f, a), st.c(0f, .9f, .5f, 0f)), center = c, radius = r), size = FULL)
 }
 
-private val path: Path get() = scratch.get()!!.path
 
 // ───────────── 1. 流線浪潮 ─────────────
 
 private fun DrawScope.waves(st: BgState) {
+    val sc = scratch.get()!!
+    val pathL = sc.path
     base(st)
     for (i in 0 until 3) {
         val y0 = H * (.56f + i * .13f)
         val a = H * (.07f - i * .012f) * (1 + st.pulse * .5f)
         val cx = st.fx * W
         val ph = st.fx * 4 * (i + 1)
-        path.reset(); path.moveTo(0f, H)
+        pathL.reset(); pathL.moveTo(0f, H)
         var x = 0f
         while (x <= W) {
             val y = y0 + a * sin(x / W * PI.toFloat() * 2 * (.7f + i * .25f) + ph) -
                 a * 1.1f * exp(-(x - cx).pow(2) / (2 * (W * .16f).pow(2)))
-            path.lineTo(x, y); x += 6f
+            pathL.lineTo(x, y); x += 6f
         }
-        path.lineTo(W, H); path.close()
-        drawPath(path, Brush.horizontalGradient(listOf(st.c(-14f + i * 10, .9f, .3f + i * .06f, .62f), st.c(18f + i * 8, .85f, .4f + i * .04f, .5f)), 0f, W))
+        pathL.lineTo(W, H); pathL.close()
+        drawPath(pathL, Brush.horizontalGradient(listOf(st.c(-14f + i * 10, .9f, .3f + i * .06f, .62f), st.c(18f + i * 8, .85f, .4f + i * .04f, .5f)), 0f, W))
     }
     vignette(.35f)
 }
@@ -151,7 +152,6 @@ private class MeshPoint(val x: Float, val y: Float, val z: Float) {
 
 private class Mesh(val points: List<List<MeshPoint>>, val tris: List<Array<MeshPoint>>)
 
-private val mesh: Mesh get() = scratch.get()!!.mesh
 
 /** 網格往四周多鋪一格（邊緣不露空），每個頂點有基礎高度 z。 */
 private fun buildMesh(): Mesh {
@@ -172,8 +172,11 @@ private fun buildMesh(): Mesh {
 }
 
 private fun DrawScope.triangles(st: BgState) {
+    val sc = scratch.get()!!
+    val pathL = sc.path
+    val meshL = sc.mesh
     val lx = st.fx * W; val ly = st.fy * H; val sig = W * .22f
-    for (row in mesh.points) for (p in row) {
+    for (row in meshL.points) for (p in row) {
         val dx = p.x - lx; val dy = (p.y - ly) * 1.2f
         val e = exp(-(dx * dx + dy * dy) / (sig * sig))
         p.zz = p.z + (40 + 22 * st.pulse) * e
@@ -182,7 +185,7 @@ private fun DrawScope.triangles(st: BgState) {
         p.sy = p.y + (p.y - ly) * push * .8f - p.zz * .5f + cos(p.x * .04f + st.fx * 7) * 4 * st.pulse
     }
     val lX = -.36f; val lY = -.55f; val lZ = .75f
-    for (t in mesh.tris) {
+    for (t in meshL.tris) {
         val a = t[0]; val b = t[1]; val c = t[2]
         val ux = b.sx - a.sx; val uy = b.sy - a.sy; val uz = b.zz - a.zz
         val vx = c.sx - a.sx; val vy = c.sy - a.sy; val vz = c.zz - a.zz
@@ -194,9 +197,9 @@ private fun DrawScope.triangles(st: BgState) {
         val d = hypot(cx - lx, (cy - ly) * 1.2f) / W
         val near = exp(-d * d * 8)
         val col = st.c((shade - .75f) * 24 + d * 10, .75f, .04f + .2f * shade.pow(3) * (.4f + .6f * near) + .04f * near)
-        path.reset(); path.moveTo(a.sx, a.sy); path.lineTo(b.sx, b.sy); path.lineTo(c.sx, c.sy); path.close()
-        drawPath(path, col)
-        drawPath(path, col, style = Stroke(.7f))
+        pathL.reset(); pathL.moveTo(a.sx, a.sy); pathL.lineTo(b.sx, b.sy); pathL.lineTo(c.sx, c.sy); pathL.close()
+        drawPath(pathL, col)
+        drawPath(pathL, col, style = Stroke(.7f))
     }
     vignette(.38f)
 }
@@ -232,10 +235,11 @@ private fun DrawScope.dots(st: BgState) {
 
 // ───────────── 5. 翻牌方陣（色彩波從焦點擴散） ─────────────
 
-private val sampleA: FloatArray get() = scratch.get()!!.sampleA
-private val sampleB: FloatArray get() = scratch.get()!!.sampleB
 
 private fun DrawScope.flip(st: BgState) {
+    val sc = scratch.get()!!
+    val sampleAL = sc.sampleA
+    val sampleBL = sc.sampleB
     drawRect(Color(0xFF04050A), size = FULL)
     val sz = 30f; val gap = 2.5f; val lx = st.fx * W; val ly = st.fy * H
     var iy = 0; var y = -4f
@@ -245,15 +249,15 @@ private fun DrawScope.flip(st: BgState) {
             val cx = x + sz / 2; val cy = y + sz / 2
             val d = hypot(cx - lx, cy - ly) / W
             val delay = d * 1100
-            st.sampleAt(delay, sampleA); st.sampleAt(delay + 160, sampleB)
-            val dh = abs(((sampleA[0] - sampleB[0] + 540f) % 360f) - 180f) + abs(sampleA[1] - sampleB[1]) * 120
+            st.sampleAt(delay, sampleAL); st.sampleAt(delay + 160, sampleBL)
+            val dh = abs(((sampleAL[0] - sampleBL[0] + 540f) % 360f) - 180f) + abs(sampleAL[1] - sampleBL[1]) * 120
             val flip = min(1f, dh / 9f)
             val wScale = max(.06f, cos(flip * 1.35f))
             val spot = exp(-d * d * 6)
             val checker = if ((ix + iy) % 2 == 1) .012f else 0f
             val l = .06f + .13f * spot + checker + (1 - wScale) * .1f
             val w = (sz - gap) * wScale; val h = sz - gap
-            val hue = sampleA[0]; val sat = sampleA[1]
+            val hue = sampleAL[0]; val sat = sampleAL[1]
             drawRect(
                 Brush.horizontalGradient(listOf(hsl(hue - 6, .75f * sat * 1.6f, l * .75f), hsl(hue + 8, .8f * sat * 1.6f, l * 1.15f)), cx - w / 2, cx + w / 2),
                 Offset(cx - w / 2, cy - h / 2), Size(w, h),
@@ -269,6 +273,8 @@ private fun DrawScope.flip(st: BgState) {
 // ───────────── 6. 絲綢 ─────────────
 
 private fun DrawScope.silk(st: BgState) {
+    val sc = scratch.get()!!
+    val pathL = sc.path
     drawRect(Brush.linearGradient(listOf(st.c(-10f, .45f, .12f), st.c(12f, .5f, .2f)), Offset.Zero, Offset(W * .3f, H)), size = FULL)
     val lx = st.fx * W
     rotate(-6.9f, pivot = Offset(W / 2, H / 2)) {
@@ -277,7 +283,7 @@ private fun DrawScope.silk(st: BgState) {
             val a = H * (.05f + .015f * sin(i * 2.1f))
             val ph = st.fx * (1.8f + i * .35f) + i * 1.7f + st.pulse * .35f * sin(i.toFloat())
             val thick = H * (.27f + .04f * cos(i * 1.3f))
-            path.reset()
+            pathL.reset()
             val xs = ArrayList<Float>(); val tops = ArrayList<Float>(); val bots = ArrayList<Float>()
             var x = -60f
             while (x <= W + 60) {
@@ -286,15 +292,15 @@ private fun DrawScope.silk(st: BgState) {
                 xs += x; tops += y; bots += y + thick * (1 - .2f * gather)
                 x += 8f
             }
-            path.moveTo(xs[0], tops[0])
-            for (k in xs.indices) path.lineTo(xs[k], tops[k])
-            for (k in xs.indices.reversed()) path.lineTo(xs[k], bots[k])
-            path.close()
+            pathL.moveTo(xs[0], tops[0])
+            for (k in xs.indices) pathL.lineTo(xs[k], tops[k])
+            for (k in xs.indices.reversed()) pathL.lineTo(xs[k], bots[k])
+            pathL.close()
             // 柔和陰影：往下錯開兩層半透明黑
-            translate(0f, 5f) { drawPath(path, Color.Black.copy(alpha = .08f)) }
-            translate(0f, 2.5f) { drawPath(path, Color.Black.copy(alpha = .1f)) }
+            translate(0f, 5f) { drawPath(pathL, Color.Black.copy(alpha = .08f)) }
+            translate(0f, 2.5f) { drawPath(pathL, Color.Black.copy(alpha = .1f)) }
             drawPath(
-                path,
+                pathL,
                 Brush.verticalGradient(
                     0f to st.c(i * 4 - 8f, .42f, .13f), .4f to st.c(i * 4 - 4f, .45f, .22f + .02f * i),
                     .52f to st.c(i * 4f, .38f, .33f + .015f * i), .64f to st.c(i * 4 + 4f, .45f, .21f + .015f * i), 1f to st.c(i * 4 + 8f, .42f, .13f),
@@ -309,6 +315,8 @@ private fun DrawScope.silk(st: BgState) {
 // ───────────── 7. 光軌 ─────────────
 
 private fun DrawScope.trails(st: BgState) {
+    val sc = scratch.get()!!
+    val pathL = sc.path
     drawRect(st.c(0f, .6f, .035f), size = FULL); focusGlow(st, W * .5f, .12f)
     val lx = st.fx * W; val ly = st.fy * H; val sx = st.fx - .5f; val sy = st.fy - .5f
     for (i in 0 until 14) {
@@ -323,9 +331,9 @@ private fun DrawScope.trails(st: BgState) {
             0f to st.c(hOff, .9f, .6f, 0f), .5f to st.c(hOff, .95f, .7f, .55f + .35f * st.pulse), 1f to st.c(hOff + 15, .9f, .6f, 0f),
             startX = -40f, endX = W + 40f,
         )
-        path.reset(); path.moveTo(-40f, yl); path.cubicTo(c1x, c1y, c2x, c2y, W + 40f, yr)
-        drawPath(path, brush, alpha = .12f, style = Stroke(thick * 6, cap = StrokeCap.Round), blendMode = BlendMode.Plus)
-        drawPath(path, brush, style = Stroke(thick, cap = StrokeCap.Round), blendMode = BlendMode.Plus)
+        pathL.reset(); pathL.moveTo(-40f, yl); pathL.cubicTo(c1x, c1y, c2x, c2y, W + 40f, yr)
+        drawPath(pathL, brush, alpha = .12f, style = Stroke(thick * 6, cap = StrokeCap.Round), blendMode = BlendMode.Plus)
+        drawPath(pathL, brush, style = Stroke(thick, cap = StrokeCap.Round), blendMode = BlendMode.Plus)
     }
     vignette(.4f)
 }
@@ -334,10 +342,12 @@ private fun DrawScope.trails(st: BgState) {
 
 private const val CNX = 96
 private const val CNY = 54
-private val field: FloatArray get() = scratch.get()!!.field
 private val bumps = arrayOf(floatArrayOf(.12f, .2f, .7f, .22f), floatArrayOf(.85f, .25f, .55f, .2f), floatArrayOf(.7f, .85f, .6f, .25f), floatArrayOf(.25f, .9f, .45f, .2f), floatArrayOf(.5f, .45f, -.35f, .3f))
 
 private fun DrawScope.contour(st: BgState) {
+    val sc = scratch.get()!!
+    val pathL = sc.path
+    val fieldL = sc.field
     base(st); focusGlow(st, W * .5f, .16f)
     val cw = W / (CNX - 1); val ch = H / (CNY - 1)
     val lx = st.fx * W; val ly = st.fy * H
@@ -346,25 +356,25 @@ private fun DrawScope.contour(st: BgState) {
         val x = i * cw; val y = j * ch
         var f = 1.25f * exp(-((x - lx).pow(2) + ((y - ly) * 1.15f).pow(2)) / (sf * sf))
         for (b in bumps) { val s2 = b[3] * W; f += b[2] * exp(-((x - b[0] * W).pow(2) + (y - b[1] * H).pow(2)) / (s2 * s2)) }
-        field[j * CNX + i] = f
+        fieldL[j * CNX + i] = f
     }
     var lev = .08f; var li = 0
     val px = FloatArray(8)
     while (lev < 1.9f) {
-        path.reset()
+        pathL.reset()
         for (j in 0 until CNY - 1) for (i in 0 until CNX - 1) {
-            val a = field[j * CNX + i]; val b = field[j * CNX + i + 1]
-            val c = field[(j + 1) * CNX + i + 1]; val d = field[(j + 1) * CNX + i]
+            val a = fieldL[j * CNX + i]; val b = fieldL[j * CNX + i + 1]
+            val c = fieldL[(j + 1) * CNX + i + 1]; val d = fieldL[(j + 1) * CNX + i]
             val x0 = i * cw; val y0 = j * ch
             var n = 0
             if ((a - lev) * (b - lev) < 0) { px[n++] = x0 + cw * (lev - a) / (b - a); px[n++] = y0 }
             if ((b - lev) * (c - lev) < 0) { px[n++] = x0 + cw; px[n++] = y0 + ch * (lev - b) / (c - b) }
             if ((d - lev) * (c - lev) < 0) { px[n++] = x0 + cw * (lev - d) / (c - d); px[n++] = y0 + ch }
             if ((a - lev) * (d - lev) < 0) { px[n++] = x0; px[n++] = y0 + ch * (lev - a) / (d - a) }
-            if (n >= 4) { path.moveTo(px[0], px[1]); path.lineTo(px[2], px[3]) }
-            if (n == 8) { path.moveTo(px[4], px[5]); path.lineTo(px[6], px[7]) }
+            if (n >= 4) { pathL.moveTo(px[0], px[1]); pathL.lineTo(px[2], px[3]) }
+            if (n == 8) { pathL.moveTo(px[4], px[5]); pathL.lineTo(px[6], px[7]) }
         }
-        drawPath(path, st.c(lev * 26, .85f, .38f + lev * .16f, .22f + min(.5f, lev * .25f)), style = Stroke(if (li % 4 == 0) 1.3f else .7f))
+        drawPath(pathL, st.c(lev * 26, .85f, .38f + lev * .16f, .22f + min(.5f, lev * .25f)), style = Stroke(if (li % 4 == 0) 1.3f else .7f))
         lev += .1f; li++
     }
     vignette(.4f)
@@ -375,23 +385,25 @@ private fun DrawScope.contour(st: BgState) {
 private val hills = Random(5).let { r -> List(5) { floatArrayOf(r.nextFloat() * 6, r.nextFloat() * 6, r.nextFloat() * 6, .5f + r.nextFloat()) } }
 
 private fun DrawScope.paper(st: BgState) {
+    val sc = scratch.get()!!
+    val pathL = sc.path
     base(st); focusGlow(st, W * .5f, .25f)
     for (i in 0 until 5) {
         val hh = hills[i]
         val yb = H * (.42f + i * .12f)
         val off = (st.fx - .5f) * W * .05f * (i + 1)
-        path.reset(); path.moveTo(0f, H)
+        pathL.reset(); pathL.moveTo(0f, H)
         var x = -10f
         while (x <= W + 10) {
             val xx = x + off
             val y = yb - H * .05f * hh[3] * (sin(xx / W * 5 + hh[0]) + .6f * sin(xx / W * 11 + hh[1]) + .3f * sin(xx / W * 23 + hh[2]))
-            path.lineTo(x, y); x += 8f
+            pathL.lineTo(x, y); x += 8f
         }
-        path.lineTo(W, H); path.close()
+        pathL.lineTo(W, H); pathL.close()
         // 紙張的陰影落在上一層：往上錯開
-        translate(0f, -4f) { drawPath(path, Color.Black.copy(alpha = .14f)) }
-        translate(0f, -2f) { drawPath(path, Color.Black.copy(alpha = .16f)) }
-        drawPath(path, st.c(i * 6 - 10f, .7f, .1f + i * .045f))
+        translate(0f, -4f) { drawPath(pathL, Color.Black.copy(alpha = .14f)) }
+        translate(0f, -2f) { drawPath(pathL, Color.Black.copy(alpha = .16f)) }
+        drawPath(pathL, st.c(i * 6 - 10f, .7f, .1f + i * .045f))
     }
     vignette(.3f)
 }
