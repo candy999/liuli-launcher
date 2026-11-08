@@ -52,6 +52,7 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -569,24 +570,24 @@ fun HomeScreen(
                 }
 
                 // 焦點 App 名稱：在焦點圖塊正下方
-                // 寬度固定、單行，並限制在畫面內（常用列很長、捲到邊緣時也不會跑版）
-                val screenW = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp.dp
+                // 單行、依實際文字寬度置中在焦點圖塊正下方；只有快超出畫面時才往內推（常用列很長、捲到邊緣也不會跑版）
                 Box(
                     Modifier
                         .padding(top = 412.dp)
-                        .width(LABEL_W)
-                        .offset {
-                            val half = LABEL_W.toPx() / 2f
-                            val minX = 16.dp.toPx()
-                            val maxX = (screenW - LABEL_W - 16.dp).toPx()
-                            IntOffset((labelX - half).coerceIn(minX, maxOf(minX, maxX)).roundToInt(), 0)
+                        .fillMaxWidth()
+                        .layout { measurable, constraints ->
+                            val p = measurable.measure(constraints.copy(minWidth = 0))
+                            val margin = 16.dp.roundToPx()
+                            val maxX = (constraints.maxWidth - p.width - margin).coerceAtLeast(margin)
+                            layout(constraints.maxWidth, p.height) {
+                                p.placeRelativeWithLayer((labelX - p.width / 2f).roundToInt().coerceIn(margin, maxX), 0)
+                            }
                         }
                         .graphicsLayer { alpha = if (dockHasFocus) 1f else 0f },
                 ) {
                     GText(
                         if (movingPkg != null) "‹  左右移動  ›　確定放下・返回取消" else dockLabel,
-                        Modifier.fillMaxWidth(),
-                        size = 16.sp, weight = FontWeight.Medium, shadow = true, align = TextAlign.Center, maxLines = 1,
+                        size = 16.sp, weight = FontWeight.Medium, shadow = true, maxLines = 1,
                     )
                 }
 
@@ -639,7 +640,6 @@ fun HomeScreen(
     }
 }
 
-private val LABEL_W = 420.dp
 
 /** 移動常用 App 時，讓被抓住的圖塊保持在可見範圍內（留一點邊距給放大效果）。 */
 private suspend fun keepDockItemVisible(state: androidx.compose.foundation.lazy.LazyListState, index: Int, context: Context) {
