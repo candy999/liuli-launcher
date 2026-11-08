@@ -298,7 +298,8 @@ class BackgroundEngine {
     }
 
     private fun step(t: Long): Boolean {
-        val dt = if (lastT == 0L) 16.7f else min(400f, (t - lastT).toFloat())
+        // 慢速播放：背景低於 15fps 時，每格最多只推進 1/15 秒的動畫量（整體變慢，但每格變化小、不頓挫）
+        val dt = if (lastT == 0L) 16.7f else min(MAX_STEP_MS, (t - lastT).toFloat())
         lastT = t
         val a1 = rc(TAU1, dt)
         val a2 = rc(TAU2, dt)
@@ -373,12 +374,15 @@ class BackgroundEngine {
 
         /**
          * 畫質階梯（由好到差）：(解析度檔位 /8, 背景每幾個畫面更新一次)。
-         * 先降解析度到 960×540，再把背景降到 20fps，最低 720×405。
+         * 解析度固定原生 1080p（使用者要求不低於 1080p），只調背景更新率：30 → 20 → 15fps；
+         * 再慢就靠 [MAX_STEP_MS] 慢速播放。保留檔位欄位，之後要開放降解析度只要改這張表。
          */
         private val QUALITY = arrayOf(
-            8 to 2, 7 to 2, 6 to 2, 5 to 2, 4 to 2, 4 to 3, 3 to 3,
+            8 to 2, 8 to 3, 8 to 4,
         )
-        private const val DEFAULT_Q = 4
+        private const val DEFAULT_Q = 0
+        /** 每一格背景最多推進的動畫時間（1/15 秒）。 */
+        private const val MAX_STEP_MS = 66.7f
         /** 相對繪圖成本：像素數 ÷ 更新間隔。 */
         private fun cost(q: Int) = QUALITY[q].first.let { it * it }.toFloat() / QUALITY[q].second
 
