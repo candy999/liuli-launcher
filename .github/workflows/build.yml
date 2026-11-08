@@ -51,6 +51,27 @@ jobs:
           name: LiuliLauncher-0.1.${{ github.run_number }}
           path: dist/*.apk
 
+      # main 每次更新都覆蓋「nightly」預覽版，固定網址：
+      # https://github.com/candy999/liuli-launcher/releases/download/nightly/LiuliLauncher-nightly.apk
+      - name: 移動 nightly 標籤到最新版本
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          cp dist/*.apk dist/LiuliLauncher-nightly.apk
+          git tag -f nightly
+          git push -f origin nightly
+
+      - name: 更新 nightly 預覽版
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: nightly
+          name: 預覽版（main 最新建置）
+          prerelease: true
+          body: |
+            main 分支最新的自動建置（0.1.${{ github.run_number }}，${{ github.sha }}）。尚未經過完整測試。
+            固定下載網址：https://github.com/candy999/liuli-launcher/releases/download/nightly/LiuliLauncher-nightly.apk
+          files: dist/LiuliLauncher-nightly.apk
+
       # 推 v 開頭的 tag（例如 v0.1.0）時自動發布 Release，電視可直接用網址下載
       - name: 發布 Release
         if: startsWith(github.ref, 'refs/tags/v')
