@@ -5,6 +5,7 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
+import java.time.LocalDate
 import java.time.LocalDateTime
 
 /** 縣市（大約位置）。只用縣市中心座標，不取用裝置定位。 */
@@ -39,38 +40,61 @@ object Cities {
     fun byId(id: String?) = all.firstOrNull { it.id == id } ?: all.first()
 }
 
+/** 天氣大類，決定圖示。 */
+enum class WeatherKind(val label: String) {
+    CLEAR("晴"), PARTLY("晴時多雲"), CLOUDY("陰"), FOG("霧"),
+    DRIZZLE("毛毛雨"), RAIN("雨"), SNOW("雪"), THUNDER("雷雨");
+
+    companion object {
+        /** WMO 天氣代碼 → 大類。 */
+        fun of(code: Int): WeatherKind = when (code) {
+            0 -> CLEAR
+            1, 2 -> PARTLY
+            3 -> CLOUDY
+            45, 48 -> FOG
+            in 51..57 -> DRIZZLE
+            in 61..67, in 80..82 -> RAIN
+            in 71..77, 85, 86 -> SNOW
+            in 95..99 -> THUNDER
+            else -> CLOUDY
+        }
+    }
+}
+
+data class HourForecast(val time: LocalDateTime, val temp: Double, val kind: WeatherKind, val rainChance: Int, val isDay: Boolean)
+
+data class DayForecast(val date: LocalDate, val kind: WeatherKind, val max: Double, val min: Double, val rainChance: Int)
+
 data class Weather(
-    /** clear / partly / cloudy / fog / drizzle / rain / snow / thunder */
-    val kind: String,
-    val label: String,
-    val code: Int,
+    val kind: WeatherKind,
     val temp: Double,
     val feelsLike: Double,
     val humidity: Int,
-    val precipitation: Double,
-    val cloudCover: Int,
     val windSpeed: Double,
     val isDay: Boolean,
-    val tempMax: Double,
-    val tempMin: Double,
-    val rainChance: Int,
     val sunrise: LocalDateTime?,
     val sunset: LocalDateTime?,
+    /** 今天起 7 天，第一筆是今天。 */
+    val days: List<DayForecast>,
+    /** 從現在起每 3 小時一筆，共 8 筆（24 小時）。 */
+    val hours: List<HourForecast>,
     val fetchedAt: Long,
-)
+) {
+    val today: DayForecast? get() = days.firstOrNull()
+}
 
 /**
- * 天氣：Open-Meteo（免金鑰、免註冊）。之後可加中央氣象署作為第二來源。
+ * 天氣：Open-Meteo（免金鑰、免註冊）。
  */
 object WeatherRepository {
 
     suspend fun fetch(city: City): Weather? = withContext(Dispatchers.IO) {
         val url = "https://api.open-meteo.com/v1/forecast" +
             "?latitude=${city.lat}&longitude=${city.lon}" +
-            "&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,precipitation," +
-            "weather_code,cloud_cover,wind_speed_10m" +
-            "&daily=sunrise,sunset,temperature_2m_max,temperature_2m_min,precipitation_probability_max" +
-            "&timezone=auto&forecast_days=1"
+            "&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,weather_code,wind_speed_10m" +
+            "&hourly=temperature_2m,weather_code,precipitation_probability,is_day" +
+            "&daily=weather_code,sunrise,sunset,temperature_2m_max,temperature_2m_min,precipitation_probability_max" +
+            "&timezone=auto&forecast_days=7"
         runCatching {
             val conn = (URL(url).openConnection() as HttpURLConnection).apply {
                 connectTimeout = 8000
@@ -88,42 +112,50 @@ object WeatherRepository {
     private fun parse(json: JSONObject): Weather {
         val c = json.getJSONObject("current")
         val d = json.getJSONObject("daily")
-        val code = c.getInt("weather_code")
-        val (kind, label) = classify(code)
-        fun dailyDouble(key: String) = d.optJSONArray(key)?.optDouble(0) ?: Double.NaN
-        fun dailyTime(key: String) = d.optJSONArray(key)?.optString(0)
-            ?.takeIf { it.isNotBlank() }
-            ?.let { runCatching { LocalDateTime.parse(it) }.getOrNull() }
+        val h = json.getJSONObject("hourly")
+
+        fun time(s: String?) = s?.takeIf { it.isNotBlank() }?.let { runCatching { LocalDateTime.parse(it) }.getOrNull() }
+
+        val dayDates = d.getJSONArray("time")
+        val days = (0 until dayDates.length()).map { i ->
+            DayForecast(
+                date = LocalDate.parse(dayDates.getString(i)),
+                kind = WeatherKind.of(d.getJSONArray("weather_code").optInt(i)),
+                max = d.getJSONArray("temperature_2m_max").optDouble(i),
+                min = d.getJSONArray("temperature_2m_min").optDouble(i),
+                rainChance = d.optJSONArray("precipitation_probability_max")?.optInt(i) ?: 0,
+            )
+        }
+
+        val now = LocalDateTime.now()
+        val hourTimes = h.getJSONArray("time")
+        val hours = (0 until hourTimes.length())
+            .mapNotNull { i ->
+                val t = time(hourTimes.getString(i)) ?: return@mapNotNull null
+                if (t.isBefore(now.minusHours(1))) return@mapNotNull null
+                HourForecast(
+                    time = t,
+                    temp = h.getJSONArray("temperature_2m").optDouble(i),
+                    kind = WeatherKind.of(h.getJSONArray("weather_code").optInt(i)),
+                    rainChance = h.optJSONArray("precipitation_probability")?.optInt(i) ?: 0,
+                    isDay = h.optJSONArray("is_day")?.optInt(i, 1) == 1,
+                )
+            }
+            .filterIndexed { i, _ -> i % 3 == 0 }
+            .take(8)
+
         return Weather(
-            kind = kind,
-            label = label,
-            code = code,
+            kind = WeatherKind.of(c.getInt("weather_code")),
             temp = c.optDouble("temperature_2m"),
             feelsLike = c.optDouble("apparent_temperature"),
             humidity = c.optInt("relative_humidity_2m"),
-            precipitation = c.optDouble("precipitation", 0.0),
-            cloudCover = c.optInt("cloud_cover"),
             windSpeed = c.optDouble("wind_speed_10m"),
             isDay = c.optInt("is_day", 1) == 1,
-            tempMax = dailyDouble("temperature_2m_max"),
-            tempMin = dailyDouble("temperature_2m_min"),
-            rainChance = d.optJSONArray("precipitation_probability_max")?.optInt(0) ?: 0,
-            sunrise = dailyTime("sunrise"),
-            sunset = dailyTime("sunset"),
+            sunrise = time(d.optJSONArray("sunrise")?.optString(0)),
+            sunset = time(d.optJSONArray("sunset")?.optString(0)),
+            days = days,
+            hours = hours,
             fetchedAt = System.currentTimeMillis(),
         )
-    }
-
-    /** WMO 天氣代碼 → 網頁好判斷的大類。 */
-    fun classify(code: Int): Pair<String, String> = when (code) {
-        0 -> "clear" to "晴"
-        1, 2 -> "partly" to "晴時多雲"
-        3 -> "cloudy" to "陰"
-        45, 48 -> "fog" to "霧"
-        in 51..57 -> "drizzle" to "毛毛雨"
-        in 61..67, in 80..82 -> "rain" to "雨"
-        in 71..77, 85, 86 -> "snow" to "雪"
-        in 95..99 -> "thunder" to "雷雨"
-        else -> "cloudy" to "多雲"
     }
 }

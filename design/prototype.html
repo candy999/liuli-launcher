@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>琉璃主畫面原型</title>
+<style>
+  /* 設計座標：960×540 dp（1080p 電視、xhdpi）。整個舞台等比縮放塞進視窗。 */
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  body { display: grid; place-items: center; font-family: "Noto Sans TC", "Microsoft JhengHei", system-ui, sans-serif; color: #fff; }
+  #stage { width: 960px; height: 540px; position: relative; overflow: hidden; transform-origin: center; }
+  #wall { position: absolute; inset: 0; width: 100%; height: 100%; }
+
+  .glass {
+    position: absolute;
+    background: rgba(255,255,255,0.07);
+    backdrop-filter: blur(22px) saturate(1.6) brightness(1.05);
+    border-radius: 26px;
+    box-shadow:
+      inset 0 1px 0.5px rgba(255,255,255,0.55),      /* 上緣高光 */
+      inset 0 -1px 0.5px rgba(255,255,255,0.18),     /* 下緣反光 */
+      inset 0 0 0 1px rgba(255,255,255,0.10),        /* 玻璃厚度邊 */
+      inset 0 0 18px rgba(255,255,255,0.06),         /* 邊緣內光（折射感） */
+      0 12px 32px rgba(0,0,0,0.22);
+  }
+
+  .clock { position: absolute; left: 48px; top: 30px; }
+  .clock .t { font-size: 76px; font-weight: 200; letter-spacing: -1px; line-height: 1; text-shadow: 0 2px 18px rgba(0,0,0,0.25); }
+  .clock .d { margin-top: 8px; font-size: 17px; font-weight: 400; opacity: 0.85; }
+  .clock .d b { font-weight: 500; color: #ffe2a8; }
+
+  .top-right { position: absolute; right: 48px; top: 36px; display: flex; gap: 12px; align-items: center; }
+  .chip { position: relative; height: 44px; padding: 0 18px; display: flex; align-items: center; gap: 10px; border-radius: 22px; font-size: 16px; }
+  .circle { position: relative; width: 44px; height: 44px; border-radius: 22px; display: grid; place-items: center; }
+  .chip svg, .circle svg { width: 22px; height: 22px; }
+
+  .widgets { position: absolute; left: 48px; right: 48px; top: 172px; height: 128px; display: grid; grid-template-columns: 1.55fr 1fr; gap: 16px; }
+  .widget { position: relative; padding: 18px 22px; display: flex; gap: 20px; align-items: center; }
+  .widget .big { font-size: 54px; font-weight: 200; line-height: 1; }
+  .widget .sub { font-size: 13px; opacity: 0.7; margin-top: 4px; text-align: center; }
+  .widget .h { font-size: 17px; font-weight: 500; }
+  .widget .tag { display: inline-block; margin-top: 6px; padding: 2px 10px; border-radius: 10px; background: rgba(255,200,120,0.18); color: #ffd99a; font-size: 13px; }
+  .widget .row { font-size: 13px; opacity: 0.72; margin-top: 4px; }
+  .widget .row span { opacity: 0.6; margin-right: 6px; }
+  .wx-temp { font-size: 54px; font-weight: 200; line-height: 1; }
+  .wx-desc { font-size: 17px; font-weight: 500; }
+  .wx-mini { display: flex; gap: 18px; margin-top: 8px; font-size: 12px; opacity: 0.75; }
+  .wx-mini div { text-align: center; }
+
+  .dock { position: absolute; left: 36px; right: 36px; top: 326px; height: 120px; border-radius: 34px; display: flex; gap: 18px; align-items: center; padding: 0 22px; }
+  .tile { position: relative; width: 150px; height: 84.4px; border-radius: 18px; flex: none; overflow: hidden; transition: transform 160ms cubic-bezier(.2,.9,.3,1.25), box-shadow 160ms; }
+  .tile .bn { position: absolute; inset: 0; display: grid; place-items: center; font-weight: 700; font-size: 22px; letter-spacing: 0.5px; }
+  .tile::after { content: ""; position: absolute; inset: 0; border-radius: inherit; box-shadow: inset 0 1px 0 rgba(255,255,255,0.35), inset 0 0 0 1px rgba(255,255,255,0.10); pointer-events: none; }
+  .tile.focus { transform: scale(1.1); z-index: 2; box-shadow: 0 0 0 3px rgba(255,255,255,0.95), 0 16px 34px rgba(0,0,0,0.45); }
+  .tile.focus::before { content: ""; position: absolute; inset: 0; background: linear-gradient(115deg, rgba(255,255,255,0.28) 0%, rgba(255,255,255,0) 38%); z-index: 1; }
+  .label { position: absolute; left: 0; right: 0; top: 452px; text-align: center; font-size: 15px; font-weight: 500; }
+
+  .section { position: absolute; left: 56px; top: 500px; font-size: 15px; font-weight: 500; opacity: 0.75; }
+  .hint { position: absolute; right: 48px; top: 500px; font-size: 13px; opacity: 0.5; }
+
+  /* 側邊面板 */
+  .sheet { position: absolute; top: 20px; bottom: 20px; right: 20px; width: 320px; border-radius: 30px; padding: 26px 18px; display: none; }
+  .sheet h2 { margin: 0 12px 4px; font-size: 21px; font-weight: 500; }
+  .sheet p { margin: 0 12px 16px; font-size: 13px; opacity: 0.6; }
+  .item { display: flex; justify-content: space-between; align-items: center; padding: 12px 14px; border-radius: 16px; font-size: 16px; margin-bottom: 4px; }
+  .item small { opacity: 0.55; font-size: 13px; }
+  .item.focus { background: rgba(255,255,255,0.92); color: #111; }
+  .item.focus small { opacity: 0.6; }
+  body.sheet-open .sheet { display: block; }
+  body.sheet-open .scrim { display: block; }
+  .scrim { position: absolute; inset: 0; background: rgba(0,0,0,0.25); display: none; }
+
+  .ctl { position: fixed; left: 10px; bottom: 10px; font: 12px system-ui; color: #aaa; display: flex; gap: 8px; }
+  .ctl button { font: inherit; background: #222; color: #ddd; border: 1px solid #444; border-radius: 6px; padding: 4px 8px; cursor: pointer; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <canvas id="wall" width="960" height="540"></canvas>
+
+  <div class="clock">
+    <div class="t" id="time">21:08</div>
+    <div class="d">11月8日 星期日　農曆九月十八</div>
+  </div>
+
+  <div class="top-right">
+    <div class="glass chip">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round"><path d="M7 18h10a4 4 0 0 0 .6-7.96A6 6 0 0 0 6.2 11 3.5 3.5 0 0 0 7 18z"/></svg>
+      22° 臺北
+    </div>
+    <div class="glass circle" title="訊號源">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="12" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+    </div>
+    <div class="glass circle" title="設定">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+    </div>
+  </div>
+
+  <div class="widgets">
+    <div class="glass widget">
+      <div><div class="big">18</div><div class="sub">九月</div></div>
+      <div>
+        <div class="h">丙午馬年・九月十八</div>
+        <div class="tag">下個節氣　小雪 11/22</div>
+        <div class="row"><span>宜</span>祭祀 祈福 出行 嫁娶 納采</div>
+        <div class="row"><span>忌</span>動土 破土 安葬</div>
+      </div>
+    </div>
+    <div class="glass widget">
+      <div>
+        <div class="wx-temp">22°</div>
+      </div>
+      <div>
+        <div class="wx-desc">多雲時晴</div>
+        <div class="row">最高 25°　最低 19°　降雨 20%</div>
+        <div class="wx-mini"><div>一<br>24°</div><div>二<br>23°</div><div>三<br>21°</div><div>四<br>22°</div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="glass dock" id="dock"></div>
+  <div class="label" id="label">YouTube</div>
+  <div class="section">所有應用程式</div>
+  <div class="hint">長按確定鍵：更多選項</div>
+
+  <div class="scrim"></div>
+  <div class="glass sheet">
+    <h2>訊號源</h2>
+    <p>選擇要切換的輸入</p>
+    <div class="item focus">電視直播 <small>電視</small></div>
+    <div class="item">HDMI 1　PS5 <small>HDMI</small></div>
+    <div class="item">HDMI 2 <small>HDMI</small></div>
+    <div class="item">HDMI 3 <small>HDMI</small></div>
+    <div class="item">AV <small>AV</small></div>
+  </div>
+</div>
+<div class="ctl">
+  <button onclick="setPalette('night')">深海（夜）</button>
+  <button onclick="setPalette('dusk')">暮光</button>
+  <button onclick="setPalette('day')">晴空（日）</button>
+  <button onclick="setPalette('forest')">夜林</button>
+  <button onclick="document.body.classList.toggle('sheet-open')">側邊面板</button>
+  <button onclick="move(1)">焦點 →</button>
+</div>
+<script>
+  // ── 桌布產生器（之後原樣移植到 Kotlin）──
+  // 同色系、低飽和：每組只用一個主色相＋一個鄰近色，避免花俏
+  var PALETTES = {
+    night:  { base: ['#05081a', '#0b1330'], blobs: [['#2747d9', .10, .18, .55, .55], ['#3a2fb0', .88, .12, .45, .45], ['#0d6f8a', .70, .98, .60, .50]], ribbons: [['#1b3fbf', '#1590a8', .60, .80, .55], ['#2a2a8f', '#2a6fd6', .78, .95, .45]] },
+    dusk:   { base: ['#140b22', '#2a1430'], blobs: [['#c2502e', .15, .95, .55, .45], ['#6b2d9e', .85, .15, .45, .45], ['#d98a3a', .60, .70, .35, .30]], ribbons: [['#b5482f', '#7a2f8f', .62, .80, .55], ['#5a2a85', '#c27a3a', .80, .95, .45]] },
+    day:    { base: ['#2d5f9e', '#6fa3d6'], blobs: [['#cfe6ff', .82, .10, .45, .55], ['#3fb3b0', .10, .95, .55, .45], ['#5b8fe0', .30, .20, .45, .40]], ribbons: [['#2f9fb8', '#3b6fd0', .64, .82, .55], ['#9fd4ff', '#4a8be0', .80, .95, .45]] },
+    forest: { base: ['#03110d', '#08221b'], blobs: [['#0e7a5f', .18, .25, .55, .50], ['#1f4f9e', .88, .85, .50, .40], ['#3f8f4a', .62, .10, .40, .35]], ribbons: [['#0f8f70', '#1a5fae', .62, .80, .55], ['#2f8f5a', '#0f7f86', .80, .95, .45]] }
+  };
+  function hexa(hex, a) { var n = parseInt(hex.slice(1), 16); return 'rgba(' + (n >> 16) + ',' + (n >> 8 & 255) + ',' + (n & 255) + ',' + a + ')'; }
+  function paint(ctx, W, H, p) {
+    var g = ctx.createLinearGradient(0, 0, W * .3, H);
+    g.addColorStop(0, p.base[0]); g.addColorStop(1, p.base[1]);
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    p.blobs.forEach(function (b) {
+      var r = b[3] * W, x = b[1] * W, y = b[2] * H;
+      var rg = ctx.createRadialGradient(x, y, 0, x, y, r);
+      var a = b[4];
+      rg.addColorStop(0, hexa(b[0], a)); rg.addColorStop(.55, hexa(b[0], a * .35)); rg.addColorStop(1, hexa(b[0], 0));
+      ctx.fillStyle = rg; ctx.fillRect(0, 0, W, H);
+    });
+    // 銳利邊緣的流線色帶：讓玻璃後面「有東西可以被模糊」
+    p.ribbons.forEach(function (rb, i) {
+      var y0 = rb[2] * H, y1 = rb[3] * H;
+      var lg = ctx.createLinearGradient(0, 0, W, 0);
+      lg.addColorStop(0, hexa(rb[0], rb[4])); lg.addColorStop(1, hexa(rb[1], rb[4]));
+      ctx.fillStyle = lg;
+      ctx.beginPath();
+      ctx.moveTo(0, y0 + 30);
+      ctx.bezierCurveTo(W * .3, y0 - 70, W * .6, y0 + 90, W, y0 - 20 - i * 30);
+      ctx.lineTo(W, y1);
+      ctx.bezierCurveTo(W * .65, y1 + 40, W * .35, y1 - 60, 0, y1 + 10);
+      ctx.closePath();
+      ctx.fill();
+    });
+  }
+  var wall = document.getElementById('wall');
+  function setPalette(name) { paint(wall.getContext('2d'), 960, 540, PALETTES[name]); }
+  setPalette('night');
+
+  var APPS = [['YouTube', '#ff0033', '#fff'], ['Netflix', '#111', '#e50914'], ['Disney+', '#0b1f5c', '#fff'], ['MyVideo', '#ff6a00', '#fff'], ['KKTV', '#1b1b1b', '#ffcc00']];
+  var dock = document.getElementById('dock'), focusIdx = 0;
+  APPS.forEach(function (a, i) {
+    var t = document.createElement('div'); t.className = 'tile' + (i === 0 ? ' focus' : '');
+    t.style.background = a[1];
+    t.innerHTML = '<div class="bn" style="color:' + a[2] + '">' + a[0] + '</div>';
+    dock.appendChild(t);
+  });
+  function move(d) {
+    var tiles = dock.children; tiles[focusIdx].classList.remove('focus');
+    focusIdx = (focusIdx + d + tiles.length) % tiles.length; tiles[focusIdx].classList.add('focus');
+    var rect = tiles[focusIdx].offsetLeft + 36 + 75;
+    var label = document.getElementById('label'); label.textContent = APPS[focusIdx][0];
+    label.style.left = (rect - 480) * 2 + 'px';
+  }
+  addEventListener('keydown', function (e) { if (e.key === 'ArrowRight') move(1); if (e.key === 'ArrowLeft') move(-1); });
+  function fit() { var s = Math.min(innerWidth / 960, innerHeight / 540); document.getElementById('stage').style.transform = 'scale(' + s + ')'; }
+  addEventListener('resize', fit); fit();
+</script>
+</body>
+</html>

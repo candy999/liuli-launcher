@@ -35,7 +35,10 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // R8：Compose 官方強調未經 R8 最佳化的 Compose 會明顯變慢
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig = if (keystorePath != null) {
                 signingConfigs.getByName("release")
             } else {
@@ -67,8 +70,8 @@ dependencies {
     implementation("androidx.compose.animation:animation")
     implementation("androidx.activity:activity-compose:1.9.2")
     implementation("androidx.core:core-ktx:1.13.1")
-    // 網頁桌布：以虛擬 https 網域載入內建與 zip 桌布
-    implementation("androidx.webkit:webkit:1.11.0")
+    // 安裝時預先編譯 Compose 內建的基準設定檔，第一次操作就流暢
+    implementation("androidx.profileinstaller:profileinstaller:1.3.1")
     // 農民曆（MIT，離線演算）
     implementation("cn.6tail:lunar:1.7.4")
 }

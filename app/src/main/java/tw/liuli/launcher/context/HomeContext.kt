@@ -1,0 +1,129 @@
+package tw.liuli.launcher.context
+
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
+import kotlinx.coroutines.delay
+import java.time.LocalDate
+import java.time.LocalDateTime
+
+/**
+ * 主畫面的「情境」：時間、日夜、農民曆、節日、天氣、大約位置。
+ * 每分鐘更新一次（時鐘自己另外更新），農曆一天只算一次。
+ */
+data class HomeContext(
+    val now: LocalDateTime,
+    val lunar: LunarInfo,
+    val festivals: List<Festival>,
+    val weather: Weather?,
+    val city: City,
+    val online: Boolean,
+) {
+    val isDaylight: Boolean
+        get() {
+            val rise = weather?.sunrise?.toLocalTime()
+            val set = weather?.sunset?.toLocalTime()
+            val t = now.toLocalTime()
+            return if (rise != null && set != null) t >= rise && t < set else now.hour in 6..17
+        }
+
+    /** 0～1：日出到日落的進度；夜間為 -1。用來決定自動桌布配色。 */
+    val sunProgress: Double
+        get() {
+            val rise = weather?.sunrise ?: now.toLocalDate().atTime(6, 0)
+            val set = weather?.sunset ?: now.toLocalDate().atTime(18, 0)
+            val total = java.time.Duration.between(rise, set).seconds.toDouble()
+            val passed = java.time.Duration.between(rise, now).seconds.toDouble()
+            return if (passed < 0 || passed > total || total <= 0) -1.0 else passed / total
+        }
+
+    val period: String
+        get() = when (now.hour) {
+            in 0..3 -> "midnight"
+            in 4..5 -> "dawn"
+            in 6..10 -> "morning"
+            in 11..12 -> "noon"
+            in 13..16 -> "afternoon"
+            in 17..18 -> "dusk"
+            else -> "night"
+        }
+
+    /** 主畫面卡片用：今天最值得提的一件事。 */
+    val highlight: String?
+        get() = when {
+            festivals.isNotEmpty() -> festivals.joinToString("・") { it.name }
+            lunar.isBaiBai -> "今日${if (lunar.day == 1) "初一" else "十五"}・拜拜"
+            lunar.solarTerm != null -> "今日${lunar.solarTerm}"
+            else -> null
+        }
+}
+
+/**
+ * 每分鐘更新時間與農曆、每 30 分鐘更新天氣（失敗時 5 分鐘後重試，沿用上次資料）。
+ */
+@Composable
+fun rememberHomeContext(city: City): State<HomeContext> {
+    val context = LocalContext.current
+    var weather by remember(city) { mutableStateOf<Weather?>(null) }
+
+    LaunchedEffect(city) {
+        while (true) {
+            val fresh = WeatherRepository.fetch(city)
+            if (fresh != null) weather = fresh
+            delay(if (fresh != null) 30 * 60_000L else 5 * 60_000L)
+        }
+    }
+
+    // 農曆一天算一次就好（不是 Compose state，避免在組合期間寫入狀態）
+    val cache = remember { LunarCache() }
+    fun lunarFor(date: LocalDate): Pair<LunarInfo, List<Festival>> = cache.get(date)
+
+    return produceState(
+        initialValue = build(LocalDateTime.now(), city, weather, isOnline(context), ::lunarFor),
+        city, weather,
+    ) {
+        while (true) {
+            value = build(LocalDateTime.now(), city, weather, isOnline(context), ::lunarFor)
+            val nowMs = System.currentTimeMillis()
+            delay(60_000L - nowMs % 60_000L + 50)
+        }
+    }
+}
+
+private class LunarCache {
+    private var date: LocalDate? = null
+    private var value: Pair<LunarInfo, List<Festival>>? = null
+
+    fun get(d: LocalDate): Pair<LunarInfo, List<Festival>> {
+        val cached = value
+        if (cached != null && d == date) return cached
+        val info = LunarCalc.of(d)
+        return (info to Festivals.of(d, info)).also { date = d; value = it }
+    }
+}
+
+private fun build(
+    now: LocalDateTime,
+    city: City,
+    weather: Weather?,
+    online: Boolean,
+    lunarFor: (LocalDate) -> Pair<LunarInfo, List<Festival>>,
+): HomeContext {
+    val (lunar, festivals) = lunarFor(now.toLocalDate())
+    return HomeContext(now, lunar, festivals, weather, city, online)
+}
+
+private fun isOnline(context: Context): Boolean {
+    val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return false
+    val caps = cm.getNetworkCapabilities(cm.activeNetwork) ?: return false
+    return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+}
