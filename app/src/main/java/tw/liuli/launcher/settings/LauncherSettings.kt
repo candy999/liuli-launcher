@@ -21,10 +21,10 @@ class LauncherSettings(context: Context) {
     var cityId by mutableStateOf(prefs.getString("city", "taipei") ?: "taipei")
         private set
 
-    /** 畫面黑框：粗細、內側圓角半徑、往內漸變範圍（dp；粗細與漸變都是 0＝關閉）。 */
+    /** 畫面黑框：粗細、內側圓角半徑、往內漸變範圍（dp；三個都是 0＝關閉；粗細 0＝不內縮只有圓角）。 */
     var frameThickness by mutableIntStateOf(prefs.getInt("frame_thickness", 0))
         private set
-    var frameRadius by mutableIntStateOf(prefs.getInt("frame_radius", 32))
+    var frameRadius by mutableIntStateOf(prefs.getInt("frame_radius", 0))
         private set
     var frameFeather by mutableIntStateOf(prefs.getInt("frame_feather", 0))
         private set

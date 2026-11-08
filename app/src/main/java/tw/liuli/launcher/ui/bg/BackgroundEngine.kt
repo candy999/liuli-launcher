@@ -25,6 +25,7 @@ import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.exp
 import kotlin.math.floor
+import kotlin.math.ln
 import kotlin.math.max
 import kotlin.math.min
 
@@ -135,8 +136,10 @@ class BackgroundEngine {
 
     /** 每種樣式各自學到的背景更新率檔位（樣式之間的繪圖成本差很多），索引對應 [QUALITY_MS]。 */
     private val learnedQ = IntArray(BgStyle.entries.size) { DEFAULT_Q }
-    /** 降過檔的樣式要再經過幾次轉場才允許試著升檔。 */
-    private val cooldown = IntArray(BgStyle.entries.size)
+    /** 升檔退避：降檔後要等這麼久才允許再試著升檔；試探失敗就加倍。 */
+    private var upBackoff = BASE_BACKOFF_MS
+    private var upBlockedUntil = 0L
+    private var lastUpgradeAt = 0L
     @Volatile private var yieldUntil = 0L
     private var glassDirty = false
     /** 目前播放速度（1＝正常；GPU 跟不上時 <1）。 */
@@ -228,12 +231,13 @@ class BackgroundEngine {
     /**
      * 由 LaunchedEffect 執行：被喚醒後推進背景，追上目標就停。
      *
-     * 排程原則（UI 順暢優先，背景固定原生 1080p）：
+     * 排程原則（UI 順暢優先）：
      * 1. 讓路：按鍵後 [YIELD_MS] 內不更新背景，之後以較慢速度緩緩接回。
-     * 2. 背景更新率依時間排程（30／20／15fps），依樣式學習；量到主執行緒被 GPU 拖慢就降一檔，
-     *    降過的樣式要隔幾次轉場、且連續夠快才會再試著升回去，避免忽快忽慢。
-     * 3. 播放速度平滑：每格最多推進 [MAX_STEP_MS]（低於 15fps 時自然變慢）；
-     *    速度要變慢可以立刻變，要變快則用 [TAU_SPEED] 慢慢加速，不會因為效能突然變好而突然變快。
+     * 2. 畫質階梯（解析度 ÷1～÷5 ＋ 更新率）在轉場中雙向調整：
+     *    連續兩個量測窗都慢（或一次非常慢）才降一檔；連續兩個窗都夠快就升一檔。
+     *    升檔後馬上又變慢＝試探失敗，下次要等更久（退避時間加倍），避免忽高忽低。
+     * 3. 提前對焦：依剩餘動畫時間估算，在停止前就逐檔升解析度，剛好在停下時回到原生解析度。
+     * 4. 播放速度平滑：每格最多推進 [MAX_STEP_MS]；變慢立即、變快緩慢。
      */
     suspend fun run() {
         var pending = false
@@ -244,7 +248,6 @@ class BackgroundEngine {
             speed = 1f
             moving = true
             val styleIdx = style.ordinal
-            if (cooldown[styleIdx] > 0) cooldown[styleIdx]--
             var q = learnedQ[styleIdx]
             var interval = QUALITY_MS[q]
             val forced = debugDiv in 1..MAX_DIV
@@ -260,6 +263,9 @@ class BackgroundEngine {
             var winSum = 0f
             var winN = 0
             var fastWins = 0
+            var slowWins = 0
+            var ramping = false
+            var nextRampT = 0L
             while (!done) {
                 withFrameMillis<Unit> { t ->
                     if (prevT != 0L) {
@@ -284,27 +290,57 @@ class BackgroundEngine {
                     if (done) snapToTarget()
                     st.nowMs = t
                     st.record(t)
+
+                    // 提前對焦：剩餘時間只夠「每 RAMP_STEP_MS 升一檔」升回原生時，就開始逐檔升
+                    if (!forced && !done && renderDiv > 1) {
+                        if (!ramping) {
+                            val rem = max(remainingMs() / max(speed, 0.2f), (holdUntil - t).toFloat())
+                            if (rem < (renderDiv - 1) * RAMP_STEP_MS + RAMP_LEAD_MS) {
+                                ramping = true
+                                nextRampT = t
+                                Log.i(TAG, "${style.id} early sharpen: ${rem.toInt()}ms left, from div $renderDiv")
+                            }
+                        }
+                        if (ramping && t >= nextRampT) {
+                            renderDiv--
+                            nextRampT = t + RAMP_STEP_MS
+                        }
+                    }
+
                     // 玻璃（畫小張背景＋高斯模糊）在背景執行緒做，主執行緒只送出要求；忙的話自動合併成一次
                     if (done || bgTicks++ % 2 == 0) requestGlass()
                     if (glassDirty) { glassDirty = false; glassVersion++ }
                     frame++
                 }
-                if (!forced && winN >= ADAPT_WINDOW) {
+                if (!forced && !ramping && winN >= ADAPT_WINDOW) {
                     // 主執行緒每格的平均間隔：GPU 跟不上時繪製佇列塞滿，主執行緒會被拖慢
                     val avg = winSum / winN
                     winSum = 0f; winN = 0
+                    val now = android.os.SystemClock.uptimeMillis()
                     var nq = q
-                    if (avg > SLOW_MS && q < QUALITY_MS.lastIndex) {
-                        nq = q + 1
-                        cooldown[styleIdx] = UPGRADE_COOLDOWN
-                        fastWins = 0
-                    } else if (avg < FAST_MS && q > 0 && cooldown[styleIdx] == 0) {
-                        if (++fastWins >= 3) { nq = q - 1; fastWins = 0 }
-                    } else {
-                        fastWins = 0
+                    when {
+                        avg > SLOW_MS -> {
+                            fastWins = 0
+                            if (++slowWins >= 2 || avg > VERY_SLOW_MS) {
+                                slowWins = 0
+                                if (q < QUALITY_MS.lastIndex) nq = q + 1
+                                // 剛升檔就變慢＝試探失敗：退避時間加倍
+                                upBackoff = if (now - lastUpgradeAt < 1500) min(upBackoff * 2, MAX_BACKOFF_MS) else BASE_BACKOFF_MS
+                                upBlockedUntil = now + upBackoff
+                            }
+                        }
+                        avg < FAST_MS -> {
+                            slowWins = 0
+                            if (++fastWins >= 2 && q > 0 && now >= upBlockedUntil) {
+                                fastWins = 0
+                                nq = q - 1
+                                lastUpgradeAt = now
+                            }
+                        }
+                        else -> { fastWins = 0; slowWins = 0 }
                     }
                     if (nq != q) {
-                        Log.i(TAG, "${style.id} ÷${QUALITY_DIV[q]}@${"%.0f".format(1000f / QUALITY_MS[q])}fps → ÷${QUALITY_DIV[nq]}@${"%.0f".format(1000f / QUALITY_MS[nq])}fps avg=${"%.1f".format(avg)}ms")
+                        Log.i(TAG, "${style.id} q $q -> $nq (div ${QUALITY_DIV[nq]}, ${(1000f / QUALITY_MS[nq]).toInt()}fps) avg=${avg.toInt()}ms")
                         q = nq
                         learnedQ[styleIdx] = q
                         interval = QUALITY_MS[q]
@@ -316,15 +352,29 @@ class BackgroundEngine {
             moving = false
             if (glassDirty) { glassDirty = false; glassVersion++ }
             frame++
-            // 靜止後慢慢拉回原生解析度：一次升一檔（÷4→÷3→÷2→÷1），不會一下子變清楚。
-            // 新的焦點變化一來就中斷，直接開始下一段轉場。
+            // 還沒回到原生解析度（例如轉場很短）：靜止後繼續逐檔升。新的焦點變化一來就中斷。
             while (renderDiv > 1) {
-                delay(RECOVER_STEP_MS)
+                delay(RAMP_STEP_MS)
                 if (wake.tryReceive().isSuccess) { pending = true; break }
                 renderDiv--
                 frame++
             }
         }
+    }
+
+    /**
+     * 估計動畫還要多久停（毫秒）：各通道以指數收斂估「降到停止門檻」所需時間，取最大。
+     * 兩級 RC 的尾巴大約以 TAU2 收斂，中間級的差距也算進去。
+     */
+    private fun remainingMs(): Float {
+        fun tail(res: Float, thr: Float, tau: Float) = if (res <= thr) 0f else tau * ln(res / thr)
+        val hue = abs(hueDelta(st.h, tH)) + abs(hueDelta(mH, tH))
+        val pos = max(abs(tFx - st.fx) + abs(tFx - mFx), abs(tFy - st.fy) + abs(tFy - mFy))
+        val sat = abs(tS - st.s) + abs(tS - mS)
+        return maxOf(
+            maxOf(tail(hue, 1f, TAU2), tail(pos, 0.003f, TAU2), tail(sat, 0.006f, TAU2)),
+            maxOf(tail(charge, 0.02f, TAU_PULSE_OUT), tail(abs(rippleTarget - st.ripple), 0.02f, TAU_RIPPLE)),
+        )
     }
 
     private fun step(t: Long): Boolean {
@@ -421,18 +471,23 @@ class BackgroundEngine {
         private val QUALITY_MS = floatArrayOf(33.3f, 33.3f, 33.3f, 33.3f, 33.3f, 50f, 66.7f)
         /** AOC 電視實測：÷2 的背景一幀 GPU 約 18ms，可以穩定 30fps。 */
         private const val DEFAULT_Q = 1
-        /** 靜止後每隔多久升一檔解析度。 */
-        private const val RECOVER_STEP_MS = 220L
-        private const val UPGRADE_COOLDOWN = 4
+        /** 提前對焦／靜止後：每隔多久升一檔解析度。 */
+        private const val RAMP_STEP_MS = 200L
+        /** 提前對焦多留一點時間，讓最後一檔在停下之前就到位。 */
+        private const val RAMP_LEAD_MS = 150L
+        private const val BASE_BACKOFF_MS = 800L
+        private const val MAX_BACKOFF_MS = 6000L
         /** 每一格背景最多推進的動畫時間（1/15 秒）。 */
         private const val MAX_STEP_MS = 66.7f
         /** 播放速度回升的時間常數（越大越慢）。 */
         private const val TAU_SPEED = 800f
         /** 按鍵後背景讓路的時間。 */
         private const val YIELD_MS = 320L
-        private const val ADAPT_WINDOW = 10
+        private const val ADAPT_WINDOW = 8
         /** 主執行緒平均每格超過 22ms＝GPU 跟不上 → 降檔；低於 17.5ms 連續三次（且過了冷卻期）才升檔。 */
         private const val SLOW_MS = 22f
+        /** 一個窗平均超過這個值（約 30fps 以下）就直接降，不等第二個窗。 */
+        private const val VERY_SLOW_MS = 30f
         private const val FAST_MS = 17.5f
 
         private fun rc(tau: Float, dt: Float) = 1f - exp(-dt / tau)

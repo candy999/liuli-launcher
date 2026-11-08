@@ -30,7 +30,7 @@ import kotlin.math.sqrt
  */
 @Composable
 fun FrameOverlay(thicknessDp: Int, radiusDp: Int, featherDp: Int, modifier: Modifier = Modifier) {
-    if (thicknessDp <= 0 && featherDp <= 0) return
+    if (thicknessDp <= 0 && featherDp <= 0 && radiusDp <= 0) return
     val density = LocalDensity.current.density
     BoxWithConstraints(modifier.fillMaxSize()) {
         val w = constraints.maxWidth

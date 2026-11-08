@@ -291,9 +291,9 @@ fun HomeScreen(
     }
 
     fun frameSheet() {
-        fun dp(v: Int) = if (v == 0) "關" else "$v dp"
+        fun dp(v: Int) = "$v dp"
         open(SheetSpec(
-            "邊框", "左右鍵調整，即時預覽。黑框蓋在背景與捲動列上，不會遮住時鐘、天氣等固定介面。",
+            "邊框", "左右鍵調整，即時預覽。粗細 0 dp＝不內縮、只有圓角。黑框蓋在背景與捲動列上，不會遮住時鐘、天氣等固定介面。",
             listOf(
                 SheetItem("黑框粗細", liveDetail = { dp(settings.frameThickness) },
                     onAdjust = { d -> settings.updateFrame(thickness = (settings.frameThickness + d * 4).coerceIn(0, 120)) }) { close() },
@@ -301,7 +301,7 @@ fun HomeScreen(
                     onAdjust = { d -> settings.updateFrame(radius = (settings.frameRadius + d * 4).coerceIn(0, 200)) }) { close() },
                 SheetItem("漸變範圍", liveDetail = { dp(settings.frameFeather) },
                     onAdjust = { d -> settings.updateFrame(feather = (settings.frameFeather + d * 4).coerceIn(0, 240)) }) { close() },
-                SheetItem("全部關閉") { settings.updateFrame(thickness = 0, feather = 0); close() },
+                SheetItem("全部關閉") { settings.updateFrame(thickness = 0, radius = 0, feather = 0); close() },
             ),
         ), gearReq)
     }
@@ -437,7 +437,7 @@ fun HomeScreen(
                     settings.updateBgFollow(on); engine.applyFollow(on); close()
                     toast("背景色系：" + if (on) "跟隨焦點" else "固定深藍")
                 },
-                SheetItem("邊框", if (settings.frameThickness == 0 && settings.frameFeather == 0) "關" else "粗 ${settings.frameThickness}・圓 ${settings.frameRadius}・漸 ${settings.frameFeather}") { frameSheet() },
+                SheetItem("邊框", if (settings.frameThickness == 0 && settings.frameFeather == 0 && settings.frameRadius == 0) "關" else "粗 ${settings.frameThickness}・圓 ${settings.frameRadius}・漸 ${settings.frameFeather}") { frameSheet() },
                 SheetItem("顯示／隱藏 App", if (hidden.isEmpty()) null else "已隱藏 ${hidden.size} 個") { visibilitySheet(0) },
                 SheetItem("遙控器按鍵", "改綁、防誤入原廠主畫面") { keysSheet() },
                 SheetItem("系統設定") { close(); SystemActions.systemSettings(context) },
@@ -540,6 +540,14 @@ fun HomeScreen(
                     }
                     itemsIndexed(dockApps, key = { _, a -> a.packageName }) { i, app ->
                         val req = if (i == 0) firstDock else dockRequesters.getOrPut(app.packageName) { FocusRequester() }
+                        // 移動中：被抓住的圖塊整塊（含陰影）往上浮，其他圖塊變淡
+                        Box(
+                            Modifier.graphicsLayer {
+                                val mp = movingPkg
+                                translationY = if (mp == app.packageName) -14.dp.toPx() else 0f
+                                alpha = if (mp != null && mp != app.packageName) 0.55f else 1f
+                            },
+                        ) {
                         AppTile(
                             app = app,
                             width = 150.dp,
@@ -559,13 +567,9 @@ fun HomeScreen(
                                     // 列捲動或移動位置後，名稱跟著焦點圖塊的實際位置走
                                     if (app.packageName == lastDockPkg) labelX = cx
                                 }
-                                .graphicsLayer {
-                                    val mp = movingPkg
-                                    translationY = if (mp == app.packageName) -14.dp.toPx() else 0f
-                                    alpha = if (mp != null && mp != app.packageName) 0.55f else 1f
-                                }
                                 .bgTarget(app.themeColor),
                         )
+                        }
                     }
                 }
 
