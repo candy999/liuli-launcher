@@ -204,12 +204,25 @@ fun WeatherGroup(home: HomeContext, requester: FocusRequester, onClick: () -> Un
 /** 設定按鈕：平常是一個圖示，焦點時變成亮白圓鈕。 */
 @Composable
 fun GearButton(requester: FocusRequester, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    RoundIconButton(LIcons.Settings, BgColors.GEAR, requester, onClick, modifier)
+}
+
+/** 右上角圓形圖示按鈕：平常是圖示，焦點時變亮白圓鈕。 */
+@Composable
+fun RoundIconButton(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    color: Int,
+    requester: FocusRequester?,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    tint: Color = Color.White.copy(alpha = 0.85f),
+) {
     val focus = rememberFocusAnim()
     Box(
         modifier
             .size(44.dp)
             .focusScale(focus, 1.15f)
-            .bgTarget(BgColors.GEAR)
+            .bgTarget(color)
             .focusTarget(focus, requester, onClick = onClick)
             .drawBehind {
                 val v = focus.value()
@@ -217,8 +230,20 @@ fun GearButton(requester: FocusRequester, onClick: () -> Unit, modifier: Modifie
             },
         contentAlignment = Alignment.Center,
     ) {
-        LIcon(LIcons.Settings, 22.dp, if (focus.focused) Ink.OnLight else Color.White.copy(alpha = 0.85f))
+        LIcon(icon, 22.dp, if (focus.focused) Ink.OnLight else tint)
     }
+}
+
+/** 網路狀態按鈕：顯示無線／有線／斷線，按下開啟網路設定。 */
+@Composable
+fun NetworkButton(status: tw.liuli.launcher.context.NetworkStatus, requester: FocusRequester?, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val icon = when (status) {
+        tw.liuli.launcher.context.NetworkStatus.WIFI -> LIcons.Wifi
+        tw.liuli.launcher.context.NetworkStatus.ETHERNET -> LIcons.Ethernet
+        tw.liuli.launcher.context.NetworkStatus.NONE -> LIcons.NoNet
+    }
+    val tint = if (status == tw.liuli.launcher.context.NetworkStatus.NONE) Ink.Tertiary else Color.White.copy(alpha = 0.85f)
+    RoundIconButton(icon, BgColors.GEAR, requester, onClick, modifier, tint)
 }
 
 /** 訊號源一列玻璃膠囊（電視機才有）。 */
@@ -278,6 +303,8 @@ private fun InputChip(src: TvSource, requester: FocusRequester?, onClick: () -> 
 @Composable
 fun AppDrawer(
     apps: List<AppEntry>,
+    /** 選單開在抽屜上面時為 true：抽屜整層暫停可聚焦，讓焦點落到選單。 */
+    sheetOpen: Boolean,
     onClose: () -> Unit,
     onLaunch: (AppEntry) -> Unit,
     onLongClick: (AppEntry, FocusRequester) -> Unit,
@@ -305,7 +332,10 @@ fun AppDrawer(
                         onClose(); true
                     } else false
                 }
-                .focusProperties { exit = { FocusRequester.Cancel } }
+                .focusProperties {
+                    exit = { FocusRequester.Cancel }
+                    canFocus = !sheetOpen
+                }
                 .focusGroup(),
         ) {
             Row(verticalAlignment = Alignment.Bottom) {

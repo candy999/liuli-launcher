@@ -20,14 +20,18 @@ import java.time.LocalDateTime
  * 主畫面的「情境」：時間、日夜、農民曆、節日、天氣、大約位置。
  * 每分鐘更新一次（時鐘自己另外更新），農曆一天只算一次。
  */
+/** 網路狀態。 */
+enum class NetworkStatus { WIFI, ETHERNET, NONE }
+
 data class HomeContext(
     val now: LocalDateTime,
     val lunar: LunarInfo,
     val festivals: List<Festival>,
     val weather: Weather?,
     val city: City,
-    val online: Boolean,
+    val network: NetworkStatus,
 ) {
+    val online: Boolean get() = network != NetworkStatus.NONE
     val isDaylight: Boolean
         get() {
             val rise = weather?.sunrise?.toLocalTime()
@@ -88,11 +92,11 @@ fun rememberHomeContext(city: City): State<HomeContext> {
     fun lunarFor(date: LocalDate): Pair<LunarInfo, List<Festival>> = cache.get(date)
 
     return produceState(
-        initialValue = build(LocalDateTime.now(), city, weather, isOnline(context), ::lunarFor),
+        initialValue = build(LocalDateTime.now(), city, weather, networkOf(context), ::lunarFor),
         city, weather,
     ) {
         while (true) {
-            value = build(LocalDateTime.now(), city, weather, isOnline(context), ::lunarFor)
+            value = build(LocalDateTime.now(), city, weather, networkOf(context), ::lunarFor)
             val nowMs = System.currentTimeMillis()
             delay(60_000L - nowMs % 60_000L + 50)
         }
@@ -115,15 +119,20 @@ private fun build(
     now: LocalDateTime,
     city: City,
     weather: Weather?,
-    online: Boolean,
+    network: NetworkStatus,
     lunarFor: (LocalDate) -> Pair<LunarInfo, List<Festival>>,
 ): HomeContext {
     val (lunar, festivals) = lunarFor(now.toLocalDate())
-    return HomeContext(now, lunar, festivals, weather, city, online)
+    return HomeContext(now, lunar, festivals, weather, city, network)
 }
 
-private fun isOnline(context: Context): Boolean {
-    val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return false
-    val caps = cm.getNetworkCapabilities(cm.activeNetwork) ?: return false
-    return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+private fun networkOf(context: Context): NetworkStatus {
+    val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return NetworkStatus.NONE
+    val caps = cm.getNetworkCapabilities(cm.activeNetwork) ?: return NetworkStatus.NONE
+    if (!caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) return NetworkStatus.NONE
+    return when {
+        caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> NetworkStatus.ETHERNET
+        caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> NetworkStatus.WIFI
+        else -> NetworkStatus.WIFI // 其他（如 USB 網卡）當作有連線
+    }
 }

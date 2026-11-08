@@ -44,6 +44,9 @@ object LIcons {
     val ChevronRight = line("M9.5 6l6 6-6 6")
     val ChevronUp = line("M6 14.5l6-6 6 6")
     val Hdmi = line("M3 9h18v4l-3 3H6l-3-3z", "M8 12h8")
+    val Wifi = line("M5 12.5a10 10 0 0 1 14 0", "M8 15.5a6 6 0 0 1 8 0", "M11 18.5a2 2 0 0 1 2 0", "M12 21h.01")
+    val Ethernet = line("M7 7h10a1 1 0 0 1 1 1v3H6V8a1 1 0 0 1 1-1z", "M4 11h16v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z", "M8 11v2M12 11v2M16 11v2")
+    val NoNet = line("M5 12.5a10 10 0 0 1 11.5-1.8", "M8 15.5a6 6 0 0 1 4.5-1.4", "M12 21h.01", "M4 4l16 16")
 
     val Sun = line(
         "M16 12a4 4 0 1 1-8 0a4 4 0 1 1 8 0z",

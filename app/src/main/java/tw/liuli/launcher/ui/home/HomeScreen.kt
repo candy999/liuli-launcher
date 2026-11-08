@@ -459,8 +459,16 @@ fun HomeScreen(
                     },
             ) {
                 TodayGroup(home, todayReq, openCalendar, Modifier.padding(start = 28.dp, top = 22.dp))
-                WeatherGroup(home, weatherReq, openWeather, Modifier.align(Alignment.TopEnd).padding(end = 92.dp, top = 30.dp))
-                GearButton(gearReq, ::openSettings, Modifier.align(Alignment.TopEnd).padding(end = 30.dp, top = 40.dp))
+                WeatherGroup(home, weatherReq, openWeather, Modifier.align(Alignment.TopEnd).padding(end = 96.dp, top = 30.dp))
+                // 右上角：網路狀態 + 設定，直向疊放
+                Column(
+                    Modifier.align(Alignment.TopEnd).padding(end = 28.dp, top = 34.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    NetworkButton(home.network, null, { SystemActions.networkSettings(context) })
+                    GearButton(gearReq, ::openSettings)
+                }
 
                 if (sources.isNotEmpty()) {
                     InputsRow(
@@ -546,6 +554,7 @@ fun HomeScreen(
             if (drawerOpen) {
                 AppDrawer(
                     apps = visibleApps,
+                    sheetOpen = sheet != null,
                     onClose = ::closeDrawer,
                     onLaunch = ::launchApp,
                     onLongClick = { app, fr -> appSheet(app, fr) },
