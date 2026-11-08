@@ -128,7 +128,7 @@ fun LiuliApp(lensing: Boolean, homePresses: Int, externalAction: Pair<Int, Strin
         val wPx = with(density) { maxWidth.toPx() }
         val hPx = with(density) { maxHeight.toPx() }
         val link = remember(engine, scope, wPx, hPx) { BgLink(engine, scope, { Size(wPx, hPx) }, { lastDir }) }
-        val backdrop = remember(wPx, hPx, lensing) { GlassBackdrop(engine.glass, { engine.frame }, Size(wPx, hPx), lensing) }
+        val backdrop = remember(wPx, hPx, lensing) { GlassBackdrop(engine.glass, { engine.glassVersion }, Size(wPx, hPx), lensing) }
 
         LaunchedEffect(screen) {
             when (screen) {

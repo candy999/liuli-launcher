@@ -29,6 +29,7 @@ import kotlin.math.roundToInt
 @Composable
 fun BackgroundLayer(engine: BackgroundEngine, blurred: () -> Float, modifier: Modifier = Modifier) {
     LaunchedEffect(engine) { engine.run() }
+    LaunchedEffect(engine) { engine.runGlass() }
     BoxWithConstraints(modifier.fillMaxSize(), contentAlignment = Alignment.TopStart) {
         // 解析度由引擎依實測幀時間決定（1/8 一檔）；靜止時逐檔升回原生解析度
         val renderScale = engine.renderLevel / BackgroundEngine.FULL_LEVEL.toFloat()
@@ -49,6 +50,7 @@ fun BackgroundLayer(engine: BackgroundEngine, blurred: () -> Float, modifier: Mo
                 }
                 val b = blurred()
                 if (b > 0.001f) {
+                    @Suppress("UNUSED_VARIABLE") val gv = engine.glassVersion // 模糊桌布跟著玻璃圖更新
                     drawImage(engine.glass, dstSize = IntSize(size.width.roundToInt(), size.height.roundToInt()), alpha = b)
                     drawRect(Color.Black, alpha = 0.4f * b)
                 }

@@ -16,6 +16,8 @@ import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.LayoutDirection
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
@@ -87,6 +89,13 @@ class BgState {
         out[0] = hh[oldest]; out[1] = hs[oldest]
     }
 
+    /** 整份複製（給背景執行緒畫玻璃用的快照，避免畫到一半被主執行緒改掉）。 */
+    fun copyFrom(o: BgState) {
+        h = o.h; s = o.s; fx = o.fx; fy = o.fy; pulse = o.pulse; dir = o.dir; ripple = o.ripple; nowMs = o.nowMs
+        o.ht.copyInto(ht); o.hh.copyInto(hh); o.hs.copyInto(hs)
+        count = o.count; head = o.head
+    }
+
     private companion object {
         const val HISTORY = 256
     }
@@ -125,13 +134,23 @@ class BackgroundEngine {
     /** 每種樣式各自學到的畫質檔位（樣式之間的繪圖成本差很多），索引對應 [QUALITY]。 */
     private val learnedQ = IntArray(BgStyle.entries.size) { DEFAULT_Q }
 
-    /** 給玻璃取樣的小張背景（240×135，放大後就是模糊效果）。 */
+    /** 給玻璃取樣的小張背景（240×135，已模糊＋過曝）。只在主執行緒寫入。 */
     val glass: ImageBitmap = ImageBitmap(GLASS_W, GLASS_H)
-    private val glassScope = CanvasDrawScope()
-    private val glassCanvas = Canvas(glass)
     private val glassBitmap = glass.asAndroidBitmap()
+
+    /** [glass] 每更新一次加一；玻璃面板與模糊桌布在繪製階段讀它。 */
+    var glassVersion by mutableLongStateOf(0L)
+        private set
+
+    // ── 背景執行緒專用：把樣式畫到這張小圖、模糊，結果放在 px ──
+    private val workImage = ImageBitmap(GLASS_W, GLASS_H)
+    private val workScope = CanvasDrawScope()
+    private val workCanvas = Canvas(workImage)
+    private val workBitmap = workImage.asAndroidBitmap()
+    private val workState = BgState()
     private val px = IntArray(GLASS_W * GLASS_H)
     private val tmp = IntArray(GLASS_W * GLASS_H)
+    private val glassReq = Channel<Unit>(Channel.CONFLATED)
 
     private var tH = 228f; private var tS = 0.5f; private var tFx = 0.2f; private var tFy = 0.7f
     private var mH = 228f; private var mS = 0.5f; private var mFx = 0.2f; private var mFy = 0.7f
@@ -173,7 +192,7 @@ class BackgroundEngine {
             }
             tFx = fx; mFx = fx; st.fx = fx
             tFy = fy; mFy = fy; st.fy = fy
-            renderGlass()
+            requestGlass()
             frame++
             return
         }
@@ -236,8 +255,8 @@ class BackgroundEngine {
                     if (done) snapToTarget()
                     st.nowMs = t
                     st.record(t)
-                    // 玻璃的高斯模糊在 CPU 上做：背景每更新 2 次才重算一次，停下時再算一次
-                    if (done || bgTicks++ % 2 == 0) renderGlass()
+                    // 玻璃（畫小張背景＋高斯模糊）在背景執行緒做，主執行緒只送出要求；忙的話自動合併成一次
+                    if (done || bgTicks++ % 2 == 0) requestGlass()
                     frame++
                 }
                 if (winN >= ADAPT_WINDOW) {
@@ -303,23 +322,37 @@ class BackgroundEngine {
         charge = 0f; st.pulse = 0f; st.ripple = rippleTarget; st.dir = dirT
     }
 
+    /** 把目前狀態送給玻璃執行緒（只做快照排隊，主執行緒幾乎不花時間）。 */
+    private fun requestGlass() {
+        glassReq.trySend(Unit)
+    }
+
     /**
-     * 給玻璃的背景：畫到 240×135，再做「三次盒狀模糊」（近似高斯）＋過曝＋提高飽和度。
-     * 真的模糊過的小圖放大後是平滑漸變，不會有雙線性放大的色塊。全程在 CPU 上約 1～2ms。
+     * 玻璃更新迴圈（由 LaunchedEffect 在主執行緒啟動）。
+     * 在主執行緒拍快照 → 背景執行緒畫 240×135 小圖＋三次盒狀模糊（≈高斯）＋過曝 → 回主執行緒寫進 [glass]。
+     * 電視 CPU 上這一套約 30～40ms，以前放在主執行緒會讓每次背景更新都卡一格；現在 UI 完全不等它。
      */
-    private fun renderGlass() {
-        glassScope.draw(Density(1f), LayoutDirection.Ltr, glassCanvas, Size(GLASS_W.toFloat(), GLASS_H.toFloat())) {
-            scale(GLASS_W / LOGICAL_W, GLASS_H / LOGICAL_H, pivot = androidx.compose.ui.geometry.Offset.Zero) {
-                drawStyle(style, st)
+    suspend fun runGlass() {
+        while (true) {
+            glassReq.receive()
+            workState.copyFrom(st)
+            val s = style
+            withContext(Dispatchers.Default) {
+                workScope.draw(Density(1f), LayoutDirection.Ltr, workCanvas, Size(GLASS_W.toFloat(), GLASS_H.toFloat())) {
+                    scale(GLASS_W / LOGICAL_W, GLASS_H / LOGICAL_H, pivot = androidx.compose.ui.geometry.Offset.Zero) {
+                        drawStyle(s, workState)
+                    }
+                }
+                workBitmap.getPixels(px, 0, GLASS_W, 0, 0, GLASS_W, GLASS_H)
+                repeat(3) {
+                    boxBlurH(px, tmp, GLASS_W, GLASS_H, BLUR_R)
+                    boxBlurV(tmp, px, GLASS_W, GLASS_H, BLUR_R)
+                }
+                expose(px)
             }
+            glassBitmap.setPixels(px, 0, GLASS_W, 0, 0, GLASS_W, GLASS_H)
+            glassVersion++
         }
-        glassBitmap.getPixels(px, 0, GLASS_W, 0, 0, GLASS_W, GLASS_H)
-        repeat(3) {
-            boxBlurH(px, tmp, GLASS_W, GLASS_H, BLUR_R)
-            boxBlurV(tmp, px, GLASS_W, GLASS_H, BLUR_R)
-        }
-        expose(px)
-        glassBitmap.setPixels(px, 0, GLASS_W, 0, 0, GLASS_W, GLASS_H)
     }
 
     companion object {

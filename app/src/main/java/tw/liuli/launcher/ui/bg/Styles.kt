@@ -33,6 +33,20 @@ private const val W = 480f
 private const val H = 270f
 private val FULL = Size(W, H)
 
+/**
+ * 繪圖用的暫存物件（Path、三角網格頂點、取樣陣列）。每條執行緒各一份：
+ * 主執行緒畫全螢幕背景的同時，背景執行緒也在畫給玻璃用的小張背景，共用同一份會互相覆蓋。
+ */
+private class Scratch {
+    val path = Path()
+    val mesh = buildMesh()
+    val sampleA = FloatArray(2)
+    val sampleB = FloatArray(2)
+    val field = FloatArray(CNX * CNY)
+}
+
+private val scratch: ThreadLocal<Scratch> = ThreadLocal.withInitial { Scratch() }
+
 private fun hsl(h: Float, s: Float, l: Float, a: Float = 1f): Color =
     Color.hsl(((h % 360f) + 360f) % 360f, s.coerceIn(0f, 1f), l.coerceIn(0f, 1f), a.coerceIn(0f, 1f))
 
@@ -77,7 +91,7 @@ private fun DrawScope.focusGlow(st: BgState, r: Float, a: Float) {
     drawRect(Brush.radialGradient(listOf(st.c(0f, .9f, .5f, a), st.c(0f, .9f, .5f, 0f)), center = c, radius = r), size = FULL)
 }
 
-private val path = Path()
+private val path: Path get() = scratch.get()!!.path
 
 // ───────────── 1. 流線浪潮 ─────────────
 
@@ -137,7 +151,7 @@ private class MeshPoint(val x: Float, val y: Float, val z: Float) {
 
 private class Mesh(val points: List<List<MeshPoint>>, val tris: List<Array<MeshPoint>>)
 
-private val mesh: Mesh = buildMesh()
+private val mesh: Mesh get() = scratch.get()!!.mesh
 
 /** 網格往四周多鋪一格（邊緣不露空），每個頂點有基礎高度 z。 */
 private fun buildMesh(): Mesh {
@@ -218,8 +232,8 @@ private fun DrawScope.dots(st: BgState) {
 
 // ───────────── 5. 翻牌方陣（色彩波從焦點擴散） ─────────────
 
-private val sampleA = FloatArray(2)
-private val sampleB = FloatArray(2)
+private val sampleA: FloatArray get() = scratch.get()!!.sampleA
+private val sampleB: FloatArray get() = scratch.get()!!.sampleB
 
 private fun DrawScope.flip(st: BgState) {
     drawRect(Color(0xFF04050A), size = FULL)
@@ -320,7 +334,7 @@ private fun DrawScope.trails(st: BgState) {
 
 private const val CNX = 96
 private const val CNY = 54
-private val field = FloatArray(CNX * CNY)
+private val field: FloatArray get() = scratch.get()!!.field
 private val bumps = arrayOf(floatArrayOf(.12f, .2f, .7f, .22f), floatArrayOf(.85f, .25f, .55f, .2f), floatArrayOf(.7f, .85f, .6f, .25f), floatArrayOf(.25f, .9f, .45f, .2f), floatArrayOf(.5f, .45f, -.35f, .3f))
 
 private fun DrawScope.contour(st: BgState) {
