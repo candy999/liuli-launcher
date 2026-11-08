@@ -34,6 +34,16 @@ jobs:
           echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.p12"
           echo "LIULI_KEYSTORE=$RUNNER_TEMP/release.p12" >> "$GITHUB_ENV"
 
+      # 正式版：版本號取自 tag（v1.0.0 → 1.0.0）
+      - name: 決定版本號
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "LIULI_VERSION_NAME=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+            echo "APK_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+          else
+            echo "APK_VERSION=0.1.${GITHUB_RUN_NUMBER}" >> "$GITHUB_ENV"
+          fi
+
       - name: 編譯
         env:
           LIULI_KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
@@ -44,11 +54,11 @@ jobs:
       - name: 命名 APK
         run: |
           mkdir -p dist
-          cp app/build/outputs/apk/release/*.apk "dist/LiuliLauncher-0.1.${GITHUB_RUN_NUMBER}.apk"
+          cp app/build/outputs/apk/release/*.apk "dist/LiuliLauncher-${APK_VERSION}.apk"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: LiuliLauncher-0.1.${{ github.run_number }}
+          name: LiuliLauncher-${{ env.APK_VERSION }}
           path: dist/*.apk
 
       # main 每次更新都覆蓋「nightly」預覽版，固定網址：
@@ -72,9 +82,13 @@ jobs:
             固定下載網址：https://github.com/candy999/liuli-launcher/releases/download/nightly/LiuliLauncher-nightly.apk
           files: dist/LiuliLauncher-nightly.apk
 
-      # 推 v 開頭的 tag（例如 v0.1.0）時自動發布 Release，電視可直接用網址下載
+      # 推 v 開頭的 tag（例如 v1.0.0）時發布正式版：說明取自 docs/releases/<tag>.md
       - name: 發布 Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
+          name: 琉璃 Launcher ${{ env.APK_VERSION }}
+          body_path: docs/releases/${{ github.ref_name }}.md
+          prerelease: false
+          make_latest: true
           files: dist/*.apk

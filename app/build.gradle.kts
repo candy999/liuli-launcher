@@ -18,7 +18,8 @@ android {
         minSdk = 28
         targetSdk = 34
         versionCode = buildNumber
-        versionName = "0.1.$buildNumber"
+        // 正式版（推 v1.0.0 這類 tag）用 tag 的版本號；main 的每日建置是 0.1.<建置號>
+        versionName = System.getenv("LIULI_VERSION_NAME") ?: "0.1.$buildNumber"
     }
 
     signingConfigs {

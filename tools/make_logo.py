@@ -235,6 +235,15 @@ def main():
             f'</div><div class="r"><div>{svg(320, 180, banner, "width:640px;height:360px;border-radius:20px")}<div class="l">電視橫幅 320×180（放大 2 倍）</div></div>'
             f'<div>{svg(320, 180, banner, "width:160px;height:90px;border-radius:8px")}<div class="l">實際大小約</div></div></div></body></html>')
     io.open(os.path.join(ROOT, 'design', 'logo-final.html'), 'w', encoding='utf-8').write(page)
+    # 給 README 用的獨立 SVG（GitHub 可直接顯示，任何尺寸都清晰）
+    logo_dir = os.path.join(ROOT, 'docs', 'logo')
+    os.makedirs(logo_dir, exist_ok=True)
+    for name, w, h, nodes, radius in (('icon.svg', 108, 108, icon, 24), ('banner.svg', 320, 180, banner, 10)):
+        s = svg(w, h, nodes).replace('<svg viewBox=', f'<svg xmlns="http://www.w3.org/2000/svg" width="{w * 4}" height="{h * 4}" viewBox=', 1)
+        # 圓角：用 clipPath 裁掉四角（README 上看起來和電視上的遮罩一致）
+        s = s.replace('<defs>', f'<defs><clipPath id="r"><rect width="{w}" height="{h}" rx="{radius}"/></clipPath>', 1)
+        s = s.replace('</defs>', '</defs><g clip-path="url(#r)">', 1).replace('</svg>', '</g></svg>')
+        io.open(os.path.join(logo_dir, name), 'w', encoding='utf-8').write(s)
     print('ok')
 
 
