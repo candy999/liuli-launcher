@@ -125,10 +125,12 @@ class BackgroundEngine {
         private set
 
     /**
-     * 背景的繪製解析度，單位是 1/8 螢幕（8＝原生 1920×1080、4＝960×540、3＝720×405）。
-     * 1920 與 1080 的公因數是 120，取 1/8 為一檔，每一檔換算出來都是整數像素、比例完全是 16:9。
+     * 背景的繪製解析度＝裝置原生解析度 ÷ [renderDiv]（1～5 的整數）。
+     * 整數倍放大，每個低解析度像素剛好對到 d×d 個實體像素，和物理點陣的落差最小。
+     * 1080p：÷1＝1920×1080、÷2＝960×540、÷3＝640×360、÷4＝480×270、÷5＝384×216。
+     * 不能整除的螢幕由 [BackgroundLayer] 無條件進位到下一個整數像素再裁切多出來的邊。
      */
-    var renderLevel by mutableIntStateOf(FULL_LEVEL)
+    var renderDiv by mutableIntStateOf(1)
         private set
 
     /** 每種樣式各自學到的背景更新率檔位（樣式之間的繪圖成本差很多），索引對應 [QUALITY_MS]。 */
@@ -245,8 +247,9 @@ class BackgroundEngine {
             if (cooldown[styleIdx] > 0) cooldown[styleIdx]--
             var q = learnedQ[styleIdx]
             var interval = QUALITY_MS[q]
-            val forced = debugLevel in 1..FULL_LEVEL
-            renderLevel = if (forced) debugLevel else FULL_LEVEL
+            val forced = debugDiv in 1..MAX_DIV
+            // 降解析度立即生效（在動，看不出切換）
+            renderDiv = if (forced) debugDiv else QUALITY_DIV[q]
             if (forced) interval = 16.7f * debugEvery.coerceIn(1, 8)
             var done = false
             var prevT = 0L
@@ -301,18 +304,26 @@ class BackgroundEngine {
                         fastWins = 0
                     }
                     if (nq != q) {
-                        Log.i(TAG, "${style.id} bg ${"%.0f".format(1000f / QUALITY_MS[q])}→${"%.0f".format(1000f / QUALITY_MS[nq])}fps avg=${"%.1f".format(avg)}ms")
+                        Log.i(TAG, "${style.id} ÷${QUALITY_DIV[q]}@${"%.0f".format(1000f / QUALITY_MS[q])}fps → ÷${QUALITY_DIV[nq]}@${"%.0f".format(1000f / QUALITY_MS[nq])}fps avg=${"%.1f".format(avg)}ms")
                         q = nq
                         learnedQ[styleIdx] = q
                         interval = QUALITY_MS[q]
+                        renderDiv = QUALITY_DIV[q]
                         skipMeasure = 2
                     }
                 }
             }
-            renderLevel = FULL_LEVEL
             moving = false
             if (glassDirty) { glassDirty = false; glassVersion++ }
             frame++
+            // 靜止後慢慢拉回原生解析度：一次升一檔（÷4→÷3→÷2→÷1），不會一下子變清楚。
+            // 新的焦點變化一來就中斷，直接開始下一段轉場。
+            while (renderDiv > 1) {
+                delay(RECOVER_STEP_MS)
+                if (wake.tryReceive().isSuccess) { pending = true; break }
+                renderDiv--
+                frame++
+            }
         }
     }
 
@@ -395,16 +406,23 @@ class BackgroundEngine {
         private const val TAG = "LiuliBg"
 
         /**
-         * 量測用（adb）：強制背景解析度檔位與更新間隔，0＝自動。
-         * adb shell am start -n tw.liuli.launcher/.MainActivity --ei bgLevel 6 --ei bgEvery 2
+         * 量測用（adb）：強制背景解析度除數與更新間隔（幾個畫面一次），0＝自動。
+         * adb shell am start -n tw.liuli.launcher/.MainActivity --ei bgDiv 2 --ei bgEvery 2
          */
-        @Volatile var debugLevel = 0
+        @Volatile var debugDiv = 0
         @Volatile var debugEvery = 2
-        const val FULL_LEVEL = 8
+        const val MAX_DIV = 5
 
-        /** 背景更新間隔階梯（由好到差）：30／20／15fps。解析度固定原生 1080p。 */
-        private val QUALITY_MS = floatArrayOf(33.3f, 50f, 66.7f)
+        /**
+         * 畫質階梯（由好到差）：解析度除數 ＋ 背景更新間隔。
+         * 先保 30fps、依序降解析度到 ÷5；還不夠才把背景降到 20、15fps，再慢就靠慢速播放。
+         */
+        private val QUALITY_DIV = intArrayOf(1, 2, 3, 4, 5, 5, 5)
+        private val QUALITY_MS = floatArrayOf(33.3f, 33.3f, 33.3f, 33.3f, 33.3f, 50f, 66.7f)
+        /** AOC 電視實測：÷2 的背景一幀 GPU 約 18ms，可以穩定 30fps。 */
         private const val DEFAULT_Q = 1
+        /** 靜止後每隔多久升一檔解析度。 */
+        private const val RECOVER_STEP_MS = 220L
         private const val UPGRADE_COOLDOWN = 4
         /** 每一格背景最多推進的動畫時間（1/15 秒）。 */
         private const val MAX_STEP_MS = 66.7f

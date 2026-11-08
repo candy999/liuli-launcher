@@ -73,10 +73,10 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handleAction(intent: Intent?): Boolean {
-        if (intent?.hasExtra("bgLevel") == true) {
-            tw.liuli.launcher.ui.bg.BackgroundEngine.debugLevel = intent.getIntExtra("bgLevel", 0)
+        if (intent?.hasExtra("bgDiv") == true) {
+            tw.liuli.launcher.ui.bg.BackgroundEngine.debugDiv = intent.getIntExtra("bgDiv", 0)
             tw.liuli.launcher.ui.bg.BackgroundEngine.debugEvery = intent.getIntExtra("bgEvery", 2)
-            intent.removeExtra("bgLevel")
+            intent.removeExtra("bgDiv")
             return true
         }
         val action = intent?.getStringExtra(EXTRA_ACTION) ?: return false
