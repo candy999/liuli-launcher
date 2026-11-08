@@ -22,7 +22,7 @@ import kotlin.math.roundToInt
  * 全螢幕背景，只在引擎推進時重畫。
  *
  * 效能（AOC 電視實測：1080p 每幀 GPU 40ms 以上）：
- * - 背景先畫在 [RENDER_SCALE]（1280×720）的離屏圖層，再放大到螢幕，GPU 填的像素只剩 44%
+ * - 轉場中背景畫在 960×540 的離屏圖層再放大（GPU 只填 1/4 像素），停下來改用全解析度畫一次
  * - 不使用 Softlight 等進階混合模式（電視 GPU 上非常貴）
  * [blurred]（0～1）＝子頁面開啟時，用給玻璃的小張背景放大蓋上去，就是不吃效能的「模糊桌布」。
  */
@@ -30,14 +30,16 @@ import kotlin.math.roundToInt
 fun BackgroundLayer(engine: BackgroundEngine, blurred: () -> Float, modifier: Modifier = Modifier) {
     LaunchedEffect(engine) { engine.run() }
     BoxWithConstraints(modifier.fillMaxSize(), contentAlignment = Alignment.TopStart) {
+        // 轉場中用 960×540 畫（在動，看不出差別），停下來再用全解析度畫一次（靜止畫面清楚）
+        val renderScale = if (engine.moving) MOVING_SCALE else 1f
         Box(
             Modifier
-                .size(maxWidth * RENDER_SCALE, maxHeight * RENDER_SCALE)
+                .size(maxWidth * renderScale, maxHeight * renderScale)
                 .graphicsLayer {
                     compositingStrategy = CompositingStrategy.Offscreen
                     transformOrigin = TransformOrigin(0f, 0f)
-                    scaleX = 1f / RENDER_SCALE
-                    scaleY = 1f / RENDER_SCALE
+                    scaleX = 1f / renderScale
+                    scaleY = 1f / renderScale
                 },
         ) {
             Canvas(Modifier.fillMaxSize()) {
@@ -48,12 +50,12 @@ fun BackgroundLayer(engine: BackgroundEngine, blurred: () -> Float, modifier: Mo
                 val b = blurred()
                 if (b > 0.001f) {
                     drawImage(engine.glass, dstSize = IntSize(size.width.roundToInt(), size.height.roundToInt()), alpha = b)
-                    drawRect(Color.Black, alpha = 0.32f * b)
+                    drawRect(Color.Black, alpha = 0.4f * b)
                 }
             }
         }
     }
 }
 
-/** 背景實際繪製解析度相對螢幕的比例（1080p → 1280×720）。 */
-private const val RENDER_SCALE = 0.6667f
+/** 轉場期間背景的繪製解析度比例（1080p → 960×540）。 */
+private const val MOVING_SCALE = 0.5f

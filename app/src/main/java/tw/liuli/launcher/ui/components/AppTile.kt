@@ -75,28 +75,16 @@ fun AppTile(
                 .background(Color(0xFF1B1E26))
                 .drawWithContent {
                     drawContent()
+                    // tvOS 式焦點：放大＋陰影＋斜向光澤，不畫任何框線
                     val v = focus.value()
-                    val r = CornerRadius(Dimens.TileRadius.toPx())
-                    // 常駐的細高光邊，讓圖塊像嵌在玻璃層架上
-                    drawRoundRect(Color.White.copy(alpha = 0.12f), cornerRadius = r, style = Stroke(1.dp.toPx()))
                     if (v > 0.01f) {
-                        // 斜向光澤
                         drawRect(
                             Brush.linearGradient(
-                                0f to Color.White.copy(alpha = 0.26f * v),
-                                0.38f to Color.Transparent,
+                                0f to Color.White.copy(alpha = 0.24f * v),
+                                0.4f to Color.Transparent,
                                 start = Offset.Zero,
                                 end = Offset(size.width, size.height),
                             ),
-                        )
-                        // 白色焦點描邊
-                        val w = 3.dp.toPx()
-                        drawRoundRect(
-                            Color.White.copy(alpha = 0.95f * v),
-                            topLeft = Offset(w / 2, w / 2),
-                            size = androidx.compose.ui.geometry.Size(size.width - w, size.height - w),
-                            cornerRadius = CornerRadius(r.x - w / 2),
-                            style = Stroke(w),
                         )
                     }
                 },

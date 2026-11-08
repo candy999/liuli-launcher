@@ -24,7 +24,6 @@ import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
@@ -51,11 +50,12 @@ val LocalGlassBackdrop = staticCompositionLocalOf { GlassBackdrop(null, { 0L }, 
  * 玻璃取出自己背後那一塊放大（雙線性放大＝自然的模糊），等於貼一張圖。
  * Android 13 以上再用 AGSL 著色器做邊緣的透鏡折射。背景靜止時零成本。
  *
- * 疊層（由下而上）：模糊背景（含折射）→ 白色薄霧 → 上緣光澤 → 邊緣內光 → 高光邊。
+ * 疊層（由下而上）：高斯模糊＋過曝的背景（含折射）→ 很淡的白霧 → 由上往下的淡光。
+ * 不畫描邊、不畫內光線條（看起來像塑膠框，俗氣）。
  */
 fun Modifier.liquidGlass(
     shape: Shape = RoundedCornerShape(26.dp),
-    tint: Float = 0.07f,
+    tint: Float = 0.03f,
     /** 0～1：讓玻璃更亮（例如焦點時）。在繪製階段讀取，不會觸發重新組合。 */
     highlight: () -> Float = { 0f },
 ): Modifier = composed {
@@ -73,8 +73,6 @@ fun Modifier.liquidGlass(
             val path = Path().apply { addOutline(outline) }
             val blurred = backdrop.image
             val radiusPx = (shape as? RoundedCornerShape)?.topStart?.toPx(size, this) ?: 0f
-            val rimWidth = 1.dp.toPx()
-            val glowWidth = 14.dp.toPx()
 
             onDrawBehind {
                 @Suppress("UNUSED_VARIABLE") val v = backdrop.version() // 背景換色時跟著重畫
@@ -100,30 +98,16 @@ fun Modifier.liquidGlass(
                     } else {
                         drawRect(Color(0x99141A2E))
                     }
-                    // 2. 白色薄霧
-                    drawRect(Color.White.copy(alpha = tint + 0.06f * hl))
-                    // 3. 上緣光澤
+                    // 2. 很淡的白色薄霧（焦點時再亮一點＝更過曝）
+                    drawRect(Color.White.copy(alpha = tint + 0.10f * hl))
+                    // 3. 由上往下非常淡的光，沒有任何描邊或線條
                     drawRect(
                         Brush.verticalGradient(
-                            0f to Color.White.copy(alpha = 0.10f + 0.08f * hl),
-                            0.4f to Color.Transparent,
+                            0f to Color.White.copy(alpha = 0.06f + 0.06f * hl),
+                            0.6f to Color.Transparent,
                         ),
                     )
-                    // 4. 邊緣內光：模擬玻璃厚度把光往邊緣聚集
-                    drawPath(path, Color.White.copy(alpha = 0.05f), style = Stroke(glowWidth))
-                    drawPath(path, Color.White.copy(alpha = 0.05f), style = Stroke(glowWidth * 0.45f))
                 }
-                // 5. 高光邊：上緣亮、側邊暗、下緣有一點反光
-                drawPath(
-                    path,
-                    Brush.verticalGradient(
-                        0f to Color.White.copy(alpha = 0.55f + 0.30f * hl),
-                        0.18f to Color.White.copy(alpha = 0.16f),
-                        0.82f to Color.White.copy(alpha = 0.08f),
-                        1f to Color.White.copy(alpha = 0.24f + 0.10f * hl),
-                    ),
-                    style = Stroke(rimWidth * 1.6f),
-                )
             }
         }
 }
