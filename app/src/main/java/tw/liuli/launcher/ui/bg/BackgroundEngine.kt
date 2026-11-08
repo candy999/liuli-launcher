@@ -136,6 +136,7 @@ class BackgroundEngine {
     /** 降過檔的樣式要再經過幾次轉場才允許試著升檔。 */
     private val cooldown = IntArray(BgStyle.entries.size)
     @Volatile private var yieldUntil = 0L
+    private var glassDirty = false
     /** 目前播放速度（1＝正常；GPU 跟不上時 <1）。 */
     private var speed = 1f
 
@@ -282,6 +283,7 @@ class BackgroundEngine {
                     st.record(t)
                     // 玻璃（畫小張背景＋高斯模糊）在背景執行緒做，主執行緒只送出要求；忙的話自動合併成一次
                     if (done || bgTicks++ % 2 == 0) requestGlass()
+                    if (glassDirty) { glassDirty = false; glassVersion++ }
                     frame++
                 }
                 if (!forced && winN >= ADAPT_WINDOW) {
@@ -309,6 +311,7 @@ class BackgroundEngine {
             }
             renderLevel = FULL_LEVEL
             moving = false
+            if (glassDirty) { glassDirty = false; glassVersion++ }
             frame++
         }
     }
@@ -371,7 +374,8 @@ class BackgroundEngine {
                 expose(px)
             }
             glassBitmap.setPixels(px, 0, GLASS_W, 0, 0, GLASS_W, GLASS_H)
-            glassVersion++
+            // 轉場中：等下一格背景一起重畫（省一次整個畫面的重繪）；靜止時立刻更新
+            if (moving) glassDirty = true else glassVersion++
         }
     }
 
@@ -407,7 +411,7 @@ class BackgroundEngine {
         /** 播放速度回升的時間常數（越大越慢）。 */
         private const val TAU_SPEED = 800f
         /** 按鍵後背景讓路的時間。 */
-        private const val YIELD_MS = 250L
+        private const val YIELD_MS = 320L
         private const val ADAPT_WINDOW = 10
         /** 主執行緒平均每格超過 22ms＝GPU 跟不上 → 降檔；低於 17.5ms 連續三次（且過了冷卻期）才升檔。 */
         private const val SLOW_MS = 22f
