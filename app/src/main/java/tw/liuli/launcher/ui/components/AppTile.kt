@@ -50,6 +50,8 @@ fun AppTile(
     onFocused: (() -> Unit)? = null,
     onClick: () -> Unit,
     onLongClick: (FocusRequester) -> Unit,
+    /** 插在焦點處理之前的修飾（例如 bgTarget）。 */
+    extra: Modifier = Modifier,
 ) {
     val own = remember { FocusRequester() }
     val req = requester ?: own
@@ -67,6 +69,7 @@ fun AppTile(
                     shape = tileShape
                     clip = false
                 }
+                .then(extra)
                 .focusTarget(focus, req, onFocused, onClick, onLongClick = { onLongClick(req) })
                 .clip(tileShape)
                 .background(Color(0xFF1B1E26))

@@ -42,6 +42,8 @@ data class SheetItem(
     val label: String,
     val detail: String? = null,
     val selected: Boolean = false,
+    /** 焦點移到這一列時執行（例如即時預覽背景樣式）。 */
+    val onFocus: (() -> Unit)? = null,
     val action: () -> Unit,
 )
 
@@ -50,6 +52,8 @@ data class SheetSpec(
     val subtitle: String? = null,
     val items: List<SheetItem>,
     val focusIndex: Int = 0,
+    /** 按返回鍵關閉（沒有選任何一項）時執行，例如還原預覽前的樣式。 */
+    val onCancel: (() -> Unit)? = null,
 )
 
 /**
@@ -100,7 +104,7 @@ private fun SheetRow(item: SheetItem, requester: FocusRequester?) {
     Row(
         Modifier
             .fillMaxWidth()
-            .focusTarget(focus, requester, onClick = item.action)
+            .focusTarget(focus, requester, onFocused = item.onFocus, onClick = item.action)
             .drawBehind {
                 val v = focus.value()
                 if (v > 0.01f) {

@@ -19,7 +19,11 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.addOutline
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.ShaderBrush
-import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -29,12 +33,23 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import kotlin.math.roundToInt
 
+/** 玻璃需要的背景：給玻璃取樣的小張背景、它的版本（換色時遞增）、整個畫面的大小。 */
+@Immutable
+class GlassBackdrop(
+    val image: ImageBitmap?,
+    val version: () -> Long,
+    val screen: Size,
+    val lensing: Boolean,
+)
+
+val LocalGlassBackdrop = staticCompositionLocalOf { GlassBackdrop(null, { 0L }, Size.Zero, false) }
+
 /**
  * Liquid Glass 材質。
  *
- * 成本：玻璃後面只有靜態桌布，所以不做即時模糊，而是從「預先模糊好的桌布」取出
- * 自己背後那一塊（等於貼一張圖）。Android 13 以上再用 AGSL 著色器做邊緣的透鏡折射。
- * 只有在面板移動（捲動、動畫）時才重畫，畫面靜止時零成本。
+ * 成本：不做即時模糊。背景引擎每畫一幀，會順便畫一張 240×135 的小背景；
+ * 玻璃取出自己背後那一塊放大（雙線性放大＝自然的模糊），等於貼一張圖。
+ * Android 13 以上再用 AGSL 著色器做邊緣的透鏡折射。背景靜止時零成本。
  *
  * 疊層（由下而上）：模糊背景（含折射）→ 白色薄霧 → 上緣光澤 → 邊緣內光 → 高光邊。
  */
@@ -46,9 +61,9 @@ fun Modifier.liquidGlass(
 ): Modifier = composed {
     val backdrop = LocalGlassBackdrop.current
     var origin by remember { mutableStateOf(Offset.Zero) }
-    val lens = remember(backdrop.images) {
-        val images = backdrop.images
-        if (backdrop.lensing && images != null && Build.VERSION.SDK_INT >= 33) LensShader.create(images) else null
+    val lens = remember(backdrop.image) {
+        val image = backdrop.image
+        if (backdrop.lensing && image != null && Build.VERSION.SDK_INT >= 33) LensShader.create(image) else null
     }
 
     this
@@ -56,13 +71,13 @@ fun Modifier.liquidGlass(
         .drawWithCache {
             val outline = shape.createOutline(size, layoutDirection, this)
             val path = Path().apply { addOutline(outline) }
-            val images = backdrop.images
-            val blurred = images?.blurred?.asImageBitmap()
+            val blurred = backdrop.image
             val radiusPx = (shape as? RoundedCornerShape)?.topStart?.toPx(size, this) ?: 0f
             val rimWidth = 1.dp.toPx()
             val glowWidth = 14.dp.toPx()
 
             onDrawBehind {
+                @Suppress("UNUSED_VARIABLE") val v = backdrop.version() // 背景換色時跟著重畫
                 val hl = highlight()
                 clipPath(path) {
                     // 1. 背景：預先模糊的桌布對應區域（含折射）
@@ -166,11 +181,11 @@ private class LensShader(private val shader: RuntimeShader) {
             }
         """
 
-        fun create(images: WallpaperImages): LensShader? = runCatching {
+        fun create(image: ImageBitmap): LensShader? = runCatching {
             val s = RuntimeShader(SRC)
             s.setInputShader(
                 "wall",
-                BitmapShader(images.blurred, android.graphics.Shader.TileMode.CLAMP, android.graphics.Shader.TileMode.CLAMP),
+                BitmapShader(image.asAndroidBitmap(), android.graphics.Shader.TileMode.CLAMP, android.graphics.Shader.TileMode.CLAMP),
             )
             LensShader(s)
         }.getOrNull()

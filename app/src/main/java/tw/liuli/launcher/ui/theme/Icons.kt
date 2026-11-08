@@ -42,6 +42,8 @@ object LIcons {
     )
     val ChevronLeft = line("M14.5 6l-6 6 6 6")
     val ChevronRight = line("M9.5 6l6 6-6 6")
+    val ChevronUp = line("M6 14.5l6-6 6 6")
+    val Hdmi = line("M3 9h18v4l-3 3H6l-3-3z", "M8 12h8")
 
     val Sun = line(
         "M16 12a4 4 0 1 1-8 0a4 4 0 1 1 8 0z",

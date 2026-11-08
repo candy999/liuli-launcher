@@ -19,9 +19,20 @@ data class AppEntry(
     /** 有提供 LEANBACK_LAUNCHER 入口（可直接用遙控器操作）。 */
     val isTvApp: Boolean,
     val launchIntent: Intent,
+    /** App 的主題色（從橫幅或圖示取色），背景會跟著它換色；取不到時為 null。 */
+    val themeColor: Int? = null,
 )
 
 object AppRepository {
+
+    /**
+     * 主題色：優先取鮮豔色（Netflix 的紅、Spotify 的綠），沒有才取最多的顏色。
+     * 白底或黑底的品牌（YouTube 白底紅字）靠「鮮豔色」抓到真正的品牌色。
+     */
+    private fun themeColorOf(bmp: android.graphics.Bitmap): Int? = runCatching {
+        val p = androidx.palette.graphics.Palette.from(bmp).maximumColorCount(16).generate()
+        (p.vibrantSwatch ?: p.lightVibrantSwatch ?: p.darkVibrantSwatch ?: p.dominantSwatch)?.rgb
+    }.getOrNull()
 
     // 橫幅縮到 320x180，約 230KB／張，低記憶體電視也撐得住
     private const val BANNER_W = 320
@@ -49,14 +60,14 @@ object AppRepository {
                 .setClassName(pkg, activity.name)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
 
-            val banner = runCatching {
-                (activity.loadBanner(pm) ?: activity.applicationInfo.loadBanner(pm))
-                    ?.toBitmap(BANNER_W, BANNER_H)?.asImageBitmap()
+            val bannerBmp = runCatching {
+                (activity.loadBanner(pm) ?: activity.applicationInfo.loadBanner(pm))?.toBitmap(BANNER_W, BANNER_H)
             }.getOrNull()
-
-            val icon = if (banner == null) {
-                runCatching { info.loadIcon(pm).toBitmap(ICON_SIZE, ICON_SIZE).asImageBitmap() }.getOrNull()
+            val iconBmp = if (bannerBmp == null) {
+                runCatching { info.loadIcon(pm).toBitmap(ICON_SIZE, ICON_SIZE) }.getOrNull()
             } else null
+            val banner = bannerBmp?.asImageBitmap()
+            val icon = iconBmp?.asImageBitmap()
 
             result[pkg] = AppEntry(
                 packageName = pkg,
@@ -65,6 +76,7 @@ object AppRepository {
                 icon = icon,
                 isTvApp = isTv,
                 launchIntent = intent,
+                themeColor = (bannerBmp ?: iconBmp)?.let(::themeColorOf),
             )
         }
 

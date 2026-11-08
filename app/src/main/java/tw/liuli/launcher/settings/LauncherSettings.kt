@@ -9,24 +9,29 @@ import androidx.compose.runtime.setValue
 class LauncherSettings(context: Context) {
     private val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
 
-    /** 桌布配色：auto（依時間）或 [tw.liuli.launcher.ui.glass.WallpaperPalette] 的 id。 */
-    var palette by mutableStateOf(prefs.getString("palette", AUTO) ?: AUTO)
+    /** 背景樣式 id（見 BgStyle）。 */
+    var bgStyle by mutableStateOf(prefs.getString("bg_style", "waves") ?: "waves")
+        private set
+
+    /** 背景色系是否跟著焦點項目變化。 */
+    var bgFollow by mutableStateOf(prefs.getBoolean("bg_follow", true))
         private set
 
     var cityId by mutableStateOf(prefs.getString("city", "taipei") ?: "taipei")
         private set
 
-    fun updatePalette(id: String) {
-        palette = id
-        prefs.edit().putString("palette", id).apply()
+    fun updateBgStyle(id: String) {
+        bgStyle = id
+        prefs.edit().putString("bg_style", id).apply()
+    }
+
+    fun updateBgFollow(on: Boolean) {
+        bgFollow = on
+        prefs.edit().putBoolean("bg_follow", on).apply()
     }
 
     fun updateCity(id: String) {
         cityId = id
         prefs.edit().putString("city", id).apply()
-    }
-
-    companion object {
-        const val AUTO = "auto"
     }
 }

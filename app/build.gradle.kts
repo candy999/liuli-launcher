@@ -72,6 +72,8 @@ dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
     // 安裝時預先編譯 Compose 內建的基準設定檔，第一次操作就流暢
     implementation("androidx.profileinstaller:profileinstaller:1.3.1")
+    // App 主題色取色
+    implementation("androidx.palette:palette-ktx:1.0.0")
     // 農民曆（MIT，離線演算）
     implementation("cn.6tail:lunar:1.7.4")
 }
