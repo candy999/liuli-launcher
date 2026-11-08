@@ -121,11 +121,12 @@ fun Modifier.focusTarget(
     .tvClickable(onClick, onLongClick)
 
 /**
- * 一列（常用列、App 格線的一列）：左右鍵不會離開這一列，到底就停住；
- * 上下鍵照常移到別列。避免在列尾按右鍵時焦點跳到下一列的某個 App。
+ * 一列（常用列、訊號源列）：左右鍵不會離開這一列，到底就停住；上下鍵照常移到別列。
+ * [enterTo]：焦點從別列進來時要落在哪一個（例如上次停留的 App）。
+ * 不使用 Compose 的 focusRestorer——它會多一個本身可以拿焦點的隱形節點，焦點落在那裡就左右都動不了。
  */
 @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
-fun Modifier.focusRow(): Modifier = this
+fun Modifier.focusRow(enterTo: (() -> FocusRequester?)? = null): Modifier = this
     .focusProperties {
         exit = { dir ->
             if (dir == androidx.compose.ui.focus.FocusDirection.Left || dir == androidx.compose.ui.focus.FocusDirection.Right) {
@@ -134,5 +135,6 @@ fun Modifier.focusRow(): Modifier = this
                 FocusRequester.Default
             }
         }
+        if (enterTo != null) enter = { enterTo() ?: FocusRequester.Default }
     }
     .focusGroup()
