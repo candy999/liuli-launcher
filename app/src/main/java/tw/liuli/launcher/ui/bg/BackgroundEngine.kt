@@ -1,6 +1,8 @@
 package tw.liuli.launcher.ui.bg
 
+import android.util.Log
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -109,9 +111,19 @@ class BackgroundEngine {
     var frame by mutableLongStateOf(0L)
         private set
 
-    /** 轉場中＝true。背景在轉場時用較低解析度畫，停下來再用全解析度畫一次。 */
+    /** 轉場中＝true。 */
     var moving by mutableStateOf(false)
         private set
+
+    /**
+     * 背景的繪製解析度，單位是 1/8 螢幕（8＝原生 1920×1080、4＝960×540、3＝720×405）。
+     * 1920 與 1080 的公因數是 120，取 1/8 為一檔，每一檔換算出來都是整數像素、比例完全是 16:9。
+     */
+    var renderLevel by mutableIntStateOf(FULL_LEVEL)
+        private set
+
+    /** 每種樣式各自學到的畫質檔位（樣式之間的繪圖成本差很多），索引對應 [QUALITY]。 */
+    private val learnedQ = IntArray(BgStyle.entries.size) { DEFAULT_Q }
 
     /** 給玻璃取樣的小張背景（240×135，放大後就是模糊效果）。 */
     val glass: ImageBitmap = ImageBitmap(GLASS_W, GLASS_H)
@@ -181,24 +193,85 @@ class BackgroundEngine {
         }
     }
 
-    /** 由 LaunchedEffect 執行：被喚醒後逐幀推進，追上目標就停。 */
+    /**
+     * 由 LaunchedEffect 執行：被喚醒後推進背景，追上目標就停。
+     *
+     * 自適應畫質（UI 順暢優先）：
+     * - 背景最多每 2 個畫面更新一次（30fps）；UI（焦點彈簧、捲動）照樣跑滿螢幕更新率。
+     *   背景有電容式緩衝，少畫幾格幾乎看不出來，但省下來的 GPU 全給 UI。
+     * - 每 [ADAPT_WINDOW] 個畫面量一次平均幀間隔。太慢就依「成本 ∝ 像素 ÷ 間隔」直接算出該降到哪一檔
+     *   （先降解析度、到 960×540 後改成每 3 格才畫一次），夠快就往上試一檔。
+     * - 學到的檔位依樣式記住，下次轉場直接從那一檔開始。
+     * - 停下來時不是一下子跳回原生解析度，而是每 [SHARPEN_STEP_MS] 升一檔，像鏡頭對焦一樣逐漸變清楚。
+     */
     suspend fun run() {
+        var pending = false
         while (true) {
-            wake.receive()
+            if (!pending) wake.receive()
+            pending = false
             lastT = 0L
             moving = true
+            val styleIdx = style.ordinal
+            var q = learnedQ[styleIdx]
+            var bgEvery = QUALITY[q].second
+            renderLevel = QUALITY[q].first
             var done = false
+            var prevT = 0L
+            var vsync = 0
+            var bgTicks = 0
+            var skipMeasure = 2
+            var winSum = 0f
+            var winN = 0
+            var fastWins = 0
+            var downgraded = false
             while (!done) {
-                withFrameMillis { t ->
+                withFrameMillis<Unit> { t ->
+                    if (prevT != 0L) {
+                        if (skipMeasure > 0) skipMeasure-- else { winSum += (t - prevT).toFloat(); winN++ }
+                    }
+                    prevT = t
+                    if (vsync++ % bgEvery != 0) return@withFrameMillis
                     if (holdMs > 0) { holdUntil = t + holdMs; holdMs = 0 }
                     done = step(t) && t > holdUntil
                     if (done) snapToTarget()
                     st.nowMs = t
                     st.record(t)
-                    // 玻璃的高斯模糊在電視 CPU 上約 10ms：轉場中每 3 幀更新一次，停下時再更新一次
-                    if (done || glassTick++ % 3 == 0) renderGlass()
+                    // 玻璃的高斯模糊在 CPU 上做：背景每更新 2 次才重算一次，停下時再算一次
+                    if (done || bgTicks++ % 2 == 0) renderGlass()
                     frame++
                 }
+                if (winN >= ADAPT_WINDOW) {
+                    val avg = winSum / winN
+                    winSum = 0f; winN = 0
+                    var nq = q
+                    if (avg > SLOW_MS && q < QUALITY.lastIndex) {
+                        // 依成本比例直接算目標檔位，不用一格一格試
+                        val want = cost(q) * (TARGET_MS / avg)
+                        nq = q + 1
+                        while (nq < QUALITY.lastIndex && cost(nq) > want) nq++
+                        downgraded = true
+                        fastWins = 0
+                    } else if (avg < FAST_MS && q > 0 && !downgraded) {
+                        if (++fastWins >= 2) { nq = q - 1; fastWins = 0 }
+                    } else {
+                        fastWins = 0
+                    }
+                    if (nq != q) {
+                        Log.i(TAG, "${style.id} q $q→$nq avg=${"%.1f".format(avg)}ms level=${QUALITY[nq].first}/8 every=${QUALITY[nq].second}")
+                        q = nq
+                        learnedQ[styleIdx] = q
+                        renderLevel = QUALITY[q].first
+                        bgEvery = QUALITY[q].second
+                        skipMeasure = 2 // 換解析度的那一幀要重新配置圖層，不算進量測
+                    }
+                }
+            }
+            // 對焦：逐檔升回原生解析度（新的焦點變化一來就中斷，直接開始下一段轉場）
+            while (renderLevel < FULL_LEVEL) {
+                delay(SHARPEN_STEP_MS)
+                if (wake.tryReceive().isSuccess) { pending = true; break }
+                renderLevel++
+                frame++
             }
             moving = false
             frame++
@@ -261,6 +334,27 @@ class BackgroundEngine {
         private const val TAU_PULSE_OUT = 600f
         private const val TAU_RIPPLE = 900f
         private const val BLUR_R = 5
+
+        private const val TAG = "LiuliBg"
+        const val FULL_LEVEL = 8
+
+        /**
+         * 畫質階梯（由好到差）：(解析度檔位 /8, 背景每幾個畫面更新一次)。
+         * 先降解析度到 960×540，再把背景降到 20fps，最低 720×405。
+         */
+        private val QUALITY = arrayOf(
+            8 to 2, 7 to 2, 6 to 2, 5 to 2, 4 to 2, 4 to 3, 3 to 3,
+        )
+        private const val DEFAULT_Q = 4
+        /** 相對繪圖成本：像素數 ÷ 更新間隔。 */
+        private fun cost(q: Int) = QUALITY[q].first.let { it * it }.toFloat() / QUALITY[q].second
+
+        private const val ADAPT_WINDOW = 10
+        /** 目標：UI 平均每格 ≤ 約 18ms（接近 60fps）；超過 22ms 就降，低於 17.5ms 連續兩次才升。 */
+        private const val TARGET_MS = 18f
+        private const val SLOW_MS = 22f
+        private const val FAST_MS = 17.5f
+        private const val SHARPEN_STEP_MS = 45L
 
         private fun rc(tau: Float, dt: Float) = 1f - exp(-dt / tau)
         private fun hueDelta(from: Float, to: Float) = ((to - from + 540f) % 360f) - 180f

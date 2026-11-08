@@ -22,7 +22,7 @@ import kotlin.math.roundToInt
  * 全螢幕背景，只在引擎推進時重畫。
  *
  * 效能（AOC 電視實測：1080p 每幀 GPU 40ms 以上）：
- * - 轉場中背景畫在 960×540 的離屏圖層再放大（GPU 只填 1/4 像素），停下來改用全解析度畫一次
+ * - 轉場中背景畫在較小的離屏圖層再放大，檔位由 [BackgroundEngine] 依幀時間自動調整，停下來逐檔升回原生解析度
  * - 不使用 Softlight 等進階混合模式（電視 GPU 上非常貴）
  * [blurred]（0～1）＝子頁面開啟時，用給玻璃的小張背景放大蓋上去，就是不吃效能的「模糊桌布」。
  */
@@ -30,8 +30,8 @@ import kotlin.math.roundToInt
 fun BackgroundLayer(engine: BackgroundEngine, blurred: () -> Float, modifier: Modifier = Modifier) {
     LaunchedEffect(engine) { engine.run() }
     BoxWithConstraints(modifier.fillMaxSize(), contentAlignment = Alignment.TopStart) {
-        // 轉場中用 768×432 畫（在動，看不出差別），停下來再用全解析度畫一次（靜止畫面清楚）
-        val renderScale = if (engine.moving) MOVING_SCALE else 1f
+        // 解析度由引擎依實測幀時間決定（1/8 一檔）；靜止時逐檔升回原生解析度
+        val renderScale = engine.renderLevel / BackgroundEngine.FULL_LEVEL.toFloat()
         Box(
             Modifier
                 .size(maxWidth * renderScale, maxHeight * renderScale)
@@ -56,6 +56,3 @@ fun BackgroundLayer(engine: BackgroundEngine, blurred: () -> Float, modifier: Mo
         }
     }
 }
-
-/** 轉場期間背景的繪製解析度比例（1080p → 768×432；PowerVR BXE 等入門 GPU 實測需要這麼低）。 */
-private const val MOVING_SCALE = 0.4f

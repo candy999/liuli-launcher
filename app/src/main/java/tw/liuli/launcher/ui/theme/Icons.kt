@@ -44,9 +44,16 @@ object LIcons {
     val ChevronRight = line("M9.5 6l6 6-6 6")
     val ChevronUp = line("M6 14.5l6-6 6 6")
     val Hdmi = line("M3 9h18v4l-3 3H6l-3-3z", "M8 12h8")
-    val Wifi = line("M5 12.5a10 10 0 0 1 14 0", "M8 15.5a6 6 0 0 1 8 0", "M11 18.5a2 2 0 0 1 2 0", "M12 21h.01")
-    val Ethernet = line("M7 7h10a1 1 0 0 1 1 1v3H6V8a1 1 0 0 1 1-1z", "M4 11h16v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z", "M8 11v2M12 11v2M16 11v2")
-    val NoNet = line("M5 12.5a10 10 0 0 1 11.5-1.8", "M8 15.5a6 6 0 0 1 4.5-1.4", "M12 21h.01", "M4 4l16 16")
+    // 網路三兄弟共用同一套幾何：扇形圓心 (12,17)、半徑 11／7.5／4、張角 ±48°，與齒輪同為 1.6 線寬
+    val Wifi = line(*wifiPaths(slash = false))
+    val NoNet = line(*wifiPaths(slash = true))
+    /** 有線：上方一台、往下分兩台（區域網路拓撲），圓角與齒輪一致。 */
+    val Ethernet = line(
+        "M10 3.5h4a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1z",
+        "M12 8.5v3.5", "M6 12h12", "M6 12v3.5", "M18 12v3.5",
+        "M4 15.5h4a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1z",
+        "M16 15.5h4a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1z",
+    )
 
     val Sun = line(
         "M16 12a4 4 0 1 1-8 0a4 4 0 1 1 8 0z",
@@ -86,4 +93,40 @@ fun LIcon(icon: ImageVector, size: Dp = 22.dp, tint: Color = Color.White, modifi
         modifier = modifier.size(size),
         colorFilter = if (tint == Color.White) null else ColorFilter.tint(tint),
     )
+}
+
+/**
+ * Wi‑Fi 圖示的路徑：三道同心圓弧＋圓點。[slash]＝斷線版本，斜線穿過的地方圓弧會斷開（留 2.1 的縫），
+ * 跟 tvOS 的 wifi.slash 一樣，不會像以前那樣只剩半截弧線。
+ */
+private fun wifiPaths(slash: Boolean): Array<String> {
+    val cx = 12.0
+    val cy = 17.0
+    val half = Math.toRadians(48.0)
+    // 斜線：左上 → 右下
+    val ax = 4.5; val ay = 4.5; val bx = 19.5; val by = 19.5
+    fun nearSlash(x: Double, y: Double): Boolean {
+        if (!slash) return false
+        val dx = bx - ax; val dy = by - ay
+        val t = (((x - ax) * dx + (y - ay) * dy) / (dx * dx + dy * dy)).coerceIn(0.0, 1.0)
+        val px = ax + t * dx - x; val py = ay + t * dy - y
+        return kotlin.math.sqrt(px * px + py * py) < 2.1
+    }
+    fun f(v: Double) = String.format(java.util.Locale.US, "%.2f", v)
+    val out = ArrayList<String>()
+    for (r in doubleArrayOf(11.0, 7.5, 4.0)) {
+        val n = 48
+        var run = ArrayList<String>()
+        fun flush() { if (run.size >= 2) out += "M" + run.joinToString(" L"); run = ArrayList() }
+        for (i in 0..n) {
+            val a = -half + 2 * half * i / n
+            val x = cx + r * kotlin.math.sin(a)
+            val y = cy - r * kotlin.math.cos(a)
+            if (nearSlash(x, y)) flush() else run += "${f(x)} ${f(y)}"
+        }
+        flush()
+    }
+    out += "M12 16.1a0.9 0.9 0 1 1 0 1.8a0.9 0.9 0 1 1 0-1.8z" // 圓點
+    if (slash) out += "M${f(ax)} ${f(ay)}L${f(bx)} ${f(by)}"
+    return out.toTypedArray()
 }
