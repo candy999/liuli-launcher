@@ -96,8 +96,7 @@ fun GlassSheet(spec: SheetSpec) {
                 }
                 .liquidGlass(RoundedCornerShape(30.dp), tint = 0.09f)
                 .padding(horizontal = 16.dp, vertical = 26.dp)
-                .focusProperties { exit = { FocusRequester.Cancel } }
-                .focusGroup(),
+                .trapDirectionalFocus(),
         ) {
             GText(spec.title, Modifier.padding(horizontal = 12.dp), size = 22.sp, weight = FontWeight.Medium)
             if (spec.subtitle != null) {

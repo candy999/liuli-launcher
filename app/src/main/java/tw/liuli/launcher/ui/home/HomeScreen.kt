@@ -554,7 +554,6 @@ fun HomeScreen(
             if (drawerOpen) {
                 AppDrawer(
                     apps = visibleApps,
-                    sheetOpen = sheet != null,
                     onClose = ::closeDrawer,
                     onLaunch = ::launchApp,
                     onLongClick = { app, fr -> appSheet(app, fr) },

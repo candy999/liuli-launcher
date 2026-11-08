@@ -138,3 +138,25 @@ fun Modifier.focusRow(enterTo: (() -> FocusRequester?)? = null): Modifier = this
         if (enterTo != null) enter = { enterTo() ?: FocusRequester.Default }
     }
     .focusGroup()
+
+/**
+ * 鎖住方向鍵：上下左右（含 Tab 的前後）都不會把焦點帶出這個群組。
+ * 只擋「方向移動」，不擋程式呼叫 requestFocus——Compose 1.7 的 requestFocus 也會經過 exit，
+ * 若一律回傳 Cancel，開在上面的選單就永遠搶不到焦點（之前抽屜長按選單的 bug）。
+ */
+@OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+fun Modifier.trapDirectionalFocus(): Modifier = this
+    .focusProperties {
+        exit = { dir ->
+            when (dir) {
+                androidx.compose.ui.focus.FocusDirection.Left,
+                androidx.compose.ui.focus.FocusDirection.Right,
+                androidx.compose.ui.focus.FocusDirection.Up,
+                androidx.compose.ui.focus.FocusDirection.Down,
+                androidx.compose.ui.focus.FocusDirection.Next,
+                androidx.compose.ui.focus.FocusDirection.Previous -> FocusRequester.Cancel
+                else -> FocusRequester.Default
+            }
+        }
+    }
+    .focusGroup()

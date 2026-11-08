@@ -55,6 +55,7 @@ import tw.liuli.launcher.data.TvSource
 import tw.liuli.launcher.ui.bg.BgColors
 import tw.liuli.launcher.ui.bg.bgTarget
 import tw.liuli.launcher.ui.components.AppTile
+import tw.liuli.launcher.ui.components.trapDirectionalFocus
 import tw.liuli.launcher.ui.components.focusRow
 import tw.liuli.launcher.ui.components.focusScale
 import tw.liuli.launcher.ui.components.focusTarget
@@ -303,8 +304,6 @@ private fun InputChip(src: TvSource, requester: FocusRequester?, onClick: () -> 
 @Composable
 fun AppDrawer(
     apps: List<AppEntry>,
-    /** 選單開在抽屜上面時為 true：抽屜整層暫停可聚焦，讓焦點落到選單。 */
-    sheetOpen: Boolean,
     onClose: () -> Unit,
     onLaunch: (AppEntry) -> Unit,
     onLongClick: (AppEntry, FocusRequester) -> Unit,
@@ -332,11 +331,7 @@ fun AppDrawer(
                         onClose(); true
                     } else false
                 }
-                .focusProperties {
-                    exit = { FocusRequester.Cancel }
-                    canFocus = !sheetOpen
-                }
-                .focusGroup(),
+                .trapDirectionalFocus(),
         ) {
             Row(verticalAlignment = Alignment.Bottom) {
                 GText("所有 App", size = 22.sp, weight = FontWeight.Medium)
