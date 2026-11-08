@@ -15,7 +15,7 @@ android {
 
     defaultConfig {
         applicationId = "tw.liuli.launcher"
-        minSdk = 29
+        minSdk = 28
         targetSdk = 34
         versionCode = buildNumber
         versionName = "0.1.$buildNumber"
