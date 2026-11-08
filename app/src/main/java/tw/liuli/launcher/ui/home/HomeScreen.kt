@@ -187,8 +187,13 @@ fun HomeScreen(
         // 面板關閉後還原焦點。即使抽屜還開著也要還原（長按開選單的 returnTo 是抽屜裡的圖塊）
         val target = pendingFocus
         if (sheet == null && target != null) {
-            delay(16)
-            if (runCatching { target.requestFocus() }.isFailure) runCatching { firstDock.requestFocus() }
+            // 等常用列重新排好（剛移除／移動過的話要多一兩格），失敗就再試，最後退回常用列第一格
+            var ok = false
+            for (attempt in 0 until 6) {
+                delay(if (attempt == 0) 32 else 48)
+                ok = runCatching { target.requestFocus() }.isSuccess || runCatching { firstDock.requestFocus() }.isSuccess
+                if (ok) break
+            }
             pendingFocus = null
         }
     }
@@ -252,7 +257,15 @@ fun HomeScreen(
                     moveOrigin = dock
                     movingPkg = app.packageName
                 })
-                add(SheetItem("從常用移除") { setDock(dock - app.packageName); close() })
+                add(SheetItem("從常用移除") {
+                    // 被移除的圖塊會消失：焦點改落在相鄰的那一個（左邊；移除的是第一個就落在新的第一個）
+                    val i = dock.indexOf(app.packageName)
+                    setDock(dock - app.packageName)
+                    close()
+                    pendingFocus = if (i <= 0) firstDock else dock.getOrNull(i - 1)?.let { pkg ->
+                        if (i - 1 == 0) firstDock else dockRequesters[pkg]
+                    } ?: firstDock
+                })
             } else {
                 add(SheetItem("加入常用", if (dock.size >= DockStore.MAX) "已滿" else null) {
                     if (dock.size < DockStore.MAX) setDock(dock + app.packageName) else toast("常用已滿，請先移除一個")
