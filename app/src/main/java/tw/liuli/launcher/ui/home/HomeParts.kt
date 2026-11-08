@@ -8,6 +8,8 @@ import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.aspectRatio
+import tw.liuli.launcher.ui.theme.Dimens
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -233,6 +235,35 @@ fun RoundIconButton(
         contentAlignment = Alignment.Center,
     ) {
         LIcon(icon, 22.dp, if (focus.focused) Ink.OnLight else tint)
+    }
+}
+
+/**
+ * 常用列是空的時候的佔位磚：和 App 磚一樣大、一樣的焦點效果。
+ * 確定（或下鍵）打開所有 App；在所有 App 裡長按就能加入常用。
+ */
+@Composable
+fun AddToDockTile(requester: FocusRequester, onFocused: () -> Unit, onClick: () -> Unit) {
+    val focus = rememberFocusAnim()
+    Box(
+        Modifier
+            .width(150.dp)
+            .aspectRatio(16f / 9f)
+            .focusScale(focus, 1.10f)
+            .focusTarget(focus, requester, onFocused = onFocused, onClick = onClick)
+            .drawBehind {
+                val v = focus.value()
+                drawRoundRect(
+                    Color.White.copy(alpha = 0.10f + 0.84f * v),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(Dimens.TileRadius.toPx()),
+                )
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            GText("＋", size = 26.sp, weight = FontWeight.Light, color = if (focus.focused) Ink.OnLight else Ink.Primary)
+            GText("加入常用", size = 13.sp, color = if (focus.focused) Ink.OnLight else Ink.Secondary)
+        }
     }
 }
 

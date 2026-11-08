@@ -172,7 +172,7 @@ fun HomeScreen(
     // ── 焦點：預設在常用列第一個 App ──
     var initialFocusDone by remember { mutableStateOf(false) }
     LaunchedEffect(apps, dock) {
-        if (!initialFocusDone && dock.isNotEmpty() && apps.isNotEmpty()) {
+        if (!initialFocusDone && apps.isNotEmpty()) {
             delay(32)
             if (runCatching { firstDock.requestFocus() }.isSuccess) initialFocusDone = true
         }
@@ -188,7 +188,7 @@ fun HomeScreen(
         val target = pendingFocus
         if (sheet == null && target != null) {
             delay(16)
-            runCatching { target.requestFocus() }
+            if (runCatching { target.requestFocus() }.isFailure) runCatching { firstDock.requestFocus() }
             pendingFocus = null
         }
     }
@@ -537,12 +537,12 @@ fun HomeScreen(
                     horizontalArrangement = Arrangement.spacedBy(22.dp),
                 ) {
                     if (dockApps.isEmpty()) {
-                        item {
-                            GText(
-                                if (apps.isEmpty()) "載入中…" else "按下鍵打開所有 App，長按確定鍵即可加入常用",
-                                Modifier.padding(vertical = 30.dp),
-                                color = Ink.Secondary,
-                                shadow = true,
+                        // 常用全部移除後，這一列必須還有東西能拿焦點，否則下鍵打不開所有 App、也無法再加入常用
+                        item(key = "add") {
+                            AddToDockTile(
+                                requester = firstDock,
+                                onFocused = { lastDockPkg = null; dockLabel = "打開所有 App，長按 App 可加入常用"; labelX = 48f * context.resources.displayMetrics.density + 75f * context.resources.displayMetrics.density },
+                                onClick = { drawerOpen = true },
                             )
                         }
                     }
