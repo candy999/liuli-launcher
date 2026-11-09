@@ -40,6 +40,9 @@ private val FULL = Size(W, H)
  */
 private class Scratch {
     val ditherPaint = DitherScope.newPaint()
+    /** 星座網的星點位置（每幀重算，不配置新陣列）。 */
+    val netX = FloatArray(NET_N)
+    val netY = FloatArray(NET_N)
     val ditherNoise = DitherScope.newNoise()
     val ditherM = android.graphics.Matrix()
     val ditherInv = android.graphics.Matrix()
@@ -83,7 +86,7 @@ private fun DrawScope.drawStyleRaw(style: BgStyle, st: BgState) {
         BgStyle.BOKEH -> bokeh(st)
         BgStyle.TRIANGLES -> triangles(st)
         BgStyle.DOTS -> dots(st)
-        BgStyle.RAIN -> rain(st)
+        BgStyle.GALAXY -> galaxy(st)
         BgStyle.DEEPSEA -> deepsea(st)
         BgStyle.TRAILS -> trails(st)
         BgStyle.CONTOUR -> contour(st)
@@ -286,15 +289,7 @@ private fun DrawScope.dots(st: BgState) {
     vignette(.4f)
 }
 
-// ───────────── 5. 雨窗（擬真雨滴：毛玻璃後的模糊燈光、水滴像透鏡映出清晰而上下顛倒的背景） ─────────────
-//
-// 參考開源的擬真做法（Codrops RainEffect／Shadertoy「Heartfelt」）的幾個重點：
-// 1. 玻璃後面是模糊的（霧面），水滴本身卻像一顆小透鏡，映出「清晰、上下顛倒」的背景——上半部是下方的顏色、下半部是上方的顏色
-// 2. 水滴的明暗來自形狀：邊緣把光折走所以暗、底部聚光較亮、高光柔而小（不是貼一個白點）
-// 3. 分層：靜止的細小水珠、慢慢匯聚長大的水滴、撐不住加速滑落的水滴
-// 4. 滑過的地方擦掉了霧氣，留下一道較清透的水痕和沿途的小殘珠，之後霧氣慢慢回來
-// 原作是 GPU 著色器（從背景貼圖取樣），這台電視不能用自訂著色器；但這裡的背景是算出來的光暈，
-// 可以直接算出水滴上下方的背景顏色，用漸層畫出那個顛倒、更鮮明的小影像。
+// ───────────── 5. 星空銀河（斜跨的銀河、三層星星、緩慢漂移的星點之間時連時斷的連線） ─────────────
 
 /** 由兩個整數得到 0～1 的固定亂數（同樣的輸入永遠同樣的值；主執行緒與背景執行緒畫出來一致）。 */
 private fun hash01(a: Int, b: Int): Float {
@@ -305,125 +300,115 @@ private fun hash01(a: Int, b: Int): Float {
 
 private fun frac(v: Float) = v - kotlin.math.floor(v)
 
-/** 窗外的模糊燈光（位置與顏色），雨滴取樣用。 */
-private class RainGlow(val x: Float, val y: Float, val r: Float, val hOff: Float, val a: Float)
+private const val NET_N = 42
 
-private fun rainGlows(st: BgState): Array<RainGlow> {
-    val px = -(st.fx - .5f) * W * .05f
-    return arrayOf(
-        RainGlow(st.fx * W + px, st.fy * H, W * .4f, 0f, .4f),
-        RainGlow(W * .15f + px, H * .25f, W * .22f, -30f, .3f),
-        RainGlow(W * .85f + px, H * .7f, W * .26f, 28f, .3f),
-        RainGlow(W * .55f + px, H * .05f, W * .2f, 45f, .22f),
-        RainGlow(W * .32f + px, H * .85f, W * .18f, -12f, .26f),
-        RainGlow(W * .7f + px, H * .3f, W * .12f, 60f, .22f),
-    )
-}
-
-/** 某一點背景的亮度（0～1）與加權色相偏移：和畫背景用的同一組光暈。 */
-private fun rainSample(gl: Array<RainGlow>, x: Float, y: Float, out: FloatArray) {
-    var w = 0f; var hs = 0f
-    for (g in gl) {
-        val d = hypot(x - g.x, y - g.y) / g.r
-        if (d >= 1f) continue
-        val k = (1f - d) * g.a
-        w += k; hs += k * g.hOff
-    }
-    out[0] = min(1f, w); out[1] = if (w > 0f) hs / w else 0f
-}
-
-private fun DrawScope.rainDrop(st: BgState, gl: Array<RainGlow>, buf: FloatArray, c: Offset, r: Float, a: Float, stretch: Float = 1f) {
-    if (a <= .01f || r <= .25f) return
-    val ry = r * stretch
-    if (r < 1.2f) {
-        // 細小水珠：只取一個顛倒的背景色畫實心點（不建漸層，一幀上百顆省 CPU）
-        rainSample(gl, c.x, c.y + r * 7f, buf)
-        drawCircle(st.c(buf[1], .75f, .14f + .5f * buf[0], a), r, c)
-        return
-    }
-    // 透鏡：上半部映出下方的背景、下半部映出上方的背景（上下顛倒），比周圍更清晰、更鮮明
-    rainSample(gl, c.x, c.y + r * 7f, buf); val lumTop = buf[0]; val hTop = buf[1]
-    rainSample(gl, c.x, c.y - r * 7f, buf); val lumBot = buf[0]; val hBot = buf[1]
-    drawOval(
-        Brush.verticalGradient(
-            0f to st.c(hTop, .75f, .1f + .45f * lumTop, a), 1f to st.c(hBot, .75f, .1f + .45f * lumBot, a),
-            startY = c.y - ry, endY = c.y + ry,
-        ),
-        topLeft = Offset(c.x - r, c.y - ry), size = Size(r * 2, ry * 2),
-    )
-    // 形狀的明暗：邊緣暗（光被折走），中間透
-    drawOval(
-        Brush.radialGradient(0f to Color.Transparent, .62f to Color.Transparent, .9f to Color.Black.copy(alpha = .38f * a), 1f to Color.Black.copy(alpha = .18f * a), center = c, radius = max(r, ry)),
-        topLeft = Offset(c.x - r, c.y - ry), size = Size(r * 2, ry * 2),
-    )
-    // 底部聚光：光穿過水滴在下緣聚成一彎亮
-    drawOval(
-        Brush.radialGradient(listOf(st.c(hBot, .4f, .8f, .28f * a), Color.Transparent), center = c + Offset(0f, ry * .55f), radius = r * .7f),
-        topLeft = Offset(c.x - r * .7f, c.y + ry * .1f), size = Size(r * 1.4f, ry * .85f), blendMode = BlendMode.Plus,
-    )
-    // 高光：左上角一點柔和的反光（小而淡）
-    drawCircle(
-        Brush.radialGradient(listOf(Color.White.copy(alpha = .45f * a), Color.Transparent), center = c + Offset(-r * .35f, -ry * .45f), radius = r * .32f),
-        r * .32f, c + Offset(-r * .35f, -ry * .45f),
-    )
-}
-
-private fun DrawScope.rain(st: BgState) {
+private fun DrawScope.galaxy(st: BgState) {
     val t = st.at
-    val gl = rainGlows(st)
-    val buf = scratch.get()!!.sampleA
-    // 窗外：深色底＋模糊的燈光（跟著主色）
-    drawRect(Brush.verticalGradient(listOf(st.c(-6f, .5f, .05f), st.c(10f, .55f, .1f)), 0f, H), size = FULL)
-    for (g in gl) {
-        drawRect(Brush.radialGradient(listOf(st.c(g.hOff, .85f, .5f, g.a), st.c(g.hOff, .85f, .45f, 0f)), center = Offset(g.x, g.y), radius = g.r), size = FULL)
-    }
-    // 霧面：整片淡白霧（玻璃上的水氣）
-    val fog = .055f
-    drawRect(Color.White.copy(alpha = fog), size = FULL)
+    val par = -(st.fx - .5f)
+    val parY = -(st.fy - .5f)
+    // 深空：幾乎全黑，帶一點主色
+    drawRect(Brush.linearGradient(listOf(st.c(-10f, .5f, .02f), st.c(14f, .6f, .055f)), Offset.Zero, Offset(W * .3f, H)), size = FULL)
 
-    // 大水滴：在原地慢慢匯聚長大，撐不住就加速往下滑，身後擦出一道清透的水痕（之後霧氣慢慢回來）
-    for (lane in 0 until 11) {
-        val period = 7f + 7f * hash01(lane, 31)
-        val ph = t / period + hash01(lane, 37)
-        val cyc = kotlin.math.floor(ph).toInt()
-        val u = ph - cyc
-        val x0 = (.04f + .92f * hash01(lane, cyc * 3 + 1)) * W
-        val y0 = (.02f + .5f * hash01(lane, cyc * 3 + 2)) * H
-        val rMax = 3.2f + 3.6f * hash01(lane, cyc * 3 + 3)
-        if (u < .5f) {
-            val g = u / .5f
-            rainDrop(st, gl, buf, Offset(x0, y0), rMax * (.4f + .6f * g * g), min(1f, u * 10f))
-        } else {
-            val s = (u - .5f) / .5f
-            val y = y0 + (H - y0 + 14f) * s * s // 重力：越滑越快
-            val x = x0 + 1.8f * sin(s * 6f + lane) * s
-            // 水痕：被擦掉霧氣的地方（抵銷霧面），上面較淡（霧氣已慢慢回來）
-            val w = rMax * 1.1f
-            drawRect(
-                Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0f), Color.Black.copy(alpha = fog * 1.6f)), y0, y),
-                Offset(x0 - w / 2, y0), Size(w, max(0f, y - y0)),
+    // 銀河：從左下斜到右上的一條光帶——幾團拉長的柔光沿著帶子排列（核心偏暖、外圍是主色），再壓上幾道暗塵帶
+    val gx = par * W * .05f
+    withTransform({ rotate(-24f, pivot = Offset(W / 2 + gx, H / 2)) }) {
+        for (k in 0 until 9) {
+            val u = k / 8f
+            val cx = W * (-.1f + 1.2f * u) + gx
+            val cy = H * .5f + 10f * sin(k * 1.9f)
+            val core = exp(-((u - .55f) / .28f).pow(2))
+            val rw = W * (.16f + .06f * hash01(k, 1))
+            val rh = H * (.13f + .05f * hash01(k, 2) + .08f * core)
+            val hOff = -20f + 40f * hash01(k, 3) + 30f * core
+            val a = .11f + .14f * core
+            drawOval(
+                Brush.radialGradient(listOf(st.c(hOff, .55f, .62f, a), st.c(hOff, .6f, .5f, a * .35f), st.c(hOff, .6f, .45f, 0f)), center = Offset(cx, cy), radius = rw),
+                topLeft = Offset(cx - rw, cy - rh), size = Size(rw * 2, rh * 2), blendMode = BlendMode.Plus,
             )
-            // 沿途的小殘珠
-            for (k in 0 until 6) {
-                val f = hash01(lane * 7 + k, cyc)
-                val ky = y0 + (y - y0) * f
-                if (ky < y - rMax * 2.2f) rainDrop(st, gl, buf, Offset(x0 + (hash01(k, cyc + lane) - .5f) * w * .8f, ky), .7f + 1f * hash01(k, lane + 3), .9f)
-            }
-            // 滑動中的水滴稍微拉長
-            rainDrop(st, gl, buf, Offset(x, y), rMax * (1f - .12f * s), 1f, stretch = 1f + .25f * s)
+        }
+        // 暗塵帶：沿著銀河中線斷斷續續
+        for (k in 0 until 6) {
+            val cx = W * (.05f + .18f * k) + gx + 10f * hash01(k, 7)
+            val cy = H * .5f + 6f * sin(k * 2.3f) - 2f
+            val rw = W * (.07f + .05f * hash01(k, 8)); val rh = H * (.025f + .02f * hash01(k, 9))
+            drawOval(
+                Brush.radialGradient(listOf(Color.Black.copy(alpha = .35f), Color.Transparent), center = Offset(cx, cy), radius = rw),
+                topLeft = Offset(cx - rw, cy - rh), size = Size(rw * 2, rh * 2),
+            )
         }
     }
-    // 靜止的細小水珠：很多、很小，慢慢浮現、停留、淡出，再出現在別處（雨一直在累積）
-    for (i in 0 until 170) {
-        val period = 10f + 10f * hash01(i, 7)
-        val ph = t / period + hash01(i, 3)
-        val cyc = kotlin.math.floor(ph).toInt()
-        val u = ph - cyc
-        val a = min(1f, u * 5f) * min(1f, (1f - u) * 4f)
-        val r = .45f + 2.1f * hash01(i, cyc + 5).pow(3f)
-        rainDrop(st, gl, buf, Offset(hash01(i, cyc * 2 + 11) * W, hash01(i, cyc * 2 + 12) * H), r, a)
+
+    // 星星：三層景深。遠的又小又多、幾乎不動；近的較大、帶一圈柔光、視差較大；各自緩慢閃爍
+    for (i in 0 until 230) {
+        val d = hash01(i, 21).pow(2.4f) // 0＝最遠
+        val k = .02f + .1f * d
+        // 銀河帶附近星星比較密：一部分星星往帶子中線靠
+        var x = hash01(i, 22) * W * 1.1f - W * .05f
+        var y = hash01(i, 23) * H
+        if (i % 3 == 0) {
+            val band = H * .5f - (x - W / 2) * .445f // 和銀河同一條斜線
+            y = band + (hash01(i, 24) - .5f) * H * .32f
+        }
+        x += par * W * k; y += parY * H * k * .5f
+        val tw = .55f + .45f * sin(t * (.6f + 2.2f * hash01(i, 25)) + i * 3.1f)
+        val a = (.25f + .6f * hash01(i, 26)) * tw * (.5f + .5f * d)
+        val r = .35f + .9f * d + .4f * hash01(i, 27)
+        val warm = (hash01(i, 28) - .5f) * 70f
+        drawCircle(st.c(warm, .25f, .85f, a), r, Offset(x, y), blendMode = BlendMode.Plus)
+        if (d > .45f) {
+            drawCircle(
+                Brush.radialGradient(listOf(st.c(warm, .4f, .75f, a * .35f), Color.Transparent), center = Offset(x, y), radius = r * 4.5f),
+                r * 4.5f, Offset(x, y), blendMode = BlendMode.Plus,
+            )
+        }
     }
-    vignette(.38f)
+
+    // 星座網：一群緩慢漂移的星點，彼此靠近時連出細線、遠離時線條淡去——網子一直在重組
+    val sc = scratch.get()!!
+    val nx = sc.netX; val ny = sc.netY
+    for (i in 0 until NET_N) {
+        val ax = hash01(i, 41); val ay = hash01(i, 42)
+        nx[i] = (ax * 1.2f - .1f) * W + 22f * sin(t * (.05f + .07f * hash01(i, 43)) + i * 1.7f) + par * W * .07f
+        ny[i] = ay * H + 16f * sin(t * (.04f + .06f * hash01(i, 44)) + i * 2.3f) + parY * H * .035f
+    }
+    val maxD = W * .17f
+    val lineW = .6f
+    for (i in 0 until NET_N) {
+        for (j in i + 1 until NET_N) {
+            val dx = nx[i] - nx[j]; val dy = ny[i] - ny[j]
+            if (abs(dx) > maxD || abs(dy) > maxD) continue
+            val dist = sqrt(dx * dx + dy * dy)
+            if (dist > maxD) continue
+            // 越近越亮；再乘一個緩慢的波，讓線條時隱時現
+            val wave = .5f + .5f * sin(t * .3f + (i * 7 + j * 13) * .37f)
+            val a = (1f - dist / maxD).pow(1.5f) * .3f * wave
+            if (a < .02f) continue
+            drawLine(st.c(-6f, .5f, .75f, a), Offset(nx[i], ny[i]), Offset(nx[j], ny[j]), lineW, blendMode = BlendMode.Plus)
+        }
+    }
+    for (i in 0 until NET_N) {
+        val tw = .6f + .4f * sin(t * (.8f + hash01(i, 45)) + i)
+        drawCircle(st.c(-6f, .35f, .85f, .55f * tw), .9f, Offset(nx[i], ny[i]), blendMode = BlendMode.Plus)
+    }
+
+    // 流星：偶爾劃過一道（約每 9～15 秒一顆）
+    val period = 12f
+    val ph = t / period
+    val cyc = kotlin.math.floor(ph).toInt()
+    val u = (ph - cyc) * period // 這一輪開始後的秒數
+    if (u < .9f && hash01(cyc, 51) > .25f) {
+        val p = u / .9f
+        val x0 = W * (.2f + .6f * hash01(cyc, 52)); val y0 = H * (.05f + .3f * hash01(cyc, 53))
+        val dxs = W * .28f; val dys = H * .16f
+        val hx = x0 + dxs * p; val hy = y0 + dys * p
+        val tail = .22f
+        val fade = sin(p * PI.toFloat())
+        drawLine(
+            Brush.linearGradient(listOf(Color.Transparent, st.c(-6f, .3f, .9f, .7f * fade)), Offset(hx - dxs * tail, hy - dys * tail), Offset(hx, hy)),
+            Offset(hx - dxs * tail, hy - dys * tail), Offset(hx, hy), 1.1f, blendMode = BlendMode.Plus,
+        )
+    }
+    vignette(.4f)
 }
 
 // ───────────── 6. 深海（只有光影：水面透下的體積光、晃動的光斑與陰影、懸浮微粒） ─────────────
@@ -438,37 +423,24 @@ private fun DrawScope.deepsea(st: BgState) {
         size = FULL,
     )
     val par = -(st.fx - .5f)
-    // 水面上的光源（太陽）在畫面上方很遠處：所有光束都從那裡呈扇形散開（有透視、不是平行的聚光燈）
-    val sx = W * .5f + par * W * .25f + (st.fx - .5f) * W * .3f
-    val sy = -H * .9f
-    // 體積光：許多細光束，粗細與亮度各不相同；每一束隨水面波動各自明暗閃動；
-    // 每束畫兩層（寬而淡＋窄而亮）讓邊緣柔和；越往深處越淡
-    for (i in 0 until 26) {
-        val h1 = hash01(i, 11); val h2 = hash01(i, 12); val h3 = hash01(i, 13)
-        val ang = (-.62f + 1.24f * (i + h1 * .8f) / 26f) + .025f * sin(t * (.13f + .1f * h2) + i)
-        // 這一束射到水面時的位置（y=0）與到底部的位置
-        val x0 = sx + (0f - sy) * kotlin.math.tan(ang)
-        val x1 = sx + (H - sy) * kotlin.math.tan(ang)
-        val flicker = .5f + .5f * sin(t * (.6f + 1.1f * h3) + i * 2.7f) * sin(t * (.23f + .3f * h1) + i)
-        val near = exp(-((x0 - st.fx * W) / (W * .35f)).pow(2))
-        val a = (.025f + .07f * h2 * h2 + .04f * near) * (.35f + .65f * flicker)
-        if (a < .01f) continue
-        val wTop = 1.5f + 7f * h3
-        val wBot = wTop * (3.5f + 3f * h1)
-        for (layer in 0 until 2) {
-            val k = if (layer == 0) 1f else .38f
-            val la = if (layer == 0) a * .55f else a
-            pathL.reset()
-            pathL.moveTo(x0 - wTop * k, 0f); pathL.lineTo(x0 + wTop * k, 0f)
-            pathL.lineTo(x1 + wBot * k, H); pathL.lineTo(x1 - wBot * k, H); pathL.close()
-            drawPath(
-                pathL,
-                Brush.verticalGradient(
-                    0f to st.c(-12f, .4f, .82f, la), .35f to st.c(-8f, .45f, .7f, la * .55f), .75f to st.c(-4f, .5f, .6f, la * .15f), 1f to st.c(0f, .5f, .5f, 0f),
-                    startY = 0f, endY = H,
-                ),
-                blendMode = BlendMode.Plus,
-            )
+    // 耶穌光（體積光）：從水面上方很遠處斜斜灑下的寬光帶，彼此錯落重疊；
+    // 每一道「橫向」與「縱向」都柔和漸淡（兩個漸層相乘），完全沒有邊界——像透過霧氣看到的光
+    val sx = W * .5f + par * W * .2f + (st.fx - .5f) * W * .25f
+    val sy = -H * 1.1f
+    for (i in 0 until 16) {
+        val h1 = hash01(i, 11); val h2 = hash01(i, 12); val h3 = hash01(i, 13); val h4 = hash01(i, 14)
+        // 角度：以畫面中央為主散開，再隨水面緩慢搖擺
+        val deg = (-26f + 52f * (i + h1) / 16f) + 2.2f * sin(t * (.07f + .06f * h2) + i * 1.3f)
+        // 寬度差很多：大多是寬而淡的光帶，少數窄而亮
+        val w = 18f + 110f * h2 * h2
+        val flicker = .55f + .45f * sin(t * (.25f + .45f * h3) + i * 2.7f) * sin(t * (.11f + .2f * h4) + i)
+        val near = exp(-((sx + (H * .5f - sy) * kotlin.math.tan(deg * PI.toFloat() / 180f) - st.fx * W) / (W * .4f)).pow(2))
+        val a = (.035f + .09f * (1f - h2) * h3 + .035f * near) * flicker
+        if (a < .008f) continue
+        val len = (H - sy) * 1.25f
+        val col = st.c(-10f + 14f * (h4 - .5f), .42f, .78f)
+        withTransform({ rotate(deg, pivot = Offset(sx, sy)) }) {
+            drawRect(SoftBeamBrush(sx, w, sy, len, col, a), Offset(sx - w / 2, sy), Size(w, len), blendMode = BlendMode.Plus)
         }
     }
     // 水面附近晃動的光斑：很多柔和的亮塊各自漂移、明暗起伏（水面起伏把光聚散），沒有線條
@@ -498,6 +470,30 @@ private fun DrawScope.deepsea(st: BgState) {
         drawCircle(st.c(-8f, .3f, .8f, a), .4f + 1.1f * d, Offset(x, y))
     }
     vignette(.34f)
+}
+
+/**
+ * 柔和光帶的著色器：橫向「透明 → 亮 → 透明」的漸層，乘上縱向「水面最亮、越深越淡」的漸層（DST_IN：用後者的透明度遮前者）。
+ * 兩個方向都漸淡，所以光帶沒有任何清楚的邊。座標是光帶自己的（呼叫端已經旋轉好）。
+ */
+private class SoftBeamBrush(
+    private val cx: Float, private val w: Float, private val top: Float, private val len: Float,
+    private val color: Color, private val alpha: Float,
+) : androidx.compose.ui.graphics.ShaderBrush() {
+    override fun createShader(size: Size): android.graphics.Shader {
+        val c = android.graphics.Color.argb((alpha.coerceIn(0f, 1f) * 255).toInt(), (color.red * 255).toInt(), (color.green * 255).toInt(), (color.blue * 255).toInt())
+        val clear = c and 0x00FFFFFF
+        val across = android.graphics.LinearGradient(
+            cx - w / 2, 0f, cx + w / 2, 0f,
+            intArrayOf(clear, c, clear), floatArrayOf(0f, .5f, 1f), android.graphics.Shader.TileMode.CLAMP,
+        )
+        // 縱向遮罩：光源到水面那段（約 42%）透明，進到水裡最亮，往下慢慢淡掉
+        val along = android.graphics.LinearGradient(
+            0f, top, 0f, top + len,
+            intArrayOf(0, 0, 0xFF000000.toInt(), 0x66000000, 0), floatArrayOf(0f, .42f, .5f, .75f, 1f), android.graphics.Shader.TileMode.CLAMP,
+        )
+        return android.graphics.ComposeShader(across, along, android.graphics.PorterDuff.Mode.DST_IN)
+    }
 }
 
 // ───────────── 7. 光軌 ─────────────

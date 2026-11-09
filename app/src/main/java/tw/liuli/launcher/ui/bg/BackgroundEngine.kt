@@ -32,7 +32,7 @@ import kotlin.math.max
 import kotlin.math.min
 
 /**
- * 背景樣式。[ambient]＝一直在動（雨滴滑落、水面光紋、光束流動）：轉場結束也不停，
+ * 背景樣式。[ambient]＝一直在動（星星閃爍與星座網、水下光影、光束流動）：轉場結束也不停，
  * 用 [BgState.at] 這個「只在背景真的有畫的時候才前進」的時鐘，暫停（面板滑動、離開琉璃）後接著動、不會跳。
  */
 enum class BgStyle(val id: String, val label: String, val note: String, val ambient: Boolean = false) {
@@ -40,8 +40,8 @@ enum class BgStyle(val id: String, val label: String, val note: String, val ambi
     BOKEH("bokeh", "光斑", "前後景深視差，焦點時光斑脈動"),
     TRIANGLES("triangles", "幾何三角", "曲面隆起並跟著焦點移動，三角面拉伸變形"),
     DOTS("dots", "波點圓圈", "遠近兩層波點，焦點處聚光"),
-    RAIN("rain", "雨窗", "毛玻璃上的雨滴累積、滑落，後面透出主色光暈", ambient = true),
-    DEEPSEA("deepsea", "深海", "水面波動的光紋與光束灑進深海，微粒緩緩飄落", ambient = true),
+    GALAXY("galaxy", "星空銀河", "斜跨的銀河與三層星星，漂移的星點時連時斷地織成星座網", ambient = true),
+    DEEPSEA("deepsea", "深海", "寬而模糊、錯落重疊的耶穌光灑進深海，光影晃動、微粒緩緩飄落", ambient = true),
     TRAILS("trails", "光軌", "長曝光光軌，兩端交錯開合"),
     CONTOUR("contour", "等高線", "焦點是山峰，等高線跟著流動"),
     PAPER("paper", "紙雕層疊", "多層山巒剪影，前景移動較多"),
@@ -51,8 +51,8 @@ enum class BgStyle(val id: String, val label: String, val note: String, val ambi
 
     companion object {
         fun byId(id: String?) = entries.firstOrNull { it.id == id } ?: when (id) {
-            // 舊版樣式改名：翻牌方陣 → 雨窗、絲綢 → 深海、極光 → 光束
-            "flip" -> RAIN
+            // 舊版樣式改名：翻牌方陣／雨窗 → 星空銀河、絲綢 → 深海、極光 → 光束
+            "flip", "rain" -> GALAXY
             "silk" -> DEEPSEA
             "aurora" -> BEAMS
             else -> WAVES
