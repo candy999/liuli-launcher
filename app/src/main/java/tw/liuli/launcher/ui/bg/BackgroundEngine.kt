@@ -240,6 +240,7 @@ class BackgroundEngine {
         if (started.isCompleted) return
         revealFrom = androidx.compose.ui.geometry.Offset(fx, fy)
         started.complete(Unit)
+        requestGlass() // 玻璃從黑色換成真正的背景
         // 從焦點盪出一圈漣漪，和擴散一起出現
         charge = max(charge, 0.35f)
         rippleTarget += 1f
@@ -622,16 +623,22 @@ class BackgroundEngine {
             glassReq.receive()
             workState.copyFrom(st)
             val s = style
+            val revealed = started.isCompleted
             withContext(Dispatchers.Default) {
-                workScope.draw(Density(1f), LayoutDirection.Ltr, workCanvas, Size(GLASS_W.toFloat(), GLASS_H.toFloat())) {
-                    scale(GLASS_W / LOGICAL_W, GLASS_H / LOGICAL_H, pivot = androidx.compose.ui.geometry.Offset.Zero) {
-                        drawStyle(s, workState)
+                if (!revealed) {
+                    // 冷啟動、背景還是黑的：玻璃也只透出黑色（不然時鐘的焦點玻璃會先露出彩色背景）
+                    px.fill(0xFF000000.toInt())
+                } else {
+                    workScope.draw(Density(1f), LayoutDirection.Ltr, workCanvas, Size(GLASS_W.toFloat(), GLASS_H.toFloat())) {
+                        scale(GLASS_W / LOGICAL_W, GLASS_H / LOGICAL_H, pivot = androidx.compose.ui.geometry.Offset.Zero) {
+                            drawStyle(s, workState)
+                        }
                     }
-                }
-                workBitmap.getPixels(px, 0, GLASS_W, 0, 0, GLASS_W, GLASS_H)
-                repeat(3) {
-                    boxBlurH(px, tmp, GLASS_W, GLASS_H, BLUR_R)
-                    boxBlurV(tmp, px, GLASS_W, GLASS_H, BLUR_R)
+                    workBitmap.getPixels(px, 0, GLASS_W, 0, 0, GLASS_W, GLASS_H)
+                    repeat(3) {
+                        boxBlurH(px, tmp, GLASS_W, GLASS_H, BLUR_R)
+                        boxBlurV(tmp, px, GLASS_W, GLASS_H, BLUR_R)
+                    }
                 }
                 expose(px)
             }
