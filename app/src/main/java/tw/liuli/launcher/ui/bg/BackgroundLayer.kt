@@ -17,7 +17,10 @@ import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.animation.core.FastOutSlowInEasing
+import kotlin.math.hypot
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.TransformOrigin
@@ -44,6 +47,17 @@ fun BackgroundLayer(engine: BackgroundEngine, blurred: () -> Float, modifier: Mo
         val fullW = constraints.maxWidth
         val fullH = constraints.maxHeight
         SideEffect { engine.setViewport(fullW, fullH) }
+
+        // 冷啟動：全黑（不畫背景）→ 第一個焦點出現後，從焦點往外擴散
+        val from = engine.revealFrom
+        val reveal = remember { Animatable(0f) }
+        LaunchedEffect(from) {
+            if (from != null && reveal.value < 1f) reveal.animateTo(1f, tween(REVEAL_MS, easing = FastOutSlowInEasing))
+        }
+        if (from == null) {
+            Canvas(Modifier.fillMaxSize()) { drawRect(Color.Black) }
+            return@BoxWithConstraints
+        }
 
         if (engine.blurLevel > 0) {
             // 背景執行緒每送來一張新圖，就從上一張交叉淡化過去（趕不上 30fps 時看起來仍然連續）
@@ -72,6 +86,7 @@ fun BackgroundLayer(engine: BackgroundEngine, blurred: () -> Float, modifier: Mo
                     drawImage(engine.glass, dstSize = IntSize(fullW, fullH), filterQuality = FilterQuality.Low)
                 }
                 pageBlur(engine, blurred(), IntSize(fullW, fullH))
+                revealMask(from, reveal.value)
             }
             return@BoxWithConstraints
         }
@@ -103,9 +118,33 @@ fun BackgroundLayer(engine: BackgroundEngine, blurred: () -> Float, modifier: Mo
                     drawStyle(engine.style, engine.st)
                 }
                 pageBlur(engine, blurred(), IntSize(w, h))
+                revealMask(from, reveal.value)
             }
         }
     }
+}
+
+private const val REVEAL_MS = 1400
+
+/**
+ * 冷啟動擴散：黑色蓋在背景上，中間挖一個從 [from]（畫面比例）往外長大的圓洞，邊緣柔和漸變。
+ * [t]＝0～1；1 之後不畫。圓的最終半徑＝到最遠角落的距離＋柔邊，保證整個畫面都露出來。
+ */
+private fun DrawScope.revealMask(from: Offset, t: Float) {
+    if (t >= 1f) return
+    val c = Offset(from.x * size.width, from.y * size.height)
+    val far = maxOf(
+        hypot(c.x, c.y), hypot(size.width - c.x, c.y),
+        hypot(c.x, size.height - c.y), hypot(size.width - c.x, size.height - c.y),
+    )
+    val feather = 0.45f // 柔邊佔半徑的比例
+    val r = (far / (1f - feather) * t).coerceAtLeast(1f)
+    drawRect(
+        Brush.radialGradient(
+            0f to Color.Transparent, (1f - feather) to Color.Transparent, 1f to Color.Black,
+            center = c, radius = r,
+        ),
+    )
 }
 
 /** 子頁面開啟時的模糊桌布：玻璃小圖放大蓋上去再壓暗。 */

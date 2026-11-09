@@ -32,10 +32,8 @@ class LauncherSettings(context: Context) {
     /** 背景模糊等級（0＝關，1～6）。 */
     var bgBlur by mutableIntStateOf(prefs.getInt("bg_blur", 0))
         private set
-    /** 背景紋理 id（空字串＝關，見 BgTexture）與不透明度（5～100%）。 */
-    var texture by mutableStateOf(prefs.getString("texture", "") ?: "")
-        private set
-    var textureOpacity by mutableIntStateOf(prefs.getInt("texture_opacity", 35))
+    /** 細緻噪點強度（0＝關，1～3 個色階，見 GrainLayer）。 */
+    var grain by mutableIntStateOf(prefs.getInt("grain", 0))
         private set
 
     fun updateBgBlur(level: Int) {
@@ -43,9 +41,10 @@ class LauncherSettings(context: Context) {
         prefs.edit().putInt("bg_blur", level).apply()
     }
 
-    fun updateTexture(id: String = texture, opacity: Int = textureOpacity) {
-        texture = id; textureOpacity = opacity
-        prefs.edit().putString("texture", id).putInt("texture_opacity", opacity).apply()
+    fun updateGrain(level: Int) {
+        grain = level
+        // 舊版的紙張紋理已移除，順便清掉
+        prefs.edit().putInt("grain", level).remove("texture").remove("texture_opacity").apply()
     }
 
     /** 螢幕小時鐘（看其他 App 時角落的時間）：開關、角落（0 左上 1 右上 2 左下 3 右下）、字級 sp、往內位移 dp、背景（0 陰影 1 半透明底）。 */

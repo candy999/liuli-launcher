@@ -46,8 +46,7 @@ import tw.liuli.launcher.ui.bg.BgColors
 import tw.liuli.launcher.ui.bg.BgLink
 import tw.liuli.launcher.ui.bg.BgStyle
 import tw.liuli.launcher.ui.bg.LocalBgLink
-import tw.liuli.launcher.ui.bg.BgTexture
-import tw.liuli.launcher.ui.bg.TextureLayer
+import tw.liuli.launcher.ui.bg.GrainLayer
 import tw.liuli.launcher.ui.calendar.CalendarScreen
 import tw.liuli.launcher.ui.glass.GlassBackdrop
 import tw.liuli.launcher.ui.glass.LocalGlassBackdrop
@@ -185,8 +184,8 @@ fun LiuliApp(lensing: Boolean, homePresses: Int, externalAction: Pair<Int, Strin
         }
 
         BackgroundLayer(engine, blurred = { pageBlur.value })
-        // 背景紋理：背景之上、所有介面之下（黑框、App 列都在它上面），原生解析度
-        TextureLayer(engine, BgTexture.byId(settings.texture), settings.textureOpacity)
+        // 細緻噪點：背景之上、所有介面之下（黑框、App 列都在它上面），原生解析度
+        GrainLayer(settings.grain)
 
         CompositionLocalProvider(LocalGlassBackdrop provides backdrop, LocalBgLink provides link) {
             // 主畫面一直保留（App 清單、焦點都不會重來），子頁面疊在上面

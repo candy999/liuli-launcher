@@ -227,6 +227,31 @@ class BackgroundEngine {
     private var pendingSince = 0L
     private val wake = Channel<Unit>(Channel.CONFLATED)
 
+    /**
+     * 冷啟動：背景先全黑、完全不畫，把 CPU／GPU 留給介面載入。
+     * 第一次有焦點（預設是第一個 App）時才開始，從焦點位置往外擴散（[revealFrom]，畫面比例 0～1）；
+     * 等太久沒有焦點（例如沒有任何 App）就從畫面中央開始。null＝還沒開始。
+     */
+    var revealFrom by mutableStateOf<androidx.compose.ui.geometry.Offset?>(null)
+        private set
+    private val started = kotlinx.coroutines.CompletableDeferred<Unit>()
+
+    private fun startReveal(fx: Float, fy: Float) {
+        if (started.isCompleted) return
+        revealFrom = androidx.compose.ui.geometry.Offset(fx, fy)
+        started.complete(Unit)
+        // 從焦點盪出一圈漣漪，和擴散一起出現
+        charge = max(charge, 0.35f)
+        rippleTarget += 1f
+        wake.trySend(Unit)
+        Log.i(TAG, "reveal from ${"%.2f".format(fx)},${"%.2f".format(fy)}")
+    }
+
+    /** 等到冷啟動擴散開始（最多 [REVEAL_FALLBACK_MS]）。 */
+    private suspend fun awaitStart() {
+        if (withTimeoutOrNull(REVEAL_FALLBACK_MS) { started.await() } == null) startReveal(0.5f, 0.5f)
+    }
+
     fun applyStyle(s: BgStyle) {
         style = s
         charge = max(charge, 0.35f)
@@ -256,6 +281,7 @@ class BackgroundEngine {
             tFy = fy; mFy = fy; st.fy = fy
             requestGlass()
             frame++
+            startReveal(fx, fy)
             return
         }
         dwellJob?.cancel()
@@ -302,6 +328,7 @@ class BackgroundEngine {
      * 5. 背景模糊開啟時：GPU 不畫向量，改由背景執行緒畫小圖＋模糊（[runBlur]），GPU 只放大一張圖。
      */
     suspend fun run() {
+        awaitStart()
         var pending = false
         while (true) {
             if (!pending) wake.receive()
@@ -619,6 +646,7 @@ class BackgroundEngine {
      * 低於 2 個像素誤差會跳到 15～40 階（出現格子與鋸齒）。所以縮小倍數 f ＝ 目標 σ ÷ 2.5，模糊越強、小圖越小、越省。
      */
     suspend fun runBlur() {
+        awaitStart()
         val scope = CanvasDrawScope()
         val state = BgState()
         var work: ImageBitmap? = null
@@ -664,9 +692,10 @@ class BackgroundEngine {
                 }
                 bmp.getPixels(px, 0, bw, 0, 0, bw, bh)
                 tDraw = android.os.SystemClock.uptimeMillis()
-                repeat(3) {
+                repeat(3) { pass ->
                     boxBlurH(px, tmp, bw, bh, BG_BLUR_R)
-                    boxBlurV(tmp, px, bw, bh, BG_BLUR_R)
+                    // 最後一次：抖色（每個通道各自加不到一階的噪點再取整數），模糊後的大面積漸層不會斷成色帶
+                    boxBlurV(tmp, px, bw, bh, BG_BLUR_R, dither = pass == 2)
                 }
             }
             val t1 = android.os.SystemClock.uptimeMillis()
@@ -719,6 +748,8 @@ class BackgroundEngine {
         const val LOGICAL_H = 270f
         const val GLASS_W = 240
         const val GLASS_H = 135
+        /** 冷啟動等第一個焦點最多多久（毫秒），之後從中央開始擴散。 */
+        private const val REVEAL_FALLBACK_MS = 4000L
         private const val DWELL = 180L
         private const val MAX_WAIT = 450L
         private const val TAU1 = 380f
@@ -850,10 +881,15 @@ private fun boxBlurH(src: IntArray, dst: IntArray, w: Int, h: Int, r: Int) {
     }
 }
 
-/** 垂直盒狀模糊：src → dst（同上的寫法）。 */
-private fun boxBlurV(src: IntArray, dst: IntArray, w: Int, h: Int, r: Int) {
+/**
+ * 垂直盒狀模糊：src → dst（同上的寫法）。
+ * [dither]：取整數前每個通道各自加 [0,1) 階的均勻噪點（floor(x+u) 的平均正好是 x），
+ * 介於兩階之間的顏色依比例交錯成相鄰兩階——平均是正確的中間色，不會出現一圈一圈的色帶。
+ */
+private fun boxBlurV(src: IntArray, dst: IntArray, w: Int, h: Int, r: Int, dither: Boolean = false) {
     val mul = (65536 + 2 * r) / (2 * r + 1) // 無條件進位：255 不會變 254
     val last = h - 1
+    if (dither) { boxBlurVDither(src, dst, w, h, r, mul); return }
     for (x in 0 until w) {
         var sr = 0; var sg = 0; var sb = 0
         for (k in -r..r) {
@@ -873,6 +909,41 @@ private fun boxBlurV(src: IntArray, dst: IntArray, w: Int, h: Int, r: Int) {
             idx += w
         }
     }
+}
+
+private var ditherSeed = 0x2545F491
+
+private fun boxBlurVDither(src: IntArray, dst: IntArray, w: Int, h: Int, r: Int, mul: Int) {
+    val last = h - 1
+    var z = ditherSeed
+    for (x in 0 until w) {
+        var sr = 0; var sg = 0; var sb = 0
+        for (k in -r..r) {
+            val c = src[(if (k < 0) 0 else if (k > last) last else k) * w + x]
+            sr += (c shr 16) and 0xFF; sg += (c shr 8) and 0xFF; sb += c and 0xFF
+        }
+        var idx = x
+        for (y in 0 until h) {
+            // xorshift32：兩個 32 位元亂數切成三個 16 位元噪點（R、G、B 各自獨立）
+            z = z xor (z shl 13); z = z xor (z ushr 17); z = z xor (z shl 5)
+            val n1 = z
+            z = z xor (z shl 13); z = z xor (z ushr 17); z = z xor (z shl 5)
+            val n2 = z
+            val vr = ((sr * mul + (n1 and 0xFFFF)) ushr 16).coerceAtMost(255)
+            val vg = ((sg * mul + (n1 ushr 16)) ushr 16).coerceAtMost(255)
+            val vb = ((sb * mul + (n2 and 0xFFFF)) ushr 16).coerceAtMost(255)
+            dst[idx] = (0xFF shl 24) or (vr shl 16) or (vg shl 8) or vb
+            val yo = y - r
+            val yi = y + r + 1
+            val out = src[(if (yo < 0) 0 else yo) * w + x]
+            val inn = src[(if (yi > last) last else yi) * w + x]
+            sr += ((inn shr 16) and 0xFF) - ((out shr 16) and 0xFF)
+            sg += ((inn shr 8) and 0xFF) - ((out shr 8) and 0xFF)
+            sb += (inn and 0xFF) - (out and 0xFF)
+            idx += w
+        }
+    }
+    ditherSeed = z
 }
 
 /**

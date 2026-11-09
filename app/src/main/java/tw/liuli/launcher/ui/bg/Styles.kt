@@ -39,6 +39,7 @@ private val FULL = Size(W, H)
  * 主執行緒畫全螢幕背景的同時，背景執行緒也在畫給玻璃用的小張背景，共用同一份會互相覆蓋。
  */
 private class Scratch {
+    val ditherPaint = DitherScope.newPaint()
     val path = Path()
     val mesh = buildMesh()
     val sampleA = FloatArray(2)
@@ -69,6 +70,11 @@ private fun hsl(h: Float, s: Float, l: Float, a: Float = 1f): Color =
 private fun BgState.c(hOff: Float, sat: Float, l: Float, a: Float = 1f) = hsl(h + hOff, sat * s * 1.6f, l, a)
 
 fun DrawScope.drawStyle(style: BgStyle, st: BgState) {
+    // 所有漸層開抖色（見 DitherScope）：8 bit 面板上的大面積暗色漸層不再一圈一圈斷開
+    DitherScope(this, scratch.get()!!.ditherPaint).drawStyleRaw(style, st)
+}
+
+private fun DrawScope.drawStyleRaw(style: BgStyle, st: BgState) {
     when (style) {
         BgStyle.WAVES -> waves(st)
         BgStyle.BOKEH -> bokeh(st)
