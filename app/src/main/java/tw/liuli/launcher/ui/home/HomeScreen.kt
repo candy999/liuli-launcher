@@ -47,6 +47,7 @@ import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.onPreviewKeyEvent
@@ -463,6 +464,33 @@ fun HomeScreen(
         ), gearReq)
     }
 
+    // 效能最佳化：透過本機網路 ADB 把琉璃預先編譯成機器碼（弱 CPU 的電視差很多）
+    fun perfSheet() {
+        open(SheetSpec(
+            "效能最佳化",
+            "把琉璃預先編譯成機器碼：第一次開面板、抽屜不再卡頓（弱 CPU 的電視差最多）。約 10 秒，完成後琉璃會自動重新啟動。需要網路 ADB 偵錯（和啟用按鍵服務相同）。",
+            listOf(
+                SheetItem("開始最佳化") {
+                    toast("編譯中…約 10 秒，請稍候")
+                    scope.launch {
+                        when (val r = SelfAdb.compileSelf(context)) {
+                            SelfAdb.Result.Success -> {
+                                toast("完成，重新啟動中")
+                                delay(800)
+                                SelfAdb.restartSelf(context)
+                            }
+                            SelfAdb.Result.NeedsAuthorization ->
+                                toast("請在電視上按「一律允許」後，再按一次開始")
+                            is SelfAdb.Result.NotConnectable ->
+                                toast("連不上本機 ADB，請確認已開啟網路 ADB 偵錯（${r.detail}）")
+                            is SelfAdb.Result.Failed -> toast("失敗：${r.detail}")
+                        }
+                    }
+                },
+            ),
+        ), gearReq)
+    }
+
     fun keysSheet() {
         val enabled = KeyMapStore.isServiceEnabled(context)
         val items = buildList {
@@ -504,12 +532,32 @@ fun HomeScreen(
                 SheetItem("邊框", if (settings.frameThickness == 0 && settings.frameFeather == 0 && settings.frameRadius == 0) "關" else "粗 ${settings.frameThickness}・圓 ${settings.frameRadius}・漸 ${settings.frameFeather}") { frameSheet() },
                 SheetItem("顯示／隱藏 App", if (hidden.isEmpty()) null else "已隱藏 ${hidden.size} 個") { visibilitySheet(0) },
                 SheetItem("遙控器按鍵", "改綁、防誤入原廠主畫面") { keysSheet() },
+                SheetItem("效能最佳化", "預先編譯，操作更順") { perfSheet() },
                 SheetItem("系統設定") { close(); SystemActions.systemSettings(context) },
                 SheetItem("網路") { close(); SystemActions.networkSettings(context) },
                 SheetItem("預設主畫面") { close(); SystemActions.homeSettings(context) },
                 SheetItem("重新整理 App 清單") { close(); reloadKey++ },
             ),
         ), gearReq)
+    }
+
+    // 量測用（adb）：ACTION=blur:3、paper:2、sheet:texture、sheet:settings（不用遙控器導覽，避免誤開 App）
+    // 放在所有面板函式宣告之後（區域函式要先宣告才能用）
+    LaunchedEffect(externalAction) {
+        val ext = externalAction.second
+        if (externalAction.first > 0 && ext != null) {
+            val arg = ext.substringAfter(':', "")
+            when (ext.substringBefore(':')) {
+                "blur" -> { val v = arg.toIntOrNull() ?: 0; settings.updateBgBlur(v); engine.applyBlur(v) }
+                "paper" -> settings.updatePaper(arg.toIntOrNull() ?: 0)
+                "sheet" -> when (arg) {
+                    "texture" -> textureSheet()
+                    "settings" -> openSettings()
+                    "frame" -> frameSheet()
+                    "perf" -> perfSheet()
+                }
+            }
+        }
     }
 
     // 返回鍵：面板 → 抽屜 → 回到第一個 App（主畫面不會離開）
@@ -535,9 +583,12 @@ fun HomeScreen(
                 .focusGroup(),
         ) {
             // ── 主畫面內容：抽屜或面板開啟時往後退。分成兩層，中間夾黑框 ──
+            // 半透明不開離屏緩衝（ModulateAlpha：每個繪圖指令各自乘透明度）：
+            // 預設做法會把整個畫面先畫到一張離屏圖再疊回來，兩層就是每幀多兩張全螢幕，弱 GPU（Mali-470）會排隊
             val recedeLayer = Modifier
                 .fillMaxSize()
                 .graphicsLayer {
+                    compositingStrategy = CompositingStrategy.ModulateAlpha
                     val k = recede.value
                     alpha = 1f - 0.4f * k
                     scaleX = 1f - 0.045f * k

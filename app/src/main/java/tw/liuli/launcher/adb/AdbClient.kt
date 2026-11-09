@@ -71,6 +71,11 @@ class AdbClient(private val host: String, private val port: Int, private val key
         }
     }
 
+    /** 讀取逾時（毫秒）：執行很久的指令（例如編譯）前調長。 */
+    fun setReadTimeout(ms: Int) {
+        socket.soTimeout = ms
+    }
+
     /** 執行一行 shell 指令，回傳輸出。 */
     fun shell(command: String): String {
         val localId = nextLocalId++

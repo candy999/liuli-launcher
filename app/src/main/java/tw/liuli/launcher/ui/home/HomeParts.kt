@@ -40,6 +40,7 @@ import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.onPreviewKeyEvent
@@ -110,6 +111,8 @@ fun GlassOnFocus(
             Modifier
                 .matchParentSize()
                 .graphicsLayer {
+                    // 淡入不開離屏緩衝（弱 GPU 上每次焦點動畫都多一張圖）
+                    compositingStrategy = CompositingStrategy.ModulateAlpha
                     val v = focus.value()
                     alpha = v
                     scaleX = 0.94f + 0.06f * v

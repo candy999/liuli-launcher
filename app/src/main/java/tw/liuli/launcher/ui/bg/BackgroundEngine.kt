@@ -518,7 +518,9 @@ class BackgroundEngine {
     }
 
     /** 由 Activity 的 FrameMetrics 監聽器（另一條執行緒）呼叫：每一幀的 vsync 時間與總耗時（奈秒）。 */
-    fun onFrameMetrics(vsyncNs: Long, totalNs: Long) {
+    fun onFrameMetrics(vsyncNs: Long, totalNs: Long, uiNs: Long) {
+        // 開面板、第一次組合新畫面時，主執行緒會忙上幾十～幾百毫秒；那是介面的成本，不能讓背景降檔（更不能被判成 CPU 瓶頸）
+        if (uiNs > UI_NOISE_NS) return
         synchronized(metricLock) {
             if (mCount < M_CAP) { mVsync[mCount] = vsyncNs; mTotal[mCount] = totalNs; mCount++ }
         }
@@ -719,6 +721,8 @@ class BackgroundEngine {
         private const val LAT_UP = 0.85f
         /** 靜止後，付不起的清楚檔位要等遙控器閒置這麼久才補畫。 */
         private const val STATIC_IDLE_MS = 700L
+        /** 這一幀之前主執行緒的延遲＋重新組合超過 8ms＝被介面拖慢，不採計。 */
+        private const val UI_NOISE_NS = 8_000_000L
 
         /** 解析度除數 from → to 的成本倍數：約 30% 固定（CPU、合成）＋70% 跟像素數成正比。 */
         private fun scaleCost(from: Int, to: Int) = 0.3f + 0.7f * (from * from).toFloat() / (to * to).toFloat()

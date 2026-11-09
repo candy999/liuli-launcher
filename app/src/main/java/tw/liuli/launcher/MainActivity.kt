@@ -67,7 +67,12 @@ class MainActivity : ComponentActivity() {
         // 每一幀的實際總耗時（vsync → 畫完）交給背景引擎決定解析度；在另一條執行緒回報，不佔主執行緒
         val metricsThread = HandlerThread("liuli-frames").apply { start() }
         window.addOnFrameMetricsAvailableListener({ _, m, _ ->
-            BackgroundEngine.active?.onFrameMetrics(m.getMetric(FrameMetrics.VSYNC_TIMESTAMP), m.getMetric(FrameMetrics.TOTAL_DURATION))
+            BackgroundEngine.active?.onFrameMetrics(
+                m.getMetric(FrameMetrics.VSYNC_TIMESTAMP),
+                m.getMetric(FrameMetrics.TOTAL_DURATION),
+                // 主執行緒在這一幀之前就在忙（介面工作）＋重新組合的時間：太長＝這一幀被介面拖慢，不算背景的成本
+                m.getMetric(FrameMetrics.UNKNOWN_DELAY_DURATION) + m.getMetric(FrameMetrics.ANIMATION_DURATION),
+            )
         }, Handler(metricsThread.looper))
         val lensing = Build.VERSION.SDK_INT >= 33 &&
             !(getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager).isLowRamDevice
