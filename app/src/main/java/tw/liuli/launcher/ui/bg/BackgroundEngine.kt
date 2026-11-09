@@ -299,19 +299,40 @@ class BackgroundEngine {
         wake.trySend(Unit)
     }
 
-    /**
-     * 簡潔模式（沒有選中任何項目）：背景自己慢慢換色、光暈中心緩緩漂移。
-     * 只在自動色彩開著時換色（選了固定顏色就照你選的）；位置漂移都會做。
-     */
-    fun drift(step: Int) {
-        if (follow) {
-            tH = (tH + 47f) % 360f
-            tS = tS.coerceIn(.42f, .62f)
-        }
-        val r = kotlin.random.Random(step * 7919 + 13)
-        tFx = .2f + .6f * r.nextFloat()
-        tFy = .25f + .5f * r.nextFloat()
+    // ── 簡潔模式的彈跳點：像老 DVD 待機畫面的標誌，一個看不見的點以很慢的等速斜著走、碰到邊緣就反彈；
+    //    背景的焦點位置跟著它，碰到邊緣時換一個顏色（只在自動色彩開著時）。背景因此一直平順地流動。 ──
+    @Volatile private var bounce = false
+    private var bx = .5f; private var by = .5f
+    private var bvx = BOUNCE_VX; private var bvy = BOUNCE_VY
+    private var lastBounceT = 0L
+
+    fun startBounce() {
+        bx = st.fx.coerceIn(BOUNCE_MIN, BOUNCE_MAX); by = st.fy.coerceIn(BOUNCE_MIN, BOUNCE_MAX)
+        bvx = if (bx < .5f) BOUNCE_VX else -BOUNCE_VX
+        bvy = if (by < .5f) BOUNCE_VY else -BOUNCE_VY
+        lastBounceT = 0L
+        bounce = true
+        if (follow) tS = tS.coerceIn(.42f, .62f)
         wake.trySend(Unit)
+    }
+
+    fun stopBounce() { bounce = false }
+
+    /** 每格推進彈跳點（在背景迴圈裡呼叫）。 */
+    private fun stepBounce(t: Long) {
+        if (!bounce) { lastBounceT = 0L; return }
+        val dt = if (lastBounceT == 0L) 0f else min(100L, t - lastBounceT) / 1000f
+        lastBounceT = t
+        var hit = false
+        bx += bvx * dt; by += bvy * dt
+        if (bx < BOUNCE_MIN) { bx = BOUNCE_MIN; bvx = -bvx; hit = true }
+        if (bx > BOUNCE_MAX) { bx = BOUNCE_MAX; bvx = -bvx; hit = true }
+        if (by < BOUNCE_MIN) { by = BOUNCE_MIN; bvy = -bvy; hit = true }
+        if (by > BOUNCE_MAX) { by = BOUNCE_MAX; bvy = -bvy; hit = true }
+        if (hit && follow) tH = (tH + 47f) % 360f
+        tFx = bx; tFy = by
+        // 背景直接跟著（不要再經過兩級 RC 拖慢；彈跳點本身已經是平順的等速移動）
+        mFx = bx; mFy = by
     }
 
     /** 固定顏色（色彩選擇器移動時即時預覽；引擎本身的緩衝讓換色平滑）。 */
@@ -457,8 +478,9 @@ class BackgroundEngine {
                     }
                     lastBgT = t
                     if (holdMs > 0) { holdUntil = t + holdMs; holdMs = 0 }
-                    // 持續動畫的樣式（雨窗、深海、光束）追上目標也不停
-                    done = step(t) && t > holdUntil && !style.ambient
+                    stepBounce(t)
+                    // 持續動畫的樣式（星空、深海、光束）與簡潔模式的彈跳點：追上目標也不停
+                    done = step(t) && t > holdUntil && !style.ambient && !bounce
                     if (done) snapToTarget()
                     if (lastAmbT != 0L) st.at += min(t - lastAmbT, 100L) / 1000f
                     lastAmbT = t
@@ -834,6 +856,11 @@ class BackgroundEngine {
         const val GLASS_H = 68
         /** 冷啟動等第一個焦點最多多久（毫秒），之後從中央開始擴散。 */
         private const val REVEAL_FALLBACK_MS = 4000L
+        /** 彈跳點的速度（畫面寬／高的比例，每秒）：橫越一次約 25 秒，慢得不會有急迫感。 */
+        private const val BOUNCE_VX = .03f
+        private const val BOUNCE_VY = .021f
+        private const val BOUNCE_MIN = .1f
+        private const val BOUNCE_MAX = .9f
         private const val DWELL = 180L
         private const val MAX_WAIT = 450L
         private const val TAU1 = 380f
