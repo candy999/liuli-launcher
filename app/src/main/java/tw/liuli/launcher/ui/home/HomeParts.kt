@@ -360,14 +360,17 @@ fun AppDrawer(
     val slide = remember { Animatable(1f) }
     val density = androidx.compose.ui.platform.LocalDensity.current
     val drawerHeightPx = with(density) { 440.dp.toPx() }
-    // 告訴背景：抽屜蓋住的部分不用畫
+    // 告訴背景：抽屜蓋住的部分不用畫。
+    // 「是否打開」要在組合時就更新（rememberUpdatedState），抽屜消失的同一格背景就畫滿；
+    // 只看 slide 的話，slide 要等到下一格的 LaunchedEffect 才歸位，中間那一兩格被蓋住的位置沒人畫＝露出黑色。
+    val openNow = androidx.compose.runtime.rememberUpdatedState(open)
     val bgEngine = LocalBgLink.current?.engine
     androidx.compose.runtime.DisposableEffect(bgEngine) {
         bgEngine?.cover = tw.liuli.launcher.ui.bg.PanelCover(
             height = drawerHeightPx,
             inset = with(density) { 20.dp.toPx() },
             corner = with(density) { 34.dp.toPx() },
-            slide = { slide.value },
+            slide = { if (openNow.value) slide.value else 1f },
         )
         onDispose { bgEngine?.cover = null }
     }
