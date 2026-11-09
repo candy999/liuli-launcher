@@ -31,6 +31,8 @@ import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
@@ -81,6 +83,8 @@ fun GlassSheet(spec: SheetSpec) {
     val first = remember { FocusRequester() }
     val slide = remember { Animatable(1f) }
     LaunchedEffect(Unit) { slide.animateTo(0f, SheetSpring) }
+    val sheetWidthPx = with(androidx.compose.ui.platform.LocalDensity.current) { 340.dp.toPx() }
+    val gapPx = with(androidx.compose.ui.platform.LocalDensity.current) { 40.dp.toPx() }
     val focusAt = spec.focusIndex.coerceIn(0, (spec.items.size - 1).coerceAtLeast(0))
     // 讓目標列一開始就被組合（遠一點的項目才不會因還沒放好而拿不到焦點）
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = focusAt)
@@ -100,8 +104,13 @@ fun GlassSheet(spec: SheetSpec) {
                 .fillMaxHeight()
                 .graphicsLayer {
                     translationX = slide.value * (size.width + 40.dp.toPx())
+                    // 滑動中：整塊面板畫成一張離屏圖、只移動位置；停下來恢復一般繪製
+                    compositingStrategy = if (slide.value > 0.001f) CompositingStrategy.Offscreen else CompositingStrategy.Auto
                 }
-                .liquidGlass(RoundedCornerShape(30.dp), tint = 0.09f)
+                .liquidGlass(
+                    RoundedCornerShape(30.dp), tint = 0.09f,
+                    slide = { Offset(slide.value * (sheetWidthPx + gapPx), 0f) },
+                )
                 .padding(horizontal = 16.dp, vertical = 26.dp)
                 .trapDirectionalFocus(),
         ) {

@@ -60,6 +60,12 @@ fun Modifier.liquidGlass(
     tint: Float = 0.03f,
     /** 0～1：讓玻璃更亮（例如焦點時）。在繪製階段讀取，不會觸發重新組合。 */
     highlight: () -> Float = { 0f },
+    /**
+     * 滑入動畫的位移（像素）：玻璃取樣背景時扣掉，以「停下來的位置」為準。
+     * 這樣滑動中玻璃的內容不變，整塊面板可以畫成一張圖只移動位置（見呼叫端的離屏圖層），
+     * 不用每格重畫整片玻璃與裡面所有元件。背景很模糊，滑動中取樣位置差一點看不出來。
+     */
+    slide: () -> Offset = { Offset.Zero },
 ): Modifier = composed {
     val backdrop = LocalGlassBackdrop.current
     var origin by remember { mutableStateOf(Offset.Zero) }
@@ -88,7 +94,12 @@ fun Modifier.liquidGlass(
     val oneShot = remember(backdrop.image) { OneShotGlass() }
 
     this
-        .onGloballyPositioned { origin = it.positionInRoot() }
+        .onGloballyPositioned {
+            // 取整數像素：滑動中位置的浮點誤差不會讓 origin 每格都「改變」而觸發重畫
+            val p = it.positionInRoot() - slide()
+            val o = Offset(p.x.roundToInt().toFloat(), p.y.roundToInt().toFloat())
+            if (o != origin) origin = o
+        }
         .drawWithCache {
             val outline = shape.createOutline(size, layoutDirection, this)
             val path = Path().apply { addOutline(outline) }

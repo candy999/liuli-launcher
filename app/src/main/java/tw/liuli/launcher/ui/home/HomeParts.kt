@@ -360,6 +360,7 @@ fun AppDrawer(
     onLongClick: (AppEntry, FocusRequester) -> Unit,
 ) {
     val slide = remember { Animatable(1f) }
+    val drawerHeightPx = with(androidx.compose.ui.platform.LocalDensity.current) { 440.dp.toPx() }
     val first = remember { FocusRequester() }
     val gridState = androidx.compose.foundation.lazy.grid.rememberLazyGridState()
     var focused by remember { mutableIntStateOf(0) }
@@ -389,8 +390,16 @@ fun AppDrawer(
                 .padding(horizontal = 20.dp)
                 .fillMaxWidth()
                 .height(440.dp)
-                .graphicsLayer { translationY = slide.value * size.height }
-                .liquidGlass(RoundedCornerShape(topStart = 34.dp, topEnd = 34.dp), tint = 0.09f)
+                .graphicsLayer {
+                    translationY = slide.value * size.height
+                    // 滑動中：整塊抽屜（玻璃＋App 格子）畫成一張離屏圖、只移動位置，GPU 每格只貼一個四邊形。
+                    // 停下來就恢復一般繪製（停住時不多一層）。
+                    compositingStrategy = if (slide.value > 0.001f) CompositingStrategy.Offscreen else CompositingStrategy.Auto
+                }
+                .liquidGlass(
+                    RoundedCornerShape(topStart = 34.dp, topEnd = 34.dp), tint = 0.09f,
+                    slide = { drawerSlideOffset(slide.value, drawerHeightPx) },
+                )
                 .padding(start = 28.dp, end = 28.dp, top = 24.dp)
                 .onPreviewKeyEvent { e ->
                     if (e.type == KeyEventType.KeyDown && e.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_DPAD_UP && focused < 6) {
@@ -431,3 +440,5 @@ fun AppDrawer(
     }
 }
 
+
+private fun drawerSlideOffset(slide: Float, heightPx: Float) = androidx.compose.ui.geometry.Offset(0f, slide * heightPx)
