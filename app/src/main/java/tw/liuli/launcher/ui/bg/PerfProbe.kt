@@ -13,9 +13,15 @@ object PerfProbe {
     var noHome by mutableStateOf(false)
     var noGlass by mutableStateOf(false)
     var noTiles by mutableStateOf(false)
+    var noClip by mutableStateOf(false)
+    var noShadow by mutableStateOf(false)
+    var noLabel by mutableStateOf(false)
+    var noImage by mutableStateOf(false)
+    var noScale by mutableStateOf(false)
 
     fun apply(arg: String) {
         val f = arg.split(',').map { it.trim() }.toSet()
         noBg = "bg" in f; noHome = "home" in f; noGlass = "glass" in f; noTiles = "tiles" in f
+        noClip = "clip" in f; noShadow = "shadow" in f; noLabel = "label" in f; noImage = "img" in f; noScale = "scale" in f
     }
 }
