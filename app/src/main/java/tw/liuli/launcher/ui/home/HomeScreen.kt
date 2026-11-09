@@ -224,6 +224,7 @@ fun HomeScreen(
     }
 
     fun open(spec: SheetSpec, returnTo: FocusRequester?) {
+        android.util.Log.i("LiuliUi", "sheet: ${spec.title}")
         sheet = OpenSheet(spec, returnTo ?: sheet?.returnTo)
     }
 
@@ -408,6 +409,7 @@ fun HomeScreen(
 
     /** 儲存（action＝null：刪除，恢復原本的功能）。 */
     fun saveBinding(code: Int, long: Boolean, action: KeyAction?) {
+        android.util.Log.i("LiuliKeys", "save ${KeyMapStore.keyName(code)} long=$long -> ${action?.encode() ?: "(remove)"}")
         if (KeyRemapService.isProtected(code)) { toast("這是基本鍵，不能改綁"); return }
         if (action == null) KeyMapStore.remove(context, code, long) else KeyMapStore.put(context, KeyBinding(code, long, action))
         KeyRemapService.instance?.reload()

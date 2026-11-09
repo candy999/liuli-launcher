@@ -7,6 +7,7 @@ import tw.liuli.launcher.data.TvSources
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.util.Log
 import android.view.KeyEvent
 import android.view.accessibility.AccessibilityEvent
 import tw.liuli.launcher.MainActivity
@@ -35,6 +36,7 @@ class KeyRemapService : AccessibilityService() {
         private set
 
     override fun onServiceConnected() {
+        Log.i(TAG, "service connected")
         instance = this
         reload()
         clock = ClockOverlay(this).also { it.start() }
@@ -61,6 +63,9 @@ class KeyRemapService : AccessibilityService() {
             monitor?.let { m -> handler.post { m(code) } }
         }
 
+        if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+            Log.i(TAG, "key ${KeyMapStore.keyName(code)} learner=${learner != null} rules=${rules.keys.count { it.first == code }}")
+        }
         // 學習模式：下一顆按下的鍵交給設定畫面
         learner?.let { callback ->
             // 受保護的基本鍵（方向、確定、返回、音量、電源）一律放行：
@@ -123,6 +128,7 @@ class KeyRemapService : AccessibilityService() {
     }
 
     private fun perform(action: KeyAction) {
+        Log.i(TAG, "perform ${action.encode()}")
         when (action) {
             KeyAction.LiuliHome -> openLiuli(null)
             KeyAction.Drawer -> openLiuli("drawer")
@@ -195,6 +201,7 @@ class KeyRemapService : AccessibilityService() {
 
     companion object {
         private const val LONG_PRESS_MS = 600L
+        private const val TAG = "LiuliKeys"
 
         /** 常見的原廠電視主畫面。 */
         val STOCK_LAUNCHERS = setOf(
