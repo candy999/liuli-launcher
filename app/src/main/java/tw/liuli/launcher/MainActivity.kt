@@ -24,6 +24,10 @@ import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.key
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.layout.layout
+import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -162,6 +166,17 @@ fun LiuliApp(lensing: Boolean, homePresses: Int, externalAction: Pair<Int, Strin
     // 過場有先後，不重疊：
     // 進入＝主畫面先加速淡出（0.15 秒），子頁面再從下方浮上來淡入；
     // 離開＝子頁面先往下淡出，完全消失後主畫面才淡入、往上浮回原位。
+    // 子頁面的可見度：主畫面先淡出，子頁面再浮上淡入；離開時子頁面先淡出
+    val pageVis = animateFloatAsState(
+        if (screen != Screen.Home) 1f else 0f,
+        if (screen != Screen.Home) tween(PAGE_IN_MS, delayMillis = PAGE_OUT_MS - 30, easing = LinearOutSlowInEasing)
+        else tween(PAGE_OUT_MS, easing = FastOutLinearInEasing),
+        label = "pageVis",
+    )
+    var lastPage by remember { mutableStateOf(Screen.Weather) }
+    if (screen != Screen.Home) lastPage = screen
+    var pagesReady by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { kotlinx.coroutines.delay(4000); pagesReady = true }
     val homeVis = animateFloatAsState(
         if (screen == Screen.Home) 1f else 0f,
         if (screen == Screen.Home) tween(PAGE_IN_MS, delayMillis = PAGE_OUT_MS, easing = LinearOutSlowInEasing)
@@ -218,19 +233,20 @@ fun LiuliApp(lensing: Boolean, homePresses: Int, externalAction: Pair<Int, Strin
                 onOpenCalendar = { calendarStart = null; screen = Screen.Calendar },
                 onOpenWeather = { screen = Screen.Weather },
             )
-            AnimatedVisibility(
-                visible = screen != Screen.Home,
-                enter = fadeIn(tween(PAGE_IN_MS, delayMillis = PAGE_OUT_MS - 30, easing = LinearOutSlowInEasing)) +
-                    slideInVertically(tween(PAGE_IN_MS + 80, delayMillis = PAGE_OUT_MS - 30, easing = LinearOutSlowInEasing)) { it / 28 },
-                exit = fadeOut(tween(PAGE_OUT_MS, easing = FastOutLinearInEasing)) +
-                    slideOutVertically(tween(PAGE_OUT_MS, easing = FastOutLinearInEasing)) { it / 40 },
-            ) {
-                var shown by remember { mutableStateOf(screen) }
-                if (screen != Screen.Home) shown = screen
-                when (shown) {
-                    Screen.Calendar -> CalendarScreen(home.now, calendarStart ?: home.now.toLocalDate())
-                    Screen.Weather -> WeatherScreen(home)
-                    Screen.Home -> Unit
+            // 月曆、天氣兩頁預先組合好（開好 4 秒後），平常不擺放＝不畫、拿不到焦點；
+            // 打開時只剩淡入。以前每次打開才組合：天氣頁第一格主執行緒卡 0.3～0.7 秒、月曆 0.2 秒以上。
+            for (page in PAGES) {
+                val isLast = page == lastPage
+                val placed = isLast && (screen == page || pageVis.value > 0.001f)
+                if (pagesReady || placed) {
+                    key(page) {
+                        PageHost(placed, alpha = { if (isLast) pageVis.value else 0f }) {
+                            when (page) {
+                                Screen.Calendar -> CalendarScreen(home.now, calendarStart ?: home.now.toLocalDate(), active = screen == Screen.Calendar)
+                                else -> WeatherScreen(home, active = screen == Screen.Weather)
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -246,3 +262,28 @@ object BuildConfigInfo {
 /** 頁面過場：舊的先離開（加速淡出）、新的再進來（減速淡入）。 */
 private const val PAGE_OUT_MS = 150
 private const val PAGE_IN_MS = 260
+
+private val PAGES = listOf(Screen.Calendar, Screen.Weather)
+
+/**
+ * 子頁面的外殼：一直組合著，[placed] 為 false 時只量尺寸、不擺放（不畫、拿不到焦點）。
+ * 淡入淡出與上下浮動只改圖層屬性，頁面內容不用重畫。
+ */
+@androidx.compose.runtime.Composable
+private fun PageHost(placed: Boolean, alpha: () -> Float, content: @androidx.compose.runtime.Composable () -> Unit) {
+    val lift = with(LocalDensity.current) { 20.dp.toPx() }
+    Box(
+        Modifier
+            .fillMaxSize()
+            .layout { m, c ->
+                val p = m.measure(c)
+                layout(p.width, p.height) {
+                    if (placed) p.placeWithLayer(0, 0) {
+                        val a = alpha()
+                        this.alpha = a
+                        translationY = (1f - a) * lift
+                    }
+                }
+            },
+    ) { content() }
+}

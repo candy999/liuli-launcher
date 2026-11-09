@@ -80,12 +80,19 @@ private val zh = Locale.TAIWAN
  * 上下左右選日期；越過月初、月底自動翻到上一個或下一個月；頻道鍵也能換月。
  */
 @Composable
-fun CalendarScreen(now: java.time.LocalDateTime, initial: LocalDate = now.toLocalDate()) {
+fun CalendarScreen(now: java.time.LocalDateTime, initial: LocalDate = now.toLocalDate(), active: Boolean = true) {
     val today = now.toLocalDate()
     var sel by remember(initial) { mutableStateOf(initial) }
     val month = YearMonth.from(sel)
     val root = remember { FocusRequester() }
-    LaunchedEffect(Unit) { runCatching { root.requestFocus() } }
+    // 頁面是預先組合好的：每次打開都回到指定的日子（預設今天），再拿焦點
+    LaunchedEffect(active, initial) {
+        if (active) {
+            sel = initial
+            kotlinx.coroutines.delay(16)
+            runCatching { root.requestFocus() }
+        }
+    }
     // 農民曆計算比較慢（宜忌、吉時…）：日期格子先畫，算好的日子放進快取再補上。
     // 這個月算完接著預先算上個月、下個月，翻月時通常已經好了。
     val cache = remember { mutableStateMapOf<LocalDate, DayInfo>() }

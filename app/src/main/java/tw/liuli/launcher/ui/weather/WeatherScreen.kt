@@ -62,13 +62,21 @@ private val Rain = Color(0xFF9FD4FF)
  * 今天預設選「現在」所在的時段，切到其他天時保持同一個時段（例如都看下午 3 點）。
  */
 @Composable
-fun WeatherScreen(home: HomeContext) {
+fun WeatherScreen(home: HomeContext, active: Boolean = true) {
     val root = remember { FocusRequester() }
-    LaunchedEffect(Unit) { runCatching { root.requestFocus() } }
+
     val w = home.weather
     val nowSlot = LocalDateTime.now().hour / 3
     var day by remember { mutableIntStateOf(0) }
     var slot by remember { mutableIntStateOf(nowSlot) }
+    // 頁面是預先組合好的：每次打開都回到「今天、現在」，再拿焦點
+    LaunchedEffect(active) {
+        if (active) {
+            day = 0; slot = LocalDateTime.now().hour / 3
+            kotlinx.coroutines.delay(16)
+            runCatching { root.requestFocus() }
+        }
+    }
 
     Box(
         Modifier

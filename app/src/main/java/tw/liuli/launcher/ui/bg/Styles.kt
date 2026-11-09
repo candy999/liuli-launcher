@@ -119,6 +119,18 @@ private fun DrawScope.focusGlow(st: BgState, r: Float, a: Float) {
 }
 
 
+/**
+ * 高斯式的徑向漸層：透明度照 e^(-4.5·r²) 從中心往外衰減（不是線性），看起來是「暈開」的光，沒有圓的邊。
+ * [color]：中心的顏色（含透明度）。
+ */
+private fun gaussBrush(color: Color, center: Offset, radius: Float): Brush {
+    val stops = Array(7) { i ->
+        val x = i / 6f
+        x to color.copy(alpha = color.alpha * if (i == 6) 0f else exp(-4.5f * x * x))
+    }
+    return Brush.radialGradient(*stops, center = center, radius = radius)
+}
+
 // ───────────── 1. 流線浪潮 ─────────────
 
 private fun DrawScope.waves(st: BgState) {
@@ -312,29 +324,36 @@ private fun DrawScope.galaxy(st: BgState) {
     // 銀河：從左下斜到右上的一條光帶——幾團拉長的柔光沿著帶子排列（核心偏暖、外圍是主色），再壓上幾道暗塵帶
     val gx = par * W * .05f
     withTransform({ rotate(-24f, pivot = Offset(W / 2 + gx, H / 2)) }) {
-        for (k in 0 until 9) {
-            val u = k / 8f
-            val cx = W * (-.1f + 1.2f * u) + gx
-            val cy = H * .5f + 10f * sin(k * 1.9f)
-            val core = exp(-((u - .55f) / .28f).pow(2))
-            val rw = W * (.16f + .06f * hash01(k, 1))
-            val rh = H * (.13f + .05f * hash01(k, 2) + .08f * core)
-            val hOff = -20f + 40f * hash01(k, 3) + 30f * core
-            val a = .11f + .14f * core
-            drawOval(
-                Brush.radialGradient(listOf(st.c(hOff, .55f, .62f, a), st.c(hOff, .6f, .5f, a * .35f), st.c(hOff, .6f, .45f, 0f)), center = Offset(cx, cy), radius = rw),
-                topLeft = Offset(cx - rw, cy - rh), size = Size(rw * 2, rh * 2), blendMode = BlendMode.Plus,
-            )
+        // 沿著帶子排很多團互相重疊的高斯柔光（暈開、沒有邊），中段的核心偏暖、較亮較厚
+        for (k in 0 until 16) {
+            val u = k / 15f
+            val cx = W * (-.12f + 1.24f * u) + gx + 8f * (hash01(k, 4) - .5f)
+            val cy = H * .5f + 9f * sin(k * 1.3f) + 6f * (hash01(k, 5) - .5f)
+            val core = exp(-((u - .55f) / .26f).pow(2))
+            val rw = W * (.12f + .07f * hash01(k, 1))
+            val sy = .32f + .18f * hash01(k, 2) + .22f * core
+            val hOff = -20f + 40f * hash01(k, 3) + 34f * core
+            val a = .1f + .13f * core
+            withTransform({ scale(1f, sy, pivot = Offset(cx, cy)) }) {
+                drawRect(gaussBrush(st.c(hOff, .55f, .6f, a), Offset(cx, cy), rw), Offset(cx - rw, cy - rw), Size(rw * 2, rw * 2), blendMode = BlendMode.Plus)
+            }
+        }
+        // 星雲顆粒：銀河裡無數暗淡的小星點（高斯分佈在中線附近），讓光帶有細節而不是一團霧
+        for (k in 0 until 150) {
+            val x = hash01(k, 61) * W * 1.2f - W * .1f + gx
+            val g = (hash01(k, 62) + hash01(k, 63) + hash01(k, 64) - 1.5f) // 近似常態分佈
+            val y = H * .5f + g * H * .16f
+            val a = (.08f + .22f * hash01(k, 65)) * (.6f + .4f * sin(t * (.5f + hash01(k, 66)) + k))
+            drawCircle(st.c(10f * (hash01(k, 67) - .5f), .3f, .82f, a), .35f + .45f * hash01(k, 68), Offset(x, y), blendMode = BlendMode.Plus)
         }
         // 暗塵帶：沿著銀河中線斷斷續續
         for (k in 0 until 6) {
             val cx = W * (.05f + .18f * k) + gx + 10f * hash01(k, 7)
             val cy = H * .5f + 6f * sin(k * 2.3f) - 2f
             val rw = W * (.07f + .05f * hash01(k, 8)); val rh = H * (.025f + .02f * hash01(k, 9))
-            drawOval(
-                Brush.radialGradient(listOf(Color.Black.copy(alpha = .35f), Color.Transparent), center = Offset(cx, cy), radius = rw),
-                topLeft = Offset(cx - rw, cy - rh), size = Size(rw * 2, rh * 2),
-            )
+            withTransform({ scale(1f, rh / rw, pivot = Offset(cx, cy)) }) {
+                drawRect(gaussBrush(Color.Black.copy(alpha = .38f), Offset(cx, cy), rw), Offset(cx - rw, cy - rw), Size(rw * 2, rw * 2))
+            }
         }
     }
 
@@ -443,23 +462,23 @@ private fun DrawScope.deepsea(st: BgState) {
             drawRect(SoftBeamBrush(sx, w, sy, len, col, a), Offset(sx - w / 2, sy), Size(w, len), blendMode = BlendMode.Plus)
         }
     }
-    // 水面附近晃動的光斑：很多柔和的亮塊各自漂移、明暗起伏（水面起伏把光聚散），沒有線條
-    for (i in 0 until 12) {
-        val cx = (hash01(i, 21) * 1.2f - .1f) * W + 22f * sin(t * (.17f + .12f * hash01(i, 22)) + i) + par * W * .06f
-        val cy = H * (.02f + .2f * hash01(i, 23)) + 6f * sin(t * (.21f + .1f * hash01(i, 24)) + i * 1.3f)
-        val r = 18f + 34f * hash01(i, 25)
-        val a = .07f * (.5f + .5f * sin(t * (.5f + .6f * hash01(i, 26)) + i * 2f))
-        drawOval(
-            Brush.radialGradient(listOf(st.c(-12f, .35f, .85f, a), st.c(-10f, .4f, .7f, 0f)), center = Offset(cx, cy), radius = r),
-            topLeft = Offset(cx - r * 1.6f, cy - r * .6f), size = Size(r * 3.2f, r * 1.2f), blendMode = BlendMode.Plus,
-        )
+    // 水面附近晃動的光：幾團很大、高斯暈開的柔光各自漂移、明暗起伏（水面起伏把光聚散），融在水裡、看不出形狀
+    for (i in 0 until 7) {
+        val cx = (hash01(i, 21) * 1.3f - .15f) * W + 30f * sin(t * (.11f + .08f * hash01(i, 22)) + i) + par * W * .06f
+        val cy = H * (.0f + .14f * hash01(i, 23)) + 5f * sin(t * (.17f + .1f * hash01(i, 24)) + i * 1.3f)
+        val r = 70f + 70f * hash01(i, 25)
+        val a = .09f * (.45f + .55f * sin(t * (.35f + .4f * hash01(i, 26)) + i * 2f))
+        if (a < .01f) continue
+        withTransform({ scale(1f, .45f, pivot = Offset(cx, cy)) }) {
+            drawRect(gaussBrush(st.c(-12f, .35f, .82f, a), Offset(cx, cy), r), Offset(cx - r, cy - r), Size(r * 2, r * 2), blendMode = BlendMode.Plus)
+        }
     }
     // 緩慢飄過的陰影（水面的起伏遮住一部分光）
     for (i in 0 until 4) {
         val cx = frac(hash01(i, 31) + t * .006f * (1f + hash01(i, 32))) * W * 1.6f - W * .3f
         val cy = H * (.15f + .35f * hash01(i, 33))
         val r = W * (.18f + .12f * hash01(i, 34))
-        drawRect(Brush.radialGradient(listOf(Color.Black.copy(alpha = .16f), Color.Transparent), center = Offset(cx, cy), radius = r), size = FULL)
+        drawRect(gaussBrush(Color.Black.copy(alpha = .18f), Offset(cx, cy), r), size = FULL)
     }
     // 懸浮微粒（海雪）：慢慢往下飄；近的大、亮、飄得快、視差大；落在光束裡的更亮
     for (p in 0 until 46) {
