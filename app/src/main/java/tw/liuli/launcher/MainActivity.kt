@@ -280,6 +280,10 @@ private fun PageHost(placed: Boolean, alpha: () -> Float, content: @androidx.com
                 layout(p.width, p.height) {
                     if (placed) p.placeWithLayer(0, 0) {
                         val a = alpha()
+                        // 淡入淡出中：整頁固定成一張快取圖、只改透明度（不然半透明時每格都要把整頁重畫進暫存層，
+                        // 海信上每格延遲衝到 200ms 以上）；完全顯示時回到一般繪製
+                        compositingStrategy = if (a < .999f) androidx.compose.ui.graphics.CompositingStrategy.Offscreen
+                        else androidx.compose.ui.graphics.CompositingStrategy.Auto
                         this.alpha = a
                         translationY = (1f - a) * lift
                     }
