@@ -83,6 +83,9 @@ fun Modifier.liquidGlass(
         }
     }
     val matrix = remember { android.graphics.Matrix() }
+    // 背景＋白霧＋淡光合成一個著色器、一次填色（大面積玻璃如抽屜，弱 GPU 少填一整層）。
+    // 只在位置、大小或亮度改變時重建；靜止時不配置任何物件。
+    val oneShot = remember(backdrop.image) { OneShotGlass() }
 
     this
         .onGloballyPositioned { origin = it.positionInRoot() }
@@ -103,28 +106,64 @@ fun Modifier.liquidGlass(
                     if (lens != null && Build.VERSION.SDK_INT >= 33) {
                         drawPath(path, lens.brush(origin, size.width, size.height, radiusPx, sx, sy))
                     } else if (wall != null) {
-                        // 貼圖座標＝（玻璃在畫面上的位置＋本地座標）× 小圖縮放
-                        matrix.setScale(1f / sx, 1f / sy)
-                        matrix.postTranslate(-origin.x, -origin.y)
-                        wall.shader.setLocalMatrix(matrix)
+                        // 貼圖座標＝（玻璃在畫面上的位置＋本地座標）× 小圖縮放；白霧與淡光用 SCREEN 合成進同一個著色器：
+                        // 白色 α 疊在 c 上＝1-(1-c)(1-α)＝screen(c, α)，結果和分開畫兩層相同
+                        oneShot.prepare(wall, matrix, origin, size, sx, sy, mistTop(tint, hl), mistOf(tint, hl))
                         drawIntoCanvas { it.nativeCanvas.drawPath(androidPath, wall) }
+                        return@onDrawBehind
                     }
                 } else {
                     drawPath(path, Color(0x99141A2E))
                 }
                 // 2＋3. 很淡的白色薄霧（焦點時再亮一點＝更過曝）＋由上往下非常淡的光，合成一次填色（弱 GPU 少填一層）。
                 // 兩層半透明白疊起來的透明度＝1-(1-a)(1-b)，結果和分開畫相同。沒有任何描邊或線條。
-                val mist = tint + 0.10f * hl
-                val glow = 0.06f + 0.06f * hl
                 drawPath(
                     path,
                     Brush.verticalGradient(
-                        0f to Color.White.copy(alpha = 1f - (1f - mist) * (1f - glow)),
-                        0.6f to Color.White.copy(alpha = mist),
+                        0f to Color.White.copy(alpha = mistTop(tint, hl)),
+                        0.6f to Color.White.copy(alpha = mistOf(tint, hl)),
                     ),
                 )
             }
         }
+}
+
+/** 白色薄霧（焦點時再亮一點＝更過曝）。 */
+private fun mistOf(tint: Float, hl: Float) = tint + 0.10f * hl
+
+/** 頂端：薄霧＋由上往下非常淡的光，兩層半透明白合起來的透明度＝1-(1-a)(1-b)。 */
+private fun mistTop(tint: Float, hl: Float): Float {
+    val glow = 0.06f + 0.06f * hl
+    return 1f - (1f - mistOf(tint, hl)) * (1f - glow)
+}
+
+/**
+ * 玻璃的單次填色著色器：背景小圖（BitmapShader）SCREEN 一條白色漸層（頂端 [top] → 0.6 高度處 [mid]）。
+ * 只有位置、大小、亮度改變時重建（例如面板滑入的那幾幀）。
+ */
+private class OneShotGlass {
+    private var key = FloatArray(6) { Float.NaN }
+    private var bitmapShader: android.graphics.Shader? = null
+
+    fun prepare(
+        paint: android.graphics.Paint, matrix: android.graphics.Matrix,
+        origin: Offset, size: Size, sx: Float, sy: Float, top: Float, mid: Float,
+    ) {
+        if (bitmapShader == null) bitmapShader = paint.shader
+        val bmp = bitmapShader ?: return
+        val k = floatArrayOf(origin.x, origin.y, size.width, size.height, top, mid)
+        if (k.contentEquals(key)) return
+        key = k
+        matrix.setScale(1f / sx, 1f / sy)
+        matrix.postTranslate(-origin.x, -origin.y)
+        bmp.setLocalMatrix(matrix)
+        fun white(a: Float) = android.graphics.Color.argb((a.coerceIn(0f, 1f) * 255f + 0.5f).toInt(), 255, 255, 255)
+        val glow = android.graphics.LinearGradient(
+            0f, 0f, 0f, size.height * 0.6f, white(top), white(mid), android.graphics.Shader.TileMode.CLAMP,
+        )
+        // shaderA＝dst（背景）、shaderB＝src（白光）；子著色器的矩陣先設好再組合，原生物件一次建好
+        paint.shader = android.graphics.ComposeShader(bmp, glow, android.graphics.PorterDuff.Mode.SCREEN)
+    }
 }
 
 /**

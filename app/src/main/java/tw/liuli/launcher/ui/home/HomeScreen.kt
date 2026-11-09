@@ -762,15 +762,14 @@ fun HomeScreen(
         ) {
             // ── 主畫面內容：抽屜或面板開啟時往後退。分成兩層，中間夾黑框 ──
             // 半透明不開離屏緩衝（ModulateAlpha：每個繪圖指令各自乘透明度）：
-            // 預設做法會把整個畫面先畫到一張離屏圖再疊回來，兩層就是每幀多兩張全螢幕，弱 GPU（Mali-470）會排隊
+            // 預設做法會把整個畫面先畫到一張離屏圖再疊回來，兩層就是每幀多兩張全螢幕，弱 GPU（Mali-470）會排隊。
+            // 只變淡、不縮小：縮放比例每幀改變時，所有文字（尤其大時鐘）每幀都要重新點陣化，
+            // 弱電視上開面板／抽屜的動畫期間每幀多 25ms 以上。
             val recedeLayer = Modifier
                 .fillMaxSize()
                 .graphicsLayer {
                     compositingStrategy = CompositingStrategy.ModulateAlpha
-                    val k = recede.value
-                    alpha = 1f - 0.4f * k
-                    scaleX = 1f - 0.045f * k
-                    scaleY = 1f - 0.045f * k
+                    alpha = 1f - 0.4f * recede.value
                 }
             // 第 1 層：會左右捲動的列（訊號源、常用 App、名稱）——在黑框之下，捲到邊緣會被框蓋住
             Box(recedeLayer) {
