@@ -75,11 +75,15 @@ sealed class KeyAction(val label: String) {
             KeyEvent.KEYCODE_MEDIA_STOP to "停止播放",
         )
 
-        /** 設定畫面的分類。 */
-        val LIULI = listOf(LiuliHome, Drawer, Inputs, Calendar, Weather, ClockToggle)
-        val VOLUME = listOf(VolumeUp, VolumeDown, Mute)
-        val MEDIA = MEDIA_NAMES.keys.map { Media(it) }
-        val SYSTEM = listOf(Back, Recents, Notifications, QuickSettings, Assistant, SystemSettings, NetworkSettings, PowerDialog, Screenshot)
+        /*
+         * 設定畫面的分類。一定要用 get()（每次呼叫才建立）：如果寫成一般的 val，
+         * 先用到某個子物件（例如 LiuliHome）時，JVM 會先初始化父類別 KeyAction 與這個 companion，
+         * 而這時那個子物件本身還沒建立完成，清單裡就會放進 null（儲存綁定後讀取就閃退）。
+         */
+        val LIULI: List<KeyAction> get() = listOf(LiuliHome, Drawer, Inputs, Calendar, Weather, ClockToggle)
+        val VOLUME: List<KeyAction> get() = listOf(VolumeUp, VolumeDown, Mute)
+        val MEDIA: List<KeyAction> get() = MEDIA_NAMES.keys.map { Media(it) }
+        val SYSTEM: List<KeyAction> get() = listOf(Back, Recents, Notifications, QuickSettings, Assistant, SystemSettings, NetworkSettings, PowerDialog, Screenshot)
 
         fun decode(raw: String): KeyAction? = when {
             raw.startsWith("app:") -> {
