@@ -63,17 +63,15 @@ fun AppTile(
             Modifier
                 .fillMaxWidth()
                 .aspectRatio(16f / 9f)
-                .let { if (tw.liuli.launcher.ui.bg.PerfProbe.noScale) it else it.focusScale(focus, 1.10f) }
-                .let {
-                    if (tw.liuli.launcher.ui.bg.PerfProbe.noShadow) it else it.graphicsLayer {
-                        shadowElevation = 8.dp.toPx() * focus.value()
-                        shape = tileShape
-                        clip = false
-                    }
+                .focusScale(focus, 1.10f)
+                .graphicsLayer {
+                    shadowElevation = 8.dp.toPx() * focus.value()
+                    shape = tileShape
+                    clip = false
                 }
                 .then(extra)
                 .focusTarget(focus, req, onFocused, onClick, onLongClick = { onLongClick(req) })
-                .let { if (tw.liuli.launcher.ui.bg.PerfProbe.noClip) it else it.clip(tileShape) }
+                .clip(tileShape)
                 .background(Color(0xFF1B1E26))
                 .drawWithContent {
                     drawContent()
@@ -93,7 +91,7 @@ fun AppTile(
         ) {
             val banner = app.banner
             val icon = app.icon
-            if (!tw.liuli.launcher.ui.bg.PerfProbe.noImage) when {
+            when {
                 banner != null -> Image(banner, app.label, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
                 icon != null -> Image(icon, app.label, Modifier.align(Alignment.Center).size(width * 0.28f))
             }
@@ -110,7 +108,7 @@ fun AppTile(
                 )
             }
         }
-        if (showLabel && !tw.liuli.launcher.ui.bg.PerfProbe.noLabel) {
+        if (showLabel) {
             Spacer(Modifier.height(10.dp))
             GText(
                 app.label,

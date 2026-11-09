@@ -99,9 +99,20 @@ fun Modifier.focusScale(
 fun rememberFocusAnim(): FocusAnim {
     val anim = remember { Animatable(0f) }
     val focus = remember { FocusAnim(anim) }
-    LaunchedEffect(focus.focused) { anim.animateTo(if (focus.focused) 1f else 0f, FocusSpring) }
+    val snap = LocalFocusSnap.current
+    LaunchedEffect(focus.focused) {
+        val target = if (focus.focused) 1f else 0f
+        if (snap()) anim.snapTo(target) else anim.animateTo(target, FocusSpring)
+    }
     return focus
 }
+
+/**
+ * 回傳 true 時，焦點效果直接跳到最終狀態、不播動畫。
+ * 面板／抽屜滑入時由它們提供：滑動中整塊畫成一張離屏圖只移動位置，裡面任何一個元件在動（例如第一格的焦點彈簧），
+ * 整張圖每格都要重畫（海信實測：抽屜滑動每格 GPU 21ms → 不動時 1ms）。焦點仍然立刻就位，只是不播放大動畫。
+ */
+val LocalFocusSnap = androidx.compose.runtime.staticCompositionLocalOf<() -> Boolean> { { false } }
 
 /** 把焦點追蹤、點擊與（選用的）FocusRequester 接到元件上。 */
 fun Modifier.focusTarget(

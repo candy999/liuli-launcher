@@ -389,6 +389,8 @@ fun AppDrawer(
         }
     }
 
+    // 滑入中：焦點效果直接到位（整塊抽屜是一張離屏圖，第一格的焦點彈簧會讓整張圖每格重畫）
+    androidx.compose.runtime.CompositionLocalProvider(tw.liuli.launcher.ui.components.LocalFocusSnap provides { slide.value > 0.001f }) {
     Box(
         Modifier
             .fillMaxSize()
@@ -450,6 +452,7 @@ fun AppDrawer(
                 }
             }
         }
+    }
     }
 }
 

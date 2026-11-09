@@ -96,6 +96,8 @@ fun GlassSheet(spec: SheetSpec) {
         }
     }
 
+    // 滑入中：焦點效果直接到位（整塊面板是一張離屏圖，裡面有東西在動就得每格重畫）
+    androidx.compose.runtime.CompositionLocalProvider(tw.liuli.launcher.ui.components.LocalFocusSnap provides { slide.value > 0.001f }) {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.CenterEnd) {
         Column(
             Modifier
@@ -126,6 +128,7 @@ fun GlassSheet(spec: SheetSpec) {
                 }
             }
         }
+    }
     }
 }
 
