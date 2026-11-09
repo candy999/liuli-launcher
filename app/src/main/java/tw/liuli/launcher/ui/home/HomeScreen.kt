@@ -126,6 +126,7 @@ fun HomeScreen(
     var hidden by remember { mutableStateOf(hiddenStore.load()) }
     var reloadKey by remember { mutableIntStateOf(0) }
     var sheet by remember { mutableStateOf<OpenSheet?>(null) }
+    var exitingSheet by remember { mutableStateOf<SheetSpec?>(null) }
     // 按鍵測試：最後收到的按鍵
     var lastKeyText by remember { mutableStateOf("（還沒按）") }
     val keyTestTitle = "按鍵測試"
@@ -243,6 +244,7 @@ fun HomeScreen(
     fun close(cancel: Boolean = false) {
         if (cancel) sheet?.spec?.onCancel?.invoke()
         pendingFocus = sheet?.returnTo
+        exitingSheet = sheet?.spec // 收起動畫：後面先畫好，面板再加速滑出
         sheet = null
         KeyRemapService.learner = null
     }
@@ -967,6 +969,7 @@ fun HomeScreen(
                 )
             }
 
+            exitingSheet?.let { s -> key(s, "exit") { GlassSheet(s, exiting = true, onExited = { if (exitingSheet === s) exitingSheet = null }) } }
             sheet?.let { s -> key(s.spec) { GlassSheet(s.spec) } }
         }
     }

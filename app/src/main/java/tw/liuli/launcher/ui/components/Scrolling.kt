@@ -19,6 +19,11 @@ class KeepVisibleSpec(
      */
     private val toleranceFraction: Float = 0.05f,
 ) : BringIntoViewSpec {
+    /** 焦點帶動清單捲動：先快後慢、停下前衝過一點點再回來，和焦點放大的彈性一致。 */
+    @Suppress("OVERRIDE_DEPRECATION")
+    override val scrollAnimationSpec: androidx.compose.animation.core.AnimationSpec<Float> =
+        androidx.compose.animation.core.spring(dampingRatio = 0.78f, stiffness = 260f)
+
     override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float {
         val margin = containerSize * marginFraction
         val tolerance = containerSize * toleranceFraction

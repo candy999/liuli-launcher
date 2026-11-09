@@ -73,6 +73,7 @@ import tw.liuli.launcher.ui.theme.GText
 import tw.liuli.launcher.ui.theme.Ink
 import tw.liuli.launcher.ui.theme.LIcon
 import tw.liuli.launcher.ui.theme.LIcons
+import tw.liuli.launcher.ui.theme.SheetExit
 import tw.liuli.launcher.ui.theme.SheetSpring
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
@@ -360,6 +361,8 @@ fun AppDrawer(
     val slide = remember { Animatable(1f) }
     val density = androidx.compose.ui.platform.LocalDensity.current
     val drawerHeightPx = with(density) { 440.dp.toPx() }
+    // 往下多延伸一段（平常在螢幕外）：滑入的彈簧會衝過頭一點，底邊抬起時露出的仍是抽屜，不是一條縫
+    val overshootPx = with(density) { DRAWER_OVERSHOOT.toPx() }
     // 告訴背景：抽屜蓋住的部分不用畫。
     // 「是否打開」要在組合時就更新（rememberUpdatedState），抽屜消失的同一格背景就畫滿；
     // 只看 slide 的話，slide 要等到下一格的 LaunchedEffect 才歸位，中間那一兩格被蓋住的位置沒人畫＝露出黑色。
@@ -379,8 +382,11 @@ fun AppDrawer(
     var focused by remember { mutableIntStateOf(0) }
     // 打開後 0.5 秒內（滑入＋主畫面淡出＋背景暫停都還在進行）整塊抽屜維持一張離屏圖，之後才回到一般繪製
     var asLayer by remember { mutableStateOf(false) }
+    // 是否擺放（看得到）：打開時立刻擺放；收起時等滑出動畫結束才拿掉
+    var shown by remember { mutableStateOf(false) }
     LaunchedEffect(open) {
         if (open) {
+            shown = true
             asLayer = true
             focused = 0
             runCatching { gridState.scrollToItem(0) }
@@ -388,9 +394,12 @@ fun AppDrawer(
             runCatching { first.requestFocus() }
             launch { delay(PANEL_LAYER_MS); asLayer = false }
             slide.animateTo(0f, SheetSpring)
-        } else {
+        } else if (shown) {
+            // 收起：背景與主畫面已經先畫好（背景不再裁掉被蓋住的部分），抽屜整塊當一張圖加速滑出
+            asLayer = true
+            slide.animateTo(1f, SheetExit)
             asLayer = false
-            slide.snapTo(1f)
+            shown = false
         }
     }
 
@@ -401,17 +410,20 @@ fun AppDrawer(
             .fillMaxSize()
             .layout { measurable, constraints ->
                 val p = measurable.measure(constraints)
-                layout(p.width, p.height) { if (open) p.place(0, 0) }
-            },
+                layout(p.width, p.height) { if (open || shown) p.place(0, 0) }
+            }
+            // 收起中的抽屜不能再被焦點走進去
+            .focusProperties { if (!open) enter = { FocusRequester.Cancel } }
+            .focusGroup(),
         contentAlignment = Alignment.BottomCenter,
     ) {
         Column(
             Modifier
                 .padding(horizontal = 20.dp)
                 .fillMaxWidth()
-                .height(440.dp)
+                .height(440.dp + DRAWER_OVERSHOOT)
                 .graphicsLayer {
-                    translationY = slide.value * size.height
+                    translationY = slide.value * drawerHeightPx + overshootPx
                     // 滑動中：整塊抽屜（玻璃＋App 格子）畫成一張離屏圖、只移動位置，GPU 每格只貼一個四邊形。
                     // 停下來就恢復一般繪製（停住時不多一層）。
                     compositingStrategy = if (asLayer || slide.value > 0.001f) CompositingStrategy.Offscreen else CompositingStrategy.Auto
@@ -466,3 +478,6 @@ private fun drawerSlideOffset(slide: Float, heightPx: Float) = androidx.compose.
 
 /** 面板／抽屜打開後維持離屏圖的時間：滑入彈簧約 0.33 秒、主畫面淡出 0.38 秒、背景暫停 0.45 秒，全部結束才回到一般繪製。 */
 internal const val PANEL_LAYER_MS = 500L
+
+/** 抽屜往螢幕下方多延伸的高度：容納滑入彈簧衝過頭的那一段（約 4～5%，20dp 左右）。 */
+private val DRAWER_OVERSHOOT = 48.dp

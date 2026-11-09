@@ -45,6 +45,7 @@ import androidx.compose.ui.unit.sp
 import tw.liuli.launcher.ui.glass.liquidGlass
 import tw.liuli.launcher.ui.theme.GText
 import tw.liuli.launcher.ui.theme.Ink
+import tw.liuli.launcher.ui.theme.SheetExit
 import tw.liuli.launcher.ui.theme.SheetSpring
 
 /**
@@ -82,14 +83,24 @@ data class SheetSpec(
  */
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
-fun GlassSheet(spec: SheetSpec) {
+fun GlassSheet(
+    spec: SheetSpec,
+    /** 收起中：從停靠位置加速滑出，不拿焦點，結束時呼叫 [onExited]。 */
+    exiting: Boolean = false,
+    onExited: () -> Unit = {},
+) {
     val first = remember { FocusRequester() }
-    val slide = remember { Animatable(1f) }
-    // 打開後 0.5 秒內整塊面板維持一張離屏圖（滑入、主畫面淡出、背景暫停都結束才回到一般繪製）
+    val slide = remember { Animatable(if (exiting) 0f else 1f) }
+    // 打開後 0.5 秒內整塊面板維持一張離屏圖（滑入、主畫面淡出、背景暫停都結束才回到一般繪製）；收起時整段都是
     var asLayer by remember { androidx.compose.runtime.mutableStateOf(true) }
     LaunchedEffect(Unit) {
-        launch { delay(500); asLayer = false }
-        slide.animateTo(0f, SheetSpring)
+        if (exiting) {
+            slide.animateTo(1f, SheetExit)
+            onExited()
+        } else {
+            launch { delay(500); asLayer = false }
+            slide.animateTo(0f, SheetSpring)
+        }
     }
     val sheetWidthPx = with(androidx.compose.ui.platform.LocalDensity.current) { 340.dp.toPx() }
     val gapPx = with(androidx.compose.ui.platform.LocalDensity.current) { 40.dp.toPx() }
@@ -98,6 +109,7 @@ fun GlassSheet(spec: SheetSpec) {
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = focusAt)
     // 延遲並重試幾次：面板比較重時，requestFocus 搶太早會落空（例如從 App 抽屜長按開啟時）
     LaunchedEffect(spec) {
+        if (exiting) return@LaunchedEffect
         repeat(3) {
             delay(16)
             runCatching { first.requestFocus() }
@@ -106,7 +118,14 @@ fun GlassSheet(spec: SheetSpec) {
 
     // 滑入中：焦點效果直接到位（整塊面板是一張離屏圖，裡面有東西在動就得每格重畫）
     androidx.compose.runtime.CompositionLocalProvider(tw.liuli.launcher.ui.components.LocalFocusSnap provides { slide.value > 0.001f || asLayer }) {
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.CenterEnd) {
+    Box(
+        Modifier
+            .fillMaxSize()
+            // 收起中的面板不能再被焦點走進去
+            .focusProperties { if (exiting) enter = { FocusRequester.Cancel } }
+            .focusGroup(),
+        contentAlignment = Alignment.CenterEnd,
+    ) {
         Column(
             Modifier
                 .padding(20.dp)

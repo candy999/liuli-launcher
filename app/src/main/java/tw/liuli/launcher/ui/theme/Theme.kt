@@ -38,11 +38,22 @@ object Dimens {
     val TileRadius = 18.dp
 }
 
-/** 焦點彈簧：偏硬、輕微回彈，跟手不拖泥帶水。 */
-val FocusSpring = spring<Float>(dampingRatio = 0.78f, stiffness = 700f)
+/**
+ * 焦點進入：低阻尼彈簧——起步快、放大時衝過頭一點（約多 1～2% 的大小）再回彈定位，有「被按下去又彈起來」的彈性。
+ * 只有縮放用超過 1 的值（FocusAnim.raw），透明度、陰影等用的是夾在 0～1 的 value。
+ */
+val FocusSpring = spring<Float>(dampingRatio = 0.52f, stiffness = 420f)
 
-/** 面板滑入。 */
-val SheetSpring = spring<Float>(dampingRatio = 0.9f, stiffness = 500f)
+/** 焦點離開：不回彈，俐落收回（離開的東西不該搶眼）。 */
+val FocusOutSpring = spring<Float>(dampingRatio = 1f, stiffness = 650f)
+
+/** 面板／抽屜滑入：先快後慢，衝過停靠位置一點點再回彈定位。 */
+val SheetSpring = spring<Float>(dampingRatio = 0.7f, stiffness = 330f)
+
+/** 面板／抽屜收起：先慢後快地加速離開，不回彈。 */
+val SheetExit = androidx.compose.animation.core.tween<Float>(
+    durationMillis = 230, easing = androidx.compose.animation.core.FastOutLinearInEasing,
+)
 
 private val TextShadow = Shadow(Color(0x40000000), blurRadius = 16f)
 

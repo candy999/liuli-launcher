@@ -24,6 +24,7 @@ import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.zIndex
+import tw.liuli.launcher.ui.theme.FocusOutSpring
 import tw.liuli.launcher.ui.theme.FocusSpring
 
 /**
@@ -77,7 +78,10 @@ fun Modifier.tvClickable(
 class FocusAnim internal constructor(private val anim: Animatable<Float, *>) {
     var focused by mutableStateOf(false)
         internal set
-    val value: () -> Float = { anim.value }
+    /** 0～1（夾住）：給透明度、陰影、顏色用。 */
+    val value: () -> Float = { anim.value.coerceIn(0f, 1f) }
+    /** 未夾住的值（彈簧回彈時會略超過 1）：只給縮放用，做出彈性。 */
+    val raw: () -> Float = { anim.value }
 }
 
 /**
@@ -90,7 +94,7 @@ fun Modifier.focusScale(
 ): Modifier = this
     .zIndex(if (focus.focused) 1f else 0f)
     .graphicsLayer {
-        val s = 1f + (scale - 1f) * focus.value()
+        val s = 1f + (scale - 1f) * focus.raw()
         scaleX = s
         scaleY = s
     }
@@ -102,7 +106,7 @@ fun rememberFocusAnim(): FocusAnim {
     val snap = LocalFocusSnap.current
     LaunchedEffect(focus.focused) {
         val target = if (focus.focused) 1f else 0f
-        if (snap()) anim.snapTo(target) else anim.animateTo(target, FocusSpring)
+        if (snap()) anim.snapTo(target) else anim.animateTo(target, if (focus.focused) FocusSpring else FocusOutSpring)
     }
     return focus
 }
