@@ -147,7 +147,9 @@ fun HomeScreen(
     val tileCenters = remember { HashMap<String, Float>() }
     // 常用列每個 App 的 FocusRequester：關抽屜、關面板時焦點回到上次停留的那一個
     val dockRequesters = remember { HashMap<String, FocusRequester>() }
-    var lastDockPkg by remember { mutableStateOf<String?>(null) }
+    // 最後停留的常用 App 存起來：弱電視上看完 Netflix 回來，琉璃常常已被系統回收（等於冷啟動），還是回到同一個位置
+    val focusPrefs = remember { context.getSharedPreferences("settings", Context.MODE_PRIVATE) }
+    var lastDockPkg by remember { mutableStateOf(focusPrefs.getString("last_dock", null)) }
 
     // ── App 清單：安裝、移除、更新時自動重新載入 ──
     LaunchedEffect(reloadKey) {
@@ -173,13 +175,26 @@ fun HomeScreen(
     }
     val sources = remember(reloadKey) { TvSources.list(context) }
 
-    // ── 焦點：預設在常用列第一個 App ──
+    // ── 焦點：開啟時直接放到上次停留的常用 App（沒有就第一個）──
+    // App 清單載入前不讓任何東西拿焦點（見下方 focusProperties）：否則系統會先把焦點給畫面上第一個元件（時鐘），
+    // 清單載好再跳過去——焦點動畫、玻璃、背景都白白動一次，看起來會抖。確定位置之後只對焦一次。
     var initialFocusDone by remember { mutableStateOf(false) }
     LaunchedEffect(apps, dock) {
         if (!initialFocusDone && apps.isNotEmpty()) {
+            val installed = apps.map { it.packageName }.toSet()
+            val shown = dock.filter { it in installed }
+            val i = shown.indexOf(lastDockPkg)
+            if (i > 0) runCatching { dockListState.scrollToItem(i) }
             delay(32)
-            if (runCatching { firstDock.requestFocus() }.isSuccess) initialFocusDone = true
+            val target = if (i >= 0) dockRequesters[shown[i]] else null
+            initialFocusDone = (target != null && runCatching { target.requestFocus() }.isSuccess) ||
+                runCatching { firstDock.requestFocus() }.isSuccess
         }
+    }
+    // 保險：清單一直沒載好（或沒有任何 App）也不能永遠沒有焦點
+    LaunchedEffect(Unit) {
+        delay(3000)
+        if (!initialFocusDone) { initialFocusDone = true; runCatching { firstDock.requestFocus() } }
     }
     LaunchedEffect(homePresses) {
         if (homePresses == 0) return@LaunchedEffect
@@ -750,7 +765,7 @@ fun HomeScreen(
             Modifier
                 .fillMaxSize()
                 .graphicsLayer { alpha = if (active) 1f else 0f }
-                .focusProperties { enter = { if (active) FocusRequester.Default else FocusRequester.Cancel } }
+                .focusProperties { enter = { if (active && initialFocusDone) FocusRequester.Default else FocusRequester.Cancel } }
                 .focusGroup(),
         ) {
             // ── 主畫面內容：抽屜或面板開啟時往後退。分成兩層，中間夾黑框 ──
@@ -840,6 +855,7 @@ fun HomeScreen(
                             requester = req,
                             onFocused = {
                                 lastDockPkg = app.packageName
+                                focusPrefs.edit().putString("last_dock", app.packageName).apply()
                                 dockLabel = app.label
                                 labelX = tileCenters[app.packageName] ?: 0f
                             },
