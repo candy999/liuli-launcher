@@ -290,6 +290,30 @@ class BackgroundEngine {
         wake.trySend(Unit)
     }
 
+    /** 目前的目標（色相、飽和度、焦點位置）：簡潔模式離開時用來還原。 */
+    fun snapshotTarget(): FloatArray = floatArrayOf(tH, tS, tFx, tFy)
+
+    fun restoreTarget(t: FloatArray) {
+        if (follow) { tH = t[0]; tS = t[1] }
+        tFx = t[2]; tFy = t[3]
+        wake.trySend(Unit)
+    }
+
+    /**
+     * 簡潔模式（沒有選中任何項目）：背景自己慢慢換色、光暈中心緩緩漂移。
+     * 只在自動色彩開著時換色（選了固定顏色就照你選的）；位置漂移都會做。
+     */
+    fun drift(step: Int) {
+        if (follow) {
+            tH = (tH + 47f) % 360f
+            tS = tS.coerceIn(.42f, .62f)
+        }
+        val r = kotlin.random.Random(step * 7919 + 13)
+        tFx = .2f + .6f * r.nextFloat()
+        tFy = .25f + .5f * r.nextFloat()
+        wake.trySend(Unit)
+    }
+
     /** 固定顏色（色彩選擇器移動時即時預覽；引擎本身的緩衝讓換色平滑）。 */
     fun applyFixedColor(hue: Float, sat: Float) {
         if (follow) return

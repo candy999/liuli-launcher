@@ -230,6 +230,20 @@ fun HomeScreen(
     )
     val lastKeyAt = remember { longArrayOf(android.os.SystemClock.uptimeMillis()) }
     val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+    // 簡潔模式中沒有選中的項目：背景自己慢慢換色、漂移；離開時回到原本焦點的顏色
+    LaunchedEffect(minimal) {
+        if (!minimal) return@LaunchedEffect
+        val saved = engine.snapshotTarget()
+        try {
+            var step = 0
+            while (true) {
+                delay(9000)
+                engine.drift(++step)
+            }
+        } finally {
+            engine.restoreTarget(saved)
+        }
+    }
     // 閒置自動進入簡潔模式
     LaunchedEffect(settings.minimalIdle, active) {
         val idle = settings.minimalIdle
