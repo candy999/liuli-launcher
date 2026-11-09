@@ -201,8 +201,19 @@ fun WeatherGroup(home: HomeContext, requester: FocusRequester, onClick: () -> Un
                 }
                 Spacer(Modifier.height(4.dp))
                 GText("${w.kind.label}・${home.city.name}", size = 15.sp, color = Ink.Secondary, shadow = true)
+                // 今天、明天各一行：高／低溫與降雨機率（明天多一個天氣圖示）
                 w.today?.let { t ->
-                    GText("${t.max.roundToInt()}° / ${t.min.roundToInt()}°　降雨 ${t.rainChance}%", size = 13.sp, color = Ink.Tertiary)
+                    GText("今天　${t.max.roundToInt()}° / ${t.min.roundToInt()}°　降雨 ${t.rainChance}%", size = 13.sp, color = Ink.Tertiary)
+                }
+                w.tomorrow?.let { t ->
+                    Spacer(Modifier.height(2.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        GText("明天", size = 13.sp, color = Ink.Tertiary)
+                        Spacer(Modifier.width(6.dp))
+                        LIcon(LIcons.weather(t.kind), 15.dp)
+                        Spacer(Modifier.width(6.dp))
+                        GText("${t.max.roundToInt()}° / ${t.min.roundToInt()}°　降雨 ${t.rainChance}%", size = 13.sp, color = Ink.Tertiary)
+                    }
                 }
             }
         }
