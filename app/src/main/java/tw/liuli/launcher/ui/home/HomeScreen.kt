@@ -51,6 +51,7 @@ import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.layout
@@ -98,6 +99,9 @@ import kotlin.math.roundToInt
 /** 側邊面板關閉後要把焦點還給誰。 */
 private data class OpenSheet(val spec: SheetSpec, val returnTo: FocusRequester?)
 
+/** 返回路徑上的一層：面板內容與當時焦點所在的列。 */
+private class SheetFrame(val spec: SheetSpec, val focus: Int)
+
 /**
  * 主畫面 v4（design/home-v4.html）：
  * 時鐘＋農民曆（左上）、天氣（右上）直接放在桌布上，焦點時才浮出玻璃膠囊；
@@ -129,6 +133,10 @@ fun HomeScreen(
     var reloadKey by remember { mutableIntStateOf(0) }
     var sheet by remember { mutableStateOf<OpenSheet?>(null) }
     var exitingSheet by remember { mutableStateOf<SheetSpec?>(null) }
+    // 返回上一層：從一個面板進到另一個面板時，記下上一層（與當時焦點所在的列）
+    val backStack = remember { ArrayList<SheetFrame>() }
+    val sheetFocus = remember { IntArray(1) }
+    val restoring = remember { BooleanArray(1) }
     // 背景顏色選擇器（色盤）：開著時、打開前的顏色（取消時還原）
     var picking by remember { mutableStateOf(false) }
     var pickerOrigin by remember { mutableStateOf<Pair<Float, Float>?>(null) }
@@ -211,8 +219,31 @@ fun HomeScreen(
         delay(3000)
         if (!initialFocusDone) { initialFocusDone = true; runCatching { firstDock.requestFocus() } }
     }
+    // ── 簡潔模式：只留左下角的時間、右下角的天氣，其他介面往下收起 ──
+    // 進入：主畫面最上方再按上鍵，或閒置一段時間（設定 → 外觀）；離開：按方向鍵／確定／返回
+    var minimal by remember { mutableStateOf(false) }
+    val minimalT = animateFloatAsState(
+        if (minimal) 1f else 0f,
+        if (minimal) tween(560, easing = androidx.compose.animation.core.FastOutSlowInEasing)
+        else tween(420, easing = androidx.compose.animation.core.FastOutSlowInEasing),
+        label = "minimal",
+    )
+    val lastKeyAt = remember { longArrayOf(android.os.SystemClock.uptimeMillis()) }
+    val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+    // 閒置自動進入簡潔模式
+    LaunchedEffect(settings.minimalIdle, active) {
+        val idle = settings.minimalIdle
+        if (idle <= 0 || !active) return@LaunchedEffect
+        while (true) {
+            delay(1000)
+            val quiet = android.os.SystemClock.uptimeMillis() - lastKeyAt[0]
+            if (!minimal && sheet == null && !drawerOpen && !picking && movingPkg == null && quiet > idle * 1000L) minimal = true
+        }
+    }
+
     LaunchedEffect(homePresses) {
         if (homePresses == 0) return@LaunchedEffect
+        minimal = false
         sheet = null; exitingSheet = null; drawerOpen = false
         delay(16)
         runCatching { firstDock.requestFocus() }
@@ -246,8 +277,10 @@ fun HomeScreen(
 
     fun toast(msg: String) = Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
 
-    fun close(cancel: Boolean = false) {
+    /** 整個關掉（所有層）。 */
+    fun closeAll(cancel: Boolean = false) {
         if (cancel) sheet?.spec?.onCancel?.invoke()
+        backStack.clear()
         pendingFocus = sheet?.returnTo
         exitingSheet = sheet?.spec // 收起動畫：後面先畫好，面板再加速滑出
         sheet = null
@@ -257,7 +290,40 @@ fun HomeScreen(
     fun open(spec: SheetSpec, returnTo: FocusRequester?) {
         android.util.Log.i("LiuliUi", "sheet: ${spec.title}")
         exitingSheet = null // 開新面板時，還在收起的舊面板直接拿掉（不然之後會被誤顯示）
+        val cur = sheet
+        if (cur != null && !restoring[0]) {
+            val existing = backStack.indexOfLast { it.spec.id == spec.id }
+            when {
+                // 回到路徑上已有的一層（例如刪除綁定後回到清單）：把它之後的都拿掉
+                existing >= 0 -> while (backStack.size > existing) backStack.removeAt(backStack.size - 1)
+                // 同一層重新整理（例如切換顯示／隱藏）：不加層
+                cur.spec.id == spec.id || cur.spec.transient -> Unit
+                else -> backStack.add(SheetFrame(cur.spec, sheetFocus[0]))
+            }
+        }
         sheet = OpenSheet(spec, returnTo ?: sheet?.returnTo)
+    }
+
+    /** 回到上一層（焦點回到當初進去的那一列）；已經是最上層就整個關掉。返回鍵、選完一個選項都走這裡。 */
+    fun close(cancel: Boolean = false) {
+        if (cancel) sheet?.spec?.onCancel?.invoke()
+        val parent = backStack.removeLastOrNull()
+        if (parent == null) { closeAll(); return }
+        KeyRemapService.learner = null
+        restoring[0] = true
+        val reopen = parent.spec.reopen
+        if (reopen != null) reopen() else open(parent.spec, null)
+        restoring[0] = false
+        sheet = sheet?.let { it.copy(spec = it.spec.copy(focusIndex = parent.focus)) }
+    }
+
+    /** 多步驟流程完成：退回到路徑上的 [id] 那一層之上，再執行 [then]（例如打開綁定清單）。 */
+    fun finishTo(id: String, then: () -> Unit) {
+        val i = backStack.indexOfLast { it.spec.id == id }
+        if (i >= 0) while (backStack.size > i + 1) backStack.removeAt(backStack.size - 1)
+        restoring[0] = true
+        then()
+        restoring[0] = false
     }
 
     fun dockReturnTarget(): FocusRequester = lastDockPkg?.let { dockRequesters[it] } ?: firstDock
@@ -286,7 +352,7 @@ fun HomeScreen(
     fun appSheet(app: AppEntry, returnTo: FocusRequester, fromDrawer: Boolean = false) {
         val inDock = app.packageName in dock
         val items = buildList {
-            add(SheetItem("開啟") { close(); launchApp(app) })
+            add(SheetItem("開啟") { closeAll(); launchApp(app) })
             if (inDock) {
                 // 只有在常用列上長按才能移動（抽屜裡看不到常用列的位置）
                 if (!fromDrawer && dock.size > 1) add(SheetItem("移動位置", "左右移動，確定放下") {
@@ -332,8 +398,8 @@ fun HomeScreen(
                 })
             }
             add(SheetItem("從主畫面隱藏") { setHidden(app.packageName, true); close() })
-            add(SheetItem("應用程式資訊", "強制停止、清除快取") { close(); SystemActions.appInfo(context, app.packageName) })
-            add(SheetItem("解除安裝") { close(); SystemActions.uninstall(context, app.packageName) })
+            add(SheetItem("應用程式資訊", "強制停止、清除快取") { closeAll(); SystemActions.appInfo(context, app.packageName) })
+            add(SheetItem("解除安裝") { closeAll(); SystemActions.uninstall(context, app.packageName) })
         }
         open(SheetSpec(app.label, if (app.isTvApp) null else "手機版 App：可能需要滑鼠或觸控操作", items), returnTo)
     }
@@ -381,8 +447,9 @@ fun HomeScreen(
                     onAdjust = { d -> settings.updateFrame(radius = (settings.frameRadius + d * 4).coerceIn(0, 200)) }) { close() },
                 SheetItem("漸變範圍", liveDetail = { dp(settings.frameFeather) },
                     onAdjust = { d -> settings.updateFrame(feather = (settings.frameFeather + d * 4).coerceIn(0, 240)) }) { close() },
-                SheetItem("全部關閉") { settings.updateFrame(thickness = 0, radius = 0, feather = 0); close() },
+                SheetItem("全部關閉") { settings.updateFrame(thickness = 0, radius = 0, feather = 0) },
             ),
+            reopen = { frameSheet() },
         ), gearReq)
     }
 
@@ -396,13 +463,14 @@ fun HomeScreen(
             listOf(
                 SheetItem("背景模糊", liveDetail = { blurText(settings.bgBlur) },
                     onAdjust = { d ->
-                        val v = (settings.bgBlur + d).coerceIn(0, maxBlur)
+                        val v = (settings.bgBlur + d + maxBlur + 1) % (maxBlur + 1) // 輪巡：最強之後回到關
                         settings.updateBgBlur(v); engine.applyBlur(v)
-                    }) { close() },
+                    }) { },
                 SheetItem("細緻噪點", liveDetail = { grainText(settings.grain) },
-                    onAdjust = { d -> settings.updateGrain((settings.grain + d).coerceIn(0, grainNames.lastIndex)) }) { close() },
-                SheetItem("全部關閉") { settings.updateBgBlur(0); engine.applyBlur(0); settings.updateGrain(0); close() },
+                    onAdjust = { d -> settings.updateGrain((settings.grain + d + grainNames.size) % grainNames.size) }) { },
+                SheetItem("全部關閉") { settings.updateBgBlur(0); engine.applyBlur(0); settings.updateGrain(0) },
             ),
+            reopen = { textureSheet() },
         ), gearReq)
     }
 
@@ -422,11 +490,12 @@ fun HomeScreen(
                     // 選顏色＝要固定顏色：自動色彩一起關掉
                     setAuto(false)
                     pickerOrigin = settings.bgHue to settings.bgSat
-                    close()
+                    closeAll()
                     pendingFocus = null // 焦點交給色盤，不要還原到設定按鈕
                     picking = true
                 },
             ),
+            reopen = { colorSheet() },
         ), gearReq)
     }
 
@@ -473,7 +542,8 @@ fun HomeScreen(
         fun pick(action: KeyAction?) {
             saveBinding(code, long, action)
             KeyMapStore.setPending(context, 0)
-            after()
+            // 流程完成：返回路徑退回「遙控器按鍵」那一層，再到下一個畫面（通常是綁定清單）
+            finishTo("keys") { after() }
         }
         // 分類子選單：右邊顯示目前選的是這一類裡的哪一個
         fun group(name: String, list: List<KeyAction>, note: String? = null) =
@@ -526,6 +596,7 @@ fun HomeScreen(
             learnTitle,
             "15 秒內，按一下遙控器上要改的那顆鍵（例如 Netflix、YouTube、彩色鍵、節目表鍵）。方向、確定、返回、音量、電源是基本鍵，受保護不能改，按了不會被當成要改的鍵。",
             listOf(SheetItem("取消") { close() }),
+            transient = true,
         ), gearReq)
         val learner: (Int) -> Unit = { code ->
             KeyMapStore.setPending(context, code) // 存起來：不小心離開 App 再回來也還在
@@ -545,6 +616,7 @@ fun HomeScreen(
                         SheetItem("按鍵測試") { keyTestSheet() },
                         SheetItem("關閉") { close() },
                     ),
+                    transient = true,
                 ), gearReq)
             }
         }
@@ -565,6 +637,7 @@ fun HomeScreen(
                 SheetItem("重新攔截新的按鍵") { KeyMapStore.setPending(context, 0); learnKey(after) },
                 SheetItem("清除，不設定了") { KeyMapStore.setPending(context, 0); close() },
             ),
+            key = "capture",
         ), gearReq)
     }
     showCapture = { a -> captureSheet(a) }
@@ -596,7 +669,7 @@ fun HomeScreen(
                 )), gearReq)
             })
         }
-        open(SheetSpec("已綁定的按鍵（${rules.size}）", "按確定可以修改或刪除。右邊是這顆鍵現在會做的事。", items), gearReq)
+        open(SheetSpec("已綁定的按鍵（${rules.size}）", "按確定可以修改或刪除。右邊是這顆鍵現在會做的事。", items, key = "bindings", reopen = { bindingsSheet() }), gearReq)
     }
 
     // 透過本機網路 ADB 自我授權開啟無障礙服務（電視常常沒有無障礙設定選單）
@@ -623,6 +696,7 @@ fun HomeScreen(
                 },
                 SheetItem("改用無障礙設定") {
                     close()
+                    closeAll()
                     if (!SystemActions.launch(context, Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))) toast("找不到無障礙設定")
                 },
             ),
@@ -679,8 +753,9 @@ fun HomeScreen(
         }
         open(SheetSpec(
             "螢幕小時鐘",
-            "看 Netflix、YouTube 等其他 App 時，角落仍看得到時間；回到琉璃主畫面會自動隱藏。左右鍵調整，設定時主畫面上也會顯示方便預覽。每分鐘微移幾個像素，避免烙印。",
+            "看 Netflix、YouTube 等其他 App 時，角落仍看得到時間；回到琉璃主畫面會自動隱藏。左右鍵調整（確定鍵＝下一個值），設定時主畫面上也會顯示方便預覽。每分鐘微移幾個像素，避免烙印。",
             items,
+            reopen = { clockSheet() },
         ), gearReq)
     }
 
@@ -702,7 +777,7 @@ fun HomeScreen(
                 if (enabled) keyTestSheet() else toast("請先啟用按鍵服務")
             })
             add(SheetItem("防止回到原廠主畫面", if (KeyMapStore.guardHome(context)) "開" else "關") {
-                KeyMapStore.setGuardHome(context, !KeyMapStore.guardHome(context)); close()
+                KeyMapStore.setGuardHome(context, !KeyMapStore.guardHome(context)); keysSheet()
             })
         }
         val status = when {
@@ -710,34 +785,57 @@ fun HomeScreen(
             KeyRemapService.instance == null -> "按鍵服務：已啟用，正在啟動…"
             else -> "按鍵服務：已啟用。"
         }
-        open(SheetSpec("遙控器按鍵", status, items), gearReq)
+        open(SheetSpec("遙控器按鍵", status, items, key = "keys", reopen = { keysSheet() }), gearReq)
+    }
+
+    // 外觀：和畫面呈現有關的設定都收在這裡
+    fun appearanceSheet() {
+        open(SheetSpec(
+            "外觀", "背景、顏色、質感、邊框與簡潔模式。",
+            listOf(
+                SheetItem("背景樣式", liveDetail = { engine.style.label }) { styleSheet() },
+                SheetItem("背景色系", liveDetail = { if (settings.bgFollow) "自動（跟著焦點）" else "固定・色相 ${settings.bgHue.roundToInt()}°" }) { colorSheet() },
+                SheetItem("背景質感", liveDetail = {
+                    listOfNotNull(
+                        if (settings.bgBlur > 0) "模糊 ${settings.bgBlur}" else null,
+                        if (settings.grain > 0) "噪點 ${tw.liuli.launcher.ui.bg.GRAIN_LABELS[settings.grain]}" else null,
+                    ).joinToString("・").ifEmpty { "關" }
+                }) { textureSheet() },
+                SheetItem("邊框", liveDetail = {
+                    if (settings.frameThickness == 0 && settings.frameFeather == 0 && settings.frameRadius == 0) "關"
+                    else "粗 ${settings.frameThickness}・圓 ${settings.frameRadius}・漸 ${settings.frameFeather}"
+                }) { frameSheet() },
+                SheetItem("閒置自動簡潔模式", subtitle = "主畫面最上方再按上鍵也能進入；按下鍵回來",
+                    liveDetail = { minimalIdleText(settings.minimalIdle) },
+                    onAdjust = { d ->
+                        val i = MINIMAL_IDLE_OPTIONS.indexOf(settings.minimalIdle).coerceAtLeast(0)
+                        settings.updateMinimalIdle(MINIMAL_IDLE_OPTIONS[(i + d + MINIMAL_IDLE_OPTIONS.size) % MINIMAL_IDLE_OPTIONS.size])
+                    }) { },
+            ),
+            key = "appearance", reopen = { appearanceSheet() },
+        ), gearReq)
     }
 
     fun openSettings() {
         open(SheetSpec(
             "設定", "琉璃 Launcher ${BuildConfigInfo.versionName(context)}",
             listOf(
-                SheetItem("地點", Cities.byId(settings.cityId).name) { citySheet() },
-                SheetItem("背景樣式", engine.style.label) { styleSheet() },
-                SheetItem("背景色系", if (settings.bgFollow) "自動（跟著焦點）" else "固定・色相 ${settings.bgHue.roundToInt()}°") { colorSheet() },
-                SheetItem("背景質感", listOfNotNull(
-                    if (settings.bgBlur > 0) "模糊 ${settings.bgBlur}" else null,
-                    if (settings.grain > 0) "噪點 ${tw.liuli.launcher.ui.bg.GRAIN_LABELS[settings.grain]}" else null,
-                ).joinToString("・").ifEmpty { "關" }) { textureSheet() },
-                SheetItem("邊框", if (settings.frameThickness == 0 && settings.frameFeather == 0 && settings.frameRadius == 0) "關" else "粗 ${settings.frameThickness}・圓 ${settings.frameRadius}・漸 ${settings.frameFeather}") { frameSheet() },
-                SheetItem("顯示／隱藏 App", if (hidden.isEmpty()) null else "已隱藏 ${hidden.size} 個") { visibilitySheet(0) },
-                SheetItem("螢幕小時鐘", if (settings.clockOn) "${tw.liuli.launcher.keys.ClockOverlay.CORNERS[settings.clockCorner.coerceIn(0, 3)]}・${settings.clockSize} sp" else "關") { clockSheet() },
+                SheetItem("地點", liveDetail = { Cities.byId(settings.cityId).name }) { citySheet() },
+                SheetItem("外觀", liveDetail = { engine.style.label + if (settings.bgFollow) "・自動色彩" else "・固定色" }) { appearanceSheet() },
+                SheetItem("顯示／隱藏 App", liveDetail = { if (hidden.isEmpty()) "" else "已隱藏 ${hidden.size} 個" }) { visibilitySheet(0) },
+                SheetItem("螢幕小時鐘", liveDetail = { if (settings.clockOn) "${tw.liuli.launcher.keys.ClockOverlay.CORNERS[settings.clockCorner.coerceIn(0, 3)]}・${settings.clockSize} sp" else "關" }) { clockSheet() },
                 SheetItem("遙控器按鍵", when {
                     !KeyMapStore.isServiceEnabled(context) -> "按鍵服務未啟用"
                     KeyMapStore.load(context).isEmpty() -> "改綁、防誤入原廠主畫面"
                     else -> "已綁定 ${KeyMapStore.load(context).size} 個"
                 }) { keysSheet() },
                 SheetItem("效能最佳化", "預先編譯，操作更順") { perfSheet() },
-                SheetItem("系統設定") { close(); SystemActions.systemSettings(context) },
-                SheetItem("網路") { close(); SystemActions.networkSettings(context) },
-                SheetItem("預設主畫面") { close(); SystemActions.homeSettings(context) },
+                SheetItem("系統設定") { closeAll(); SystemActions.systemSettings(context) },
+                SheetItem("網路") { closeAll(); SystemActions.networkSettings(context) },
+                SheetItem("預設主畫面") { closeAll(); SystemActions.homeSettings(context) },
                 SheetItem("重新整理 App 清單") { close(); reloadKey++ },
             ),
+            key = "settings", reopen = { openSettings() },
         ), gearReq)
     }
 
@@ -757,6 +855,7 @@ fun HomeScreen(
                     "perf" -> perfSheet()
                     "clock" -> clockSheet()
                     "color" -> colorSheet()
+                    "appearance" -> appearanceSheet()
                 }
                 "picker" -> {
                     settings.updateBgFollow(false); engine.applyFollow(false, settings.bgHue, settings.bgSat)
@@ -792,6 +891,7 @@ fun HomeScreen(
     // 返回鍵：面板 → 抽屜 → 回到第一個 App（主畫面不會離開）
     BackHandler(enabled = active) {
         when {
+            minimal -> minimal = false
             picking -> { pickerOrigin?.let { (h, s) -> settings.updateBgColor(h, s); engine.applyFixedColor(h, s) }; picking = false; pendingFocus = gearReq }
             movingPkg != null -> { dock = moveOrigin; movingPkg = null }
             sheet != null -> close(cancel = true)
@@ -834,7 +934,25 @@ fun HomeScreen(
                         }
                     }
                 }
-                .focusGroup(),
+                .focusGroup()
+                .onPreviewKeyEvent { e ->
+                    if (e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                    lastKeyAt[0] = android.os.SystemClock.uptimeMillis()
+                    if (!minimal) return@onPreviewKeyEvent false
+                    // 簡潔模式中：方向鍵、確定鍵把介面拉回來（不移動焦點、不觸發任何東西）
+                    when (e.nativeKeyEvent.keyCode) {
+                        KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT,
+                        KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER -> { minimal = false; true }
+                        else -> false
+                    }
+                }
+                .onKeyEvent { e ->
+                    // 主畫面最上方再按上鍵（焦點已經沒地方去）：進入簡潔模式
+                    if (e.type != KeyEventType.KeyDown || e.nativeKeyEvent.keyCode != KeyEvent.KEYCODE_DPAD_UP) return@onKeyEvent false
+                    if (sheet != null || drawerOpen || picking || movingPkg != null || !active) return@onKeyEvent false
+                    if (!focusManager.moveFocus(androidx.compose.ui.focus.FocusDirection.Up)) minimal = true
+                    true
+                },
         ) {
             // ── 主畫面內容：抽屜或面板開啟時往後退。分成兩層，中間夾黑框 ──
             // 半透明不開離屏緩衝（ModulateAlpha：每個繪圖指令各自乘透明度）：
@@ -845,7 +963,10 @@ fun HomeScreen(
                 .fillMaxSize()
                 .graphicsLayer {
                     compositingStrategy = CompositingStrategy.ModulateAlpha
-                    alpha = 1f - 0.4f * recede.value
+                    val m = minimalT.value
+                    alpha = (1f - 0.4f * recede.value) * (1f - m)
+                    // 簡潔模式：整片往下收、淡出（只動圖層位置，不重新排版）
+                    translationY = m * 46.dp.toPx()
                 }
             // 第 1 層：會左右捲動的列（訊號源、常用 App、名稱）——在黑框之下，捲到邊緣會被框蓋住
             if (!tw.liuli.launcher.ui.bg.PerfProbe.noHome) Box(recedeLayer) {
@@ -1007,6 +1128,10 @@ fun HomeScreen(
                 )
             }
 
+            // 簡潔模式：左下角時間、右下角天氣（主畫面收起一半後才浮上來）
+            if (minimalT.value > 0.001f) {
+                MinimalOverlay(home) { ((minimalT.value - .35f) / .65f).coerceIn(0f, 1f) }
+            }
             if (picking) {
                 ColorPickerPanel(
                     hue = settings.bgHue, sat = settings.bgSat,
@@ -1021,7 +1146,11 @@ fun HomeScreen(
             // 開著的面板；關閉後同一個面板（同一個 key，不重新組合）切到收起動畫，滑出後才拿掉
             (sheet?.spec ?: exitingSheet)?.let { s ->
                 key(s) {
-                    GlassSheet(s, exiting = sheet == null, onExited = { if (exitingSheet === s) exitingSheet = null })
+                    GlassSheet(
+                        s, exiting = sheet == null,
+                        onExited = { if (exitingSheet === s) exitingSheet = null },
+                        onFocusIndex = { sheetFocus[0] = it },
+                    )
                 }
             }
         }
@@ -1047,4 +1176,13 @@ private suspend fun keepDockItemVisible(state: androidx.compose.foundation.lazy.
 }
 
 /** 面板／抽屜滑動動畫的長度（背景在這段時間暫停）：彈簧動畫約 0.4 秒、主畫面淡出 0.38 秒。 */
-private const val UI_SLIDE_HOLD_MS = 450L
+private const val UI_SLIDE_HOLD_MS = 700L
+
+/** 閒置自動簡潔模式的選項（秒；0＝不自動）。 */
+private val MINIMAL_IDLE_OPTIONS = listOf(0, 15, 30, 60, 120, 300)
+
+private fun minimalIdleText(sec: Int) = when {
+    sec <= 0 -> "關"
+    sec < 60 -> "閒置 $sec 秒"
+    else -> "閒置 ${sec / 60} 分鐘"
+}

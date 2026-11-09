@@ -53,6 +53,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.ensureActive
 import tw.liuli.launcher.context.Festival
 import tw.liuli.launcher.context.Festivals
 import tw.liuli.launcher.context.LunarCalc
@@ -96,12 +97,15 @@ fun CalendarScreen(now: java.time.LocalDateTime, initial: LocalDate = now.toLoca
     // 農民曆計算比較慢（宜忌、吉時…）：日期格子先畫，算好的日子放進快取再補上。
     // 這個月算完接著預先算上個月、下個月，翻月時通常已經好了。
     val cache = remember { mutableStateMapOf<LocalDate, DayInfo>() }
+    // 不管翻到哪個月，都先算好這個月、再算前後各兩個月（翻得快也不用等）。
+    // 每算完一週就交回結果，翻月時舊的計算立刻停下（不會拖著算完整個月才換）。
     LaunchedEffect(month) {
-        for (m in listOf(month, month.plusMonths(1), month.minusMonths(1))) {
+        for (m in listOf(month, month.plusMonths(1), month.minusMonths(1), month.plusMonths(2), month.minusMonths(2))) {
             val missing = (1..m.lengthOfMonth()).map { m.atDay(it) }.filter { it !in cache }
-            if (missing.isEmpty()) continue
-            val computed = withContext(Dispatchers.Default) { missing.map { dayInfo(it) } }
-            computed.forEach { cache[it.date] = it }
+            for (chunk in missing.chunked(7)) {
+                val computed = withContext(Dispatchers.Default) { chunk.map { coroutineContext.ensureActive(); dayInfo(it) } }
+                computed.forEach { cache[it.date] = it }
+            }
         }
     }
 

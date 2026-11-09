@@ -47,12 +47,15 @@ val FocusSpring = spring<Float>(dampingRatio = 0.52f, stiffness = 420f)
 /** 焦點離開：不回彈，俐落收回（離開的東西不該搶眼）。 */
 val FocusOutSpring = spring<Float>(dampingRatio = 1f, stiffness = 650f)
 
-/** 面板／抽屜滑入：先快後慢，衝過停靠位置一點點再回彈定位。 */
-val SheetSpring = spring<Float>(dampingRatio = 0.7f, stiffness = 330f)
+/**
+ * 面板／抽屜滑入：大面積的東西要有重量——起步不能太衝、收尾慢慢停，衝過停靠位置一點點再回彈。
+ * （以前 stiffness 330 在大面積上太快、太硬）
+ */
+val SheetSpring = spring<Float>(dampingRatio = 0.74f, stiffness = 190f)
 
 /** 面板／抽屜收起：先慢後快地加速離開，不回彈。 */
 val SheetExit = androidx.compose.animation.core.tween<Float>(
-    durationMillis = 230, easing = androidx.compose.animation.core.FastOutLinearInEasing,
+    durationMillis = 260, easing = androidx.compose.animation.core.CubicBezierEasing(.4f, 0f, .8f, .4f),
 )
 
 private val TextShadow = Shadow(Color(0x40000000), blurRadius = 16f)

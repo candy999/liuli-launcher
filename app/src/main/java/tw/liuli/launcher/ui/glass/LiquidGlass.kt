@@ -66,6 +66,8 @@ fun Modifier.liquidGlass(
      * 不用每格重畫整片玻璃與裡面所有元件。背景很模糊，滑動中取樣位置差一點看不出來。
      */
     slide: () -> Offset = { Offset.Zero },
+    /** true＝動畫中，不更新取樣位置（面板同時在縮放時，位置每格都在變；背景很模糊，凍結在停下時的位置看不出差別）。 */
+    frozen: () -> Boolean = { false },
 ): Modifier = composed {
     val backdrop = LocalGlassBackdrop.current
     var origin by remember { mutableStateOf(Offset.Zero) }
@@ -95,6 +97,7 @@ fun Modifier.liquidGlass(
 
     this
         .onGloballyPositioned {
+            if (frozen() && origin != Offset.Zero) return@onGloballyPositioned
             // 取整數像素：滑動中位置的浮點誤差不會讓 origin 每格都「改變」而觸發重畫
             val p = it.positionInRoot() - slide()
             val o = Offset(p.x.roundToInt().toFloat(), p.y.roundToInt().toFloat())

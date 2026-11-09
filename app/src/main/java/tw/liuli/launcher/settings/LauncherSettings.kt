@@ -23,6 +23,15 @@ class LauncherSettings(context: Context) {
     var bgSat by mutableStateOf(prefs.getFloat("bg_sat", 0.5f))
         private set
 
+    /** 閒置幾秒後自動進入簡潔模式（0＝不自動）。 */
+    var minimalIdle by mutableStateOf(prefs.getInt("minimal_idle", 0))
+        private set
+
+    fun updateMinimalIdle(sec: Int) {
+        minimalIdle = sec
+        prefs.edit().putInt("minimal_idle", sec).apply()
+    }
+
     fun updateBgColor(hue: Float, sat: Float) {
         bgHue = hue; bgSat = sat
         prefs.edit().putFloat("bg_hue", hue).putFloat("bg_sat", sat).apply()

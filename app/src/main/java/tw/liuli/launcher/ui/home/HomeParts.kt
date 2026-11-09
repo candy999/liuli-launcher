@@ -437,14 +437,21 @@ fun AppDrawer(
                 .fillMaxWidth()
                 .height(440.dp + DRAWER_OVERSHOOT)
                 .graphicsLayer {
-                    translationY = slide.value * drawerHeightPx + overshootPx
-                    // 滑動中：整塊抽屜（玻璃＋App 格子）畫成一張離屏圖、只移動位置，GPU 每格只貼一個四邊形。
-                    // 停下來就恢復一般繪製（停住時不多一層）。
-                    compositingStrategy = if (asLayer || slide.value > 0.001f) CompositingStrategy.Offscreen else CompositingStrategy.Auto
+                    val s = slide.value
+                    translationY = s * drawerHeightPx + overshootPx
+                    // 大面積的動作要有「重量」：從稍小、稍透明，一邊上升一邊長到原大（以底邊中央為支點），
+                    // 收起時反過來。整塊是一張離屏圖，縮放只是貼圖變形，不會重畫裡面的內容。
+                    val k = s.coerceIn(0f, 1f)
+                    scaleX = 1f - .05f * k; scaleY = 1f - .05f * k
+                    transformOrigin = androidx.compose.ui.graphics.TransformOrigin(.5f, 1f)
+                    alpha = 1f - .55f * k * k
+                    // 滑動中：整塊抽屜（玻璃＋App 格子）畫成一張離屏圖，GPU 每格只貼一個四邊形；停下來恢復一般繪製
+                    compositingStrategy = if (asLayer || s > 0.001f) CompositingStrategy.Offscreen else CompositingStrategy.Auto
                 }
                 .liquidGlass(
                     RoundedCornerShape(topStart = 34.dp, topEnd = 34.dp), tint = 0.09f,
                     slide = { drawerSlideOffset(slide.value, drawerHeightPx) },
+                    frozen = { asLayer || slide.value > 0.001f },
                 )
                 .padding(start = 28.dp, end = 28.dp, top = 24.dp)
                 .onPreviewKeyEvent { e ->
@@ -491,7 +498,57 @@ fun AppDrawer(
 private fun drawerSlideOffset(slide: Float, heightPx: Float) = androidx.compose.ui.geometry.Offset(0f, slide * heightPx)
 
 /** 面板／抽屜打開後維持離屏圖的時間：滑入彈簧約 0.33 秒、主畫面淡出 0.38 秒、背景暫停 0.45 秒，全部結束才回到一般繪製。 */
-internal const val PANEL_LAYER_MS = 500L
+internal const val PANEL_LAYER_MS = 700L
 
 /** 抽屜往螢幕下方多延伸的高度：容納滑入彈簧衝過頭的那一段（約 4～5%，20dp 左右）。 */
 private val DRAWER_OVERSHOOT = 48.dp
+
+/**
+ * 簡潔模式：只留左下角的時間（含日期、農曆）與右下角的天氣，其他介面都收起來。
+ * [t]（0～1）：浮上來的進度（在主畫面收起一半之後才開始），只改圖層的透明度與位置。
+ */
+@Composable
+fun MinimalOverlay(home: HomeContext, t: () -> Float) {
+    val context = LocalContext.current
+    val now = rememberMinuteClock()
+    val is24h = android.text.format.DateFormat.is24HourFormat(context)
+    val time = now.format(DateTimeFormatter.ofPattern(if (is24h) "HH:mm" else "h:mm", zh))
+    val ampm = if (is24h) null else if (now.hour < 12) "上午" else "下午"
+    val l = home.lunar
+    val w = home.weather
+    Box(
+        Modifier
+            .fillMaxSize()
+            .padding(start = 56.dp, end = 56.dp, bottom = 44.dp)
+            .graphicsLayer {
+                val v = t()
+                alpha = v
+                translationY = (1f - v) * 24.dp.toPx()
+            },
+    ) {
+        Column(Modifier.align(Alignment.BottomStart)) {
+            Row(verticalAlignment = Alignment.Bottom) {
+                GText(time, size = 84.sp, weight = FontWeight.ExtraLight, shadow = true, letterSpacing = (-2).sp)
+                if (ampm != null) GText(ampm, Modifier.padding(start = 8.dp, bottom = 14.dp), size = 19.sp, weight = FontWeight.Light, shadow = true)
+            }
+            GText(
+                now.format(DateTimeFormatter.ofPattern("M月d日 EEEE", zh)) + "・農曆" + l.monthText + l.dayText,
+                size = 17.sp, color = Ink.Secondary, shadow = true,
+            )
+        }
+        if (w != null) {
+            Column(Modifier.align(Alignment.BottomEnd), horizontalAlignment = Alignment.End) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    LIcon(LIcons.weather(w.kind, w.isDay), 32.dp)
+                    Spacer(Modifier.width(12.dp))
+                    GText("${w.temp.roundToInt()}°", size = 52.sp, weight = FontWeight.ExtraLight, shadow = true)
+                }
+                val td = w.today
+                GText(
+                    w.kind.label + (if (td != null) "　${td.max.roundToInt()}° / ${td.min.roundToInt()}°" else "") + "・" + home.city.name,
+                    size = 15.sp, color = Ink.Secondary, shadow = true,
+                )
+            }
+        }
+    }
+}

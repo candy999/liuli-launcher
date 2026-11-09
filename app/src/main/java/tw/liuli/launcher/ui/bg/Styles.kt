@@ -12,6 +12,10 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.drawscope.withTransform
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.nativeCanvas
 import kotlin.math.PI
@@ -337,7 +341,9 @@ private object StarField {
             // 帶子中段較厚、兩端較薄
             val u = (x + W * .15f) / (W * 1.3f)
             val thick = .1f + .07f * exp(-((u - .55f) / .25f).pow(2))
-            val y = H * .5f + g * H * thick
+            // 和星雲貼圖同一條彎曲的中線（MilkyWay.build 的 bend）
+            val ut = (x - W / 2) / (W * 1.15f) + .5f
+            val y = H * .5f + 7f * sin(ut * 5.1f) + 4f * sin(ut * 11.3f + 1f) + g * H * thick
             // 越靠中線越可能是亮一點的星
             val b = (hash01(i, 106).pow(2.2f) * BUCKETS).toInt().coerceIn(0, BUCKETS - 1)
             cl[b] += x; cl[b] += y
@@ -377,35 +383,54 @@ private fun DrawScope.galaxy(st: BgState) {
 
     // 銀河在很遠的地方：視差很小
     val gx = par * W * .02f
-    withTransform({ rotate(-24f, pivot = Offset(W / 2 + gx, H / 2)) }) {
+    val mw = MilkyWay.image
+    if (mw != null) {
+        // 程序化生成的星雲貼圖（碎形雲團＋暗塵帶，已經暈開）；顏色帶一點點主色
+        val m = MilkyWay.MARGIN
+        val tint = lerp(Color.White, st.c(0f, .5f, .72f), .3f)
         translate(gx, 0f) {
-            // 底光：低飽和、偏中性的寬柔光（中段核心微暖），只是淡淡地托住星雲
-            for (k in 0 until 12) {
-                val u = k / 11f
-                val cx = W * (-.12f + 1.24f * u)
-                val core = exp(-((u - .55f) / .22f).pow(2))
-                val rw = W * (.16f + .05f * hash01(k, 1))
-                val a = .05f + .09f * core
-                withTransform({ scale(1f, .3f + .2f * core, pivot = Offset(cx, H * .5f)) }) {
-                    drawRect(
-                        gaussBrush(Color.hsl(32f + 10f * hash01(k, 3), .25f + .2f * core, .7f, a), Offset(cx, H * .5f), rw),
-                        Offset(cx - rw, H * .5f - rw), Size(rw * 2, rw * 2), blendMode = BlendMode.Plus,
-                    )
+            drawImage(
+                mw,
+                dstOffset = IntOffset((-W * m).toInt(), (-H * m).toInt()),
+                dstSize = IntSize((W * (1 + 2 * m)).toInt(), (H * (1 + 2 * m)).toInt()),
+                blendMode = BlendMode.Plus,
+                colorFilter = ColorFilter.tint(tint, BlendMode.Modulate),
+            )
+        }
+    } else {
+        // 貼圖還在生成（只有第一次、約 0.2 秒）：先用簡易的柔光頂著
+        MilkyWay.request()
+        withTransform({ rotate(-24f, pivot = Offset(W / 2 + gx, H / 2)) }) {
+            translate(gx, 0f) {
+                // 底光：低飽和、偏中性的寬柔光（中段核心微暖），只是淡淡地托住星雲
+                for (k in 0 until 12) {
+                    val u = k / 11f
+                    val cx = W * (-.12f + 1.24f * u)
+                    val core = exp(-((u - .55f) / .22f).pow(2))
+                    val rw = W * (.16f + .05f * hash01(k, 1))
+                    val a = .05f + .09f * core
+                    withTransform({ scale(1f, .3f + .2f * core, pivot = Offset(cx, H * .5f)) }) {
+                        drawRect(
+                            gaussBrush(Color.hsl(32f + 10f * hash01(k, 3), .25f + .2f * core, .7f, a), Offset(cx, H * .5f), rw),
+                            Offset(cx - rw, H * .5f - rw), Size(rw * 2, rw * 2), blendMode = BlendMode.Plus,
+                        )
+                    }
                 }
-            }
-            // 星雲的細星點在原生解析度另外畫（galaxyStars）：這裡只畫柔光與暗塵帶
-            // 暗塵帶：沿著中線、彎彎曲曲斷斷續續的暗紋（高斯暈開）
-            for (k in 0 until 14) {
-                val cx = W * (-.05f + .085f * k) + 6f * (hash01(k, 7) - .5f)
-                val cy = H * .5f + 7f * sin(k * 1.1f) + 3f * (hash01(k, 8) - .5f)
-                val rw = W * (.05f + .04f * hash01(k, 9))
-                withTransform({ scale(1f, .16f + .12f * hash01(k, 10), pivot = Offset(cx, cy)) }) {
-                    drawRect(gaussBrush(Color.Black.copy(alpha = .5f), Offset(cx, cy), rw), Offset(cx - rw, cy - rw), Size(rw * 2, rw * 2))
+                // 星雲的細星點在原生解析度另外畫（galaxyStars）：這裡只畫柔光與暗塵帶
+                // 暗塵帶：沿著中線、彎彎曲曲斷斷續續的暗紋（高斯暈開）
+                for (k in 0 until 14) {
+                    val cx = W * (-.05f + .085f * k) + 6f * (hash01(k, 7) - .5f)
+                    val cy = H * .5f + 7f * sin(k * 1.1f) + 3f * (hash01(k, 8) - .5f)
+                    val rw = W * (.05f + .04f * hash01(k, 9))
+                    withTransform({ scale(1f, .16f + .12f * hash01(k, 10), pivot = Offset(cx, cy)) }) {
+                        drawRect(gaussBrush(Color.Black.copy(alpha = .5f), Offset(cx, cy), rw), Offset(cx - rw, cy - rw), Size(rw * 2, rw * 2))
+                    }
                 }
             }
         }
-    }
 
+
+    }
     // 少數亮星的柔光（核心與所有星點在原生解析度另外畫）
     for (i in 0 until 14) {
         val x = hash01(i, 121) * W + par * W * .04f

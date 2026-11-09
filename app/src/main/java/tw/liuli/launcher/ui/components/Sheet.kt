@@ -75,7 +75,15 @@ data class SheetSpec(
     val focusIndex: Int = 0,
     /** 按返回鍵關閉（沒有選任何一項）時執行，例如還原預覽前的樣式。 */
     val onCancel: (() -> Unit)? = null,
-)
+    /** 返回上一層時用來重新開啟這一層（右邊的數值會是最新的）；沒有就沿用原本的內容。 */
+    val reopen: (() -> Unit)? = null,
+    /** 判斷「是不是同一層」用的名字（標題會變的面板要給，例如「已綁定的按鍵（3）」）。 */
+    val key: String? = null,
+    /** 暫時的畫面（例如「按一下要改的鍵」的等待畫面）：不列入返回路徑。 */
+    val transient: Boolean = false,
+) {
+    val id: String get() = key ?: title
+}
 
 /**
  * 從右側滑入的玻璃側邊面板（Google TV／tvOS 的設定慣例）。
@@ -88,6 +96,8 @@ fun GlassSheet(
     /** 收起中：從停靠位置加速滑出，不拿焦點，結束時呼叫 [onExited]。 */
     exiting: Boolean = false,
     onExited: () -> Unit = {},
+    /** 焦點停在第幾列（返回上一層時，焦點回到當初進去的那一列）。 */
+    onFocusIndex: (Int) -> Unit = {},
 ) {
     val first = remember { FocusRequester() }
     val slide = remember { Animatable(1f) }
@@ -100,7 +110,7 @@ fun GlassSheet(
             slide.animateTo(1f, SheetExit)
             onExited()
         } else {
-            launch { delay(500); asLayer = false }
+            launch { delay(700); asLayer = false }
             slide.animateTo(0f, SheetSpring)
         }
     }
@@ -134,13 +144,20 @@ fun GlassSheet(
                 .width(340.dp)
                 .fillMaxHeight()
                 .graphicsLayer {
-                    translationX = slide.value * (size.width + 40.dp.toPx())
-                    // 滑動中：整塊面板畫成一張離屏圖、只移動位置；停下來恢復一般繪製
-                    compositingStrategy = if (asLayer || slide.value > 0.001f) CompositingStrategy.Offscreen else CompositingStrategy.Auto
+                    val s = slide.value
+                    translationX = s * (size.width + 40.dp.toPx())
+                    // 從稍小、稍透明滑進來並長到原大（以右側中央為支點）；整塊是一張離屏圖，縮放不重畫內容
+                    val k = s.coerceIn(0f, 1f)
+                    scaleX = 1f - .06f * k; scaleY = 1f - .06f * k
+                    transformOrigin = androidx.compose.ui.graphics.TransformOrigin(1f, .5f)
+                    alpha = 1f - .5f * k * k
+                    // 滑動中：整塊面板畫成一張離屏圖；停下來恢復一般繪製
+                    compositingStrategy = if (asLayer || s > 0.001f) CompositingStrategy.Offscreen else CompositingStrategy.Auto
                 }
                 .liquidGlass(
                     RoundedCornerShape(30.dp), tint = 0.09f,
                     slide = { Offset(slide.value * (sheetWidthPx + gapPx), 0f) },
+                    frozen = { asLayer || slide.value > 0.001f },
                 )
                 .padding(horizontal = 16.dp, vertical = 26.dp)
                 .trapDirectionalFocus(),
@@ -153,7 +170,7 @@ fun GlassSheet(
             Spacer(Modifier.height(16.dp))
             LazyColumn(Modifier.weight(1f), state = listState, verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 itemsIndexed(spec.items) { index, item ->
-                    SheetRow(item, if (index == focusAt) first else null)
+                    SheetRow(item, if (index == focusAt) first else null) { onFocusIndex(index) }
                 }
             }
         }
@@ -162,7 +179,7 @@ fun GlassSheet(
 }
 
 @Composable
-private fun SheetRow(item: SheetItem, requester: FocusRequester?) {
+private fun SheetRow(item: SheetItem, requester: FocusRequester?, onFocused: () -> Unit) {
     val focus = rememberFocusAnim()
     Row(
         Modifier
@@ -178,7 +195,12 @@ private fun SheetRow(item: SheetItem, requester: FocusRequester?) {
                     }
                 }
             }
-            .focusTarget(focus, requester, onFocused = item.onFocus, onClick = item.action)
+            // 統一操作：有「‹ 值 ›」的列，確定鍵＝換到下一個值（選單不關）；其他列執行動作
+            .focusTarget(
+                focus, requester,
+                onFocused = { onFocused(); item.onFocus?.invoke() },
+                onClick = item.onAdjust?.let { adj -> { adj(1) } } ?: item.action,
+            )
             .drawBehind {
                 val v = focus.value()
                 if (v > 0.01f) {
