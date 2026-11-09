@@ -436,7 +436,7 @@ fun AppDrawer(
                 horizontalArrangement = Arrangement.spacedBy(22.dp),
                 verticalArrangement = Arrangement.spacedBy(20.dp),
             ) {
-                itemsIndexed(apps, key = { _, a -> a.packageName }) { i, app ->
+                itemsIndexed(if (tw.liuli.launcher.ui.bg.PerfProbe.noTiles) emptyList() else apps, key = { _, a -> a.packageName }) { i, app ->
                     AppTile(
                         app = app,
                         width = 124.dp,

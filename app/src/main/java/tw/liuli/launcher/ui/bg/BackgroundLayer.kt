@@ -59,7 +59,7 @@ fun BackgroundLayer(engine: BackgroundEngine, blurred: () -> Float, modifier: Mo
         LaunchedEffect(from) {
             if (from != null && reveal.value < 1f) reveal.animateTo(1f, tween(REVEAL_MS, easing = FastOutSlowInEasing))
         }
-        if (from == null) {
+        if (from == null || PerfProbe.noBg) {
             Canvas(Modifier.fillMaxSize()) { drawRect(Color.Black) }
             return@BoxWithConstraints
         }

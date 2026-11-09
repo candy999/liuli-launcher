@@ -730,6 +730,7 @@ fun HomeScreen(
                     "clock" -> clockSheet()
                 }
                 "drawer" -> { sheet = null; drawerOpen = true }
+                "probe" -> tw.liuli.launcher.ui.bg.PerfProbe.apply(arg)
                 "clock" -> settings.updateClock(on = arg == "1" || arg == "on")
             }
         }
@@ -807,7 +808,7 @@ fun HomeScreen(
                     alpha = 1f - 0.4f * recede.value
                 }
             // 第 1 層：會左右捲動的列（訊號源、常用 App、名稱）——在黑框之下，捲到邊緣會被框蓋住
-            Box(recedeLayer) {
+            if (!tw.liuli.launcher.ui.bg.PerfProbe.noHome) Box(recedeLayer) {
                 if (sources.isNotEmpty()) {
                     InputsRow(
                         sources = sources,
@@ -929,7 +930,7 @@ fun HomeScreen(
             FrameOverlay(settings.frameThickness, settings.frameRadius, settings.frameFeather)
 
             // 第 3 層：固定介面（時鐘、天氣、右上按鈕、抽屜提示）——在黑框之上，不會被遮住
-            Box(recedeLayer) {
+            if (!tw.liuli.launcher.ui.bg.PerfProbe.noHome) Box(recedeLayer) {
                 TodayGroup(home, todayReq, openCalendar, Modifier.padding(start = 28.dp, top = 22.dp))
                 WeatherGroup(home, weatherReq, openWeather, Modifier.align(Alignment.TopEnd).padding(end = 96.dp, top = 30.dp))
                 // 右上角：網路狀態 + 設定，直向疊放

@@ -108,6 +108,7 @@ fun Modifier.liquidGlass(
             val radiusPx = (shape as? RoundedCornerShape)?.topStart?.toPx(size, this) ?: 0f
 
             onDrawBehind {
+                if (tw.liuli.launcher.ui.bg.PerfProbe.noGlass) return@onDrawBehind
                 @Suppress("UNUSED_VARIABLE") val v = backdrop.version() // 背景換色時跟著重畫
                 val hl = highlight()
                 // 1. 背景：預先模糊的桌布對應區域（含折射）
