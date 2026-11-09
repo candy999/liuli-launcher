@@ -124,12 +124,14 @@ fun BackgroundLayer(engine: BackgroundEngine, blurred: () -> Float, modifier: Mo
                     // 抖色噪點：實體螢幕上固定 2 像素一格（畫布是 ÷d，所以一格＝2／d 個畫布像素），跟著焦點平滑視差
                     drawStyle(engine.style, engine.st, noisePx = DitherScope.NOISE_PX / d, noiseShift = engine.st.noiseParallax(parallaxPx) / d.toFloat())
                 }
-                pageBlur(engine, blurred(), IntSize(w, h))
                 // 設定面板開著時壓暗：畫在 ÷d 的小圖裡，成本只有全螢幕的 1／d²
                 if (engine.dim > 0f) drawRect(Color.Black, alpha = engine.dim)
                 revealMask(from, reveal.value)
             }
         }
+        // 子頁面的模糊桌布畫在背景圖層「外面」：淡入淡出時每格只多貼一張小圖，背景本身維持快取不用重畫
+        // （以前畫在裡面：背景靜止時已升到原生解析度，過場的每一格都要把整個背景重畫一次）
+        Canvas(Modifier.fillMaxSize()) { pageBlur(engine, blurred(), IntSize(fullW, fullH)) }
     }
 }
 

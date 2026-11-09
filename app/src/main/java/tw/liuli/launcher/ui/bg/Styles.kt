@@ -12,6 +12,8 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.drawscope.withTransform
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.graphics.nativeCanvas
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.cos
@@ -40,6 +42,8 @@ private val FULL = Size(W, H)
  */
 private class Scratch {
     val ditherPaint = DitherScope.newPaint()
+    /** 批次畫星點用的畫筆（圓頭，約一個像素）。 */
+    val starPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { strokeCap = android.graphics.Paint.Cap.ROUND }
     /** 星座網的星點位置（每幀重算，不配置新陣列）。 */
     val netX = FloatArray(NET_N)
     val netY = FloatArray(NET_N)
@@ -301,7 +305,7 @@ private fun DrawScope.dots(st: BgState) {
     vignette(.4f)
 }
 
-// ───────────── 5. 星空銀河（斜跨的銀河、三層星星、緩慢漂移的星點之間時連時斷的連線） ─────────────
+// ───────────── 5. 星空銀河（星雲是無數細星點聚成的、暗塵帶切過；星星大多只有一個像素） ─────────────
 
 /** 由兩個整數得到 0～1 的固定亂數（同樣的輸入永遠同樣的值；主執行緒與背景執行緒畫出來一致）。 */
 private fun hash01(a: Int, b: Int): Float {
@@ -312,109 +316,143 @@ private fun hash01(a: Int, b: Int): Float {
 
 private fun frac(v: Float) = v - kotlin.math.floor(v)
 
-private const val NET_N = 42
+private const val NET_N = 36
+private const val BUCKETS = 4
+
+/**
+ * 預先算好的星點位置（只算一次）。
+ * - [cloud]：銀河星雲，在「銀河自己的座標」裡（呼叫端旋轉），垂直方向呈常態分佈、越靠中線越密；分 4 個亮度組
+ * - [field]：滿天的背景星，分 4 個亮度組
+ * 用一次一組的批次畫點（drawPoints），兩千多顆星只要 8 次繪圖呼叫。
+ */
+private object StarField {
+    val cloud: Array<FloatArray>
+    val field: Array<FloatArray>
+
+    init {
+        val cl = Array(BUCKETS) { ArrayList<Float>() }
+        for (i in 0 until 1900) {
+            val x = hash01(i, 101) * W * 1.3f - W * .15f
+            val g = hash01(i, 102) + hash01(i, 103) + hash01(i, 104) + hash01(i, 105) - 2f // 近似常態分佈
+            // 帶子中段較厚、兩端較薄
+            val u = (x + W * .15f) / (W * 1.3f)
+            val thick = .1f + .07f * exp(-((u - .55f) / .25f).pow(2))
+            val y = H * .5f + g * H * thick
+            // 越靠中線越可能是亮一點的星
+            val b = (hash01(i, 106).pow(2.2f) * BUCKETS).toInt().coerceIn(0, BUCKETS - 1)
+            cl[b] += x; cl[b] += y
+        }
+        cloud = Array(BUCKETS) { cl[it].toFloatArray() }
+        val fl = Array(BUCKETS) { ArrayList<Float>() }
+        for (i in 0 until 520) {
+            val b = (hash01(i, 111).pow(2.6f) * BUCKETS).toInt().coerceIn(0, BUCKETS - 1)
+            fl[b] += hash01(i, 112) * W * 1.1f - W * .05f
+            fl[b] += hash01(i, 113) * H
+        }
+        field = Array(BUCKETS) { fl[it].toFloatArray() }
+    }
+}
+
+private val CLOUD_ALPHA = floatArrayOf(.1f, .18f, .3f, .5f)
+private val FIELD_ALPHA = floatArrayOf(.18f, .3f, .48f, .75f)
+
+private fun DrawScope.points(pts: FloatArray, paint: android.graphics.Paint) {
+    drawContext.canvas.nativeCanvas.drawPoints(pts, paint)
+}
 
 private fun DrawScope.galaxy(st: BgState) {
     val t = st.at
+    val sc = scratch.get()!!
+    val paint = sc.starPaint
     val par = -(st.fx - .5f)
     val parY = -(st.fy - .5f)
     // 深空：幾乎全黑，帶一點主色
-    drawRect(Brush.linearGradient(listOf(st.c(-10f, .5f, .02f), st.c(14f, .6f, .055f)), Offset.Zero, Offset(W * .3f, H)), size = FULL)
+    drawRect(Brush.linearGradient(listOf(st.c(-10f, .5f, .018f), st.c(14f, .55f, .045f)), Offset.Zero, Offset(W * .3f, H)), size = FULL)
 
-    // 銀河：從左下斜到右上的一條光帶——幾團拉長的柔光沿著帶子排列（核心偏暖、外圍是主色），再壓上幾道暗塵帶
-    val gx = par * W * .05f
+    // 銀河在很遠的地方：視差很小
+    val gx = par * W * .02f
     withTransform({ rotate(-24f, pivot = Offset(W / 2 + gx, H / 2)) }) {
-        // 沿著帶子排很多團互相重疊的高斯柔光（暈開、沒有邊），中段的核心偏暖、較亮較厚
-        for (k in 0 until 16) {
-            val u = k / 15f
-            val cx = W * (-.12f + 1.24f * u) + gx + 8f * (hash01(k, 4) - .5f)
-            val cy = H * .5f + 9f * sin(k * 1.3f) + 6f * (hash01(k, 5) - .5f)
-            val core = exp(-((u - .55f) / .26f).pow(2))
-            val rw = W * (.12f + .07f * hash01(k, 1))
-            val sy = .32f + .18f * hash01(k, 2) + .22f * core
-            val hOff = -20f + 40f * hash01(k, 3) + 34f * core
-            val a = .1f + .13f * core
-            withTransform({ scale(1f, sy, pivot = Offset(cx, cy)) }) {
-                drawRect(gaussBrush(st.c(hOff, .55f, .6f, a), Offset(cx, cy), rw), Offset(cx - rw, cy - rw), Size(rw * 2, rw * 2), blendMode = BlendMode.Plus)
+        translate(gx, 0f) {
+            // 底光：低飽和、偏中性的寬柔光（中段核心微暖），只是淡淡地托住星雲
+            for (k in 0 until 12) {
+                val u = k / 11f
+                val cx = W * (-.12f + 1.24f * u)
+                val core = exp(-((u - .55f) / .22f).pow(2))
+                val rw = W * (.16f + .05f * hash01(k, 1))
+                val a = .05f + .09f * core
+                withTransform({ scale(1f, .3f + .2f * core, pivot = Offset(cx, H * .5f)) }) {
+                    drawRect(
+                        gaussBrush(Color.hsl(32f + 10f * hash01(k, 3), .25f + .2f * core, .7f, a), Offset(cx, H * .5f), rw),
+                        Offset(cx - rw, H * .5f - rw), Size(rw * 2, rw * 2), blendMode = BlendMode.Plus,
+                    )
+                }
             }
-        }
-        // 星雲顆粒：銀河裡無數暗淡的小星點（高斯分佈在中線附近），讓光帶有細節而不是一團霧
-        for (k in 0 until 150) {
-            val x = hash01(k, 61) * W * 1.2f - W * .1f + gx
-            val g = (hash01(k, 62) + hash01(k, 63) + hash01(k, 64) - 1.5f) // 近似常態分佈
-            val y = H * .5f + g * H * .16f
-            val a = (.08f + .22f * hash01(k, 65)) * (.6f + .4f * sin(t * (.5f + hash01(k, 66)) + k))
-            drawCircle(st.c(10f * (hash01(k, 67) - .5f), .3f, .82f, a), .35f + .45f * hash01(k, 68), Offset(x, y), blendMode = BlendMode.Plus)
-        }
-        // 暗塵帶：沿著銀河中線斷斷續續
-        for (k in 0 until 6) {
-            val cx = W * (.05f + .18f * k) + gx + 10f * hash01(k, 7)
-            val cy = H * .5f + 6f * sin(k * 2.3f) - 2f
-            val rw = W * (.07f + .05f * hash01(k, 8)); val rh = H * (.025f + .02f * hash01(k, 9))
-            withTransform({ scale(1f, rh / rw, pivot = Offset(cx, cy)) }) {
-                drawRect(gaussBrush(Color.Black.copy(alpha = .38f), Offset(cx, cy), rw), Offset(cx - rw, cy - rw), Size(rw * 2, rw * 2))
+            // 星雲：無數細星點（約一個像素），越靠中線越密
+            paint.strokeWidth = .55f
+            for (b in 0 until BUCKETS) {
+                paint.color = Color.hsl(40f, .15f, .9f, CLOUD_ALPHA[b]).toArgb()
+                points(StarField.cloud[b], paint)
+            }
+            // 暗塵帶：沿著中線、彎彎曲曲斷斷續續的暗紋（高斯暈開）
+            for (k in 0 until 14) {
+                val cx = W * (-.05f + .085f * k) + 6f * (hash01(k, 7) - .5f)
+                val cy = H * .5f + 7f * sin(k * 1.1f) + 3f * (hash01(k, 8) - .5f)
+                val rw = W * (.05f + .04f * hash01(k, 9))
+                withTransform({ scale(1f, .16f + .12f * hash01(k, 10), pivot = Offset(cx, cy)) }) {
+                    drawRect(gaussBrush(Color.Black.copy(alpha = .5f), Offset(cx, cy), rw), Offset(cx - rw, cy - rw), Size(rw * 2, rw * 2))
+                }
             }
         }
     }
 
-    // 星星：三層景深。遠的又小又多、幾乎不動；近的較大、帶一圈柔光、視差較大；各自緩慢閃爍
-    for (i in 0 until 230) {
-        val d = hash01(i, 21).pow(2.4f) // 0＝最遠
-        val k = .02f + .1f * d
-        // 銀河帶附近星星比較密：一部分星星往帶子中線靠
-        var x = hash01(i, 22) * W * 1.1f - W * .05f
-        var y = hash01(i, 23) * H
-        if (i % 3 == 0) {
-            val band = H * .5f - (x - W / 2) * .445f // 和銀河同一條斜線
-            y = band + (hash01(i, 24) - .5f) * H * .32f
-        }
-        x += par * W * k; y += parY * H * k * .5f
-        val tw = .55f + .45f * sin(t * (.6f + 2.2f * hash01(i, 25)) + i * 3.1f)
-        val a = (.25f + .6f * hash01(i, 26)) * tw * (.5f + .5f * d)
-        val r = .35f + .9f * d + .4f * hash01(i, 27)
-        val warm = (hash01(i, 28) - .5f) * 70f
-        drawCircle(st.c(warm, .25f, .85f, a), r, Offset(x, y), blendMode = BlendMode.Plus)
-        if (d > .45f) {
-            drawCircle(
-                Brush.radialGradient(listOf(st.c(warm, .4f, .75f, a * .35f), Color.Transparent), center = Offset(x, y), radius = r * 4.5f),
-                r * 4.5f, Offset(x, y), blendMode = BlendMode.Plus,
-            )
+    // 滿天的背景星：幾乎都是一個像素的點；近的（亮組）視差稍大
+    paint.strokeWidth = .6f
+    for (b in 0 until BUCKETS) {
+        val k = .01f + .02f * b
+        translate(par * W * k, parY * H * k * .5f) {
+            paint.color = Color.hsl(220f, .1f, .92f, FIELD_ALPHA[b]).toArgb()
+            points(StarField.field[b], paint)
         }
     }
+    // 少數亮星：一點核心＋很小的柔光，各自緩慢閃爍
+    for (i in 0 until 14) {
+        val x = hash01(i, 121) * W + par * W * .04f
+        val y = hash01(i, 122) * H + parY * H * .02f
+        val tw = .6f + .4f * sin(t * (.7f + 1.5f * hash01(i, 123)) + i * 2.3f)
+        val warm = if (hash01(i, 124) > .6f) 30f else 215f
+        drawRect(gaussBrush(Color.hsl(warm, .35f, .85f, .22f * tw), Offset(x, y), 2.6f), Offset(x - 2.6f, y - 2.6f), Size(5.2f, 5.2f), blendMode = BlendMode.Plus)
+        drawCircle(Color.hsl(warm, .2f, .95f, .85f * tw), .45f, Offset(x, y), blendMode = BlendMode.Plus)
+    }
 
-    // 星座網：一群緩慢漂移的星點，彼此靠近時連出細線、遠離時線條淡去——網子一直在重組
-    val sc = scratch.get()!!
+    // 星座網：一群緩慢漂移的星點，彼此靠近時連出極細的線、遠離時淡去——網子一直在重組
     val nx = sc.netX; val ny = sc.netY
     for (i in 0 until NET_N) {
-        val ax = hash01(i, 41); val ay = hash01(i, 42)
-        nx[i] = (ax * 1.2f - .1f) * W + 22f * sin(t * (.05f + .07f * hash01(i, 43)) + i * 1.7f) + par * W * .07f
-        ny[i] = ay * H + 16f * sin(t * (.04f + .06f * hash01(i, 44)) + i * 2.3f) + parY * H * .035f
+        nx[i] = (hash01(i, 41) * 1.2f - .1f) * W + 22f * sin(t * (.05f + .07f * hash01(i, 43)) + i * 1.7f) + par * W * .05f
+        ny[i] = hash01(i, 42) * H + 16f * sin(t * (.04f + .06f * hash01(i, 44)) + i * 2.3f) + parY * H * .025f
     }
     val maxD = W * .17f
-    val lineW = .6f
     for (i in 0 until NET_N) {
         for (j in i + 1 until NET_N) {
             val dx = nx[i] - nx[j]; val dy = ny[i] - ny[j]
             if (abs(dx) > maxD || abs(dy) > maxD) continue
             val dist = sqrt(dx * dx + dy * dy)
             if (dist > maxD) continue
-            // 越近越亮；再乘一個緩慢的波，讓線條時隱時現
             val wave = .5f + .5f * sin(t * .3f + (i * 7 + j * 13) * .37f)
-            val a = (1f - dist / maxD).pow(1.5f) * .3f * wave
-            if (a < .02f) continue
-            drawLine(st.c(-6f, .5f, .75f, a), Offset(nx[i], ny[i]), Offset(nx[j], ny[j]), lineW, blendMode = BlendMode.Plus)
+            val a = (1f - dist / maxD).pow(1.6f) * .2f * wave
+            if (a < .015f) continue
+            drawLine(st.c(-6f, .35f, .8f, a), Offset(nx[i], ny[i]), Offset(nx[j], ny[j]), .4f, blendMode = BlendMode.Plus)
         }
     }
     for (i in 0 until NET_N) {
         val tw = .6f + .4f * sin(t * (.8f + hash01(i, 45)) + i)
-        drawCircle(st.c(-6f, .35f, .85f, .55f * tw), .9f, Offset(nx[i], ny[i]), blendMode = BlendMode.Plus)
+        drawCircle(st.c(-6f, .25f, .9f, .6f * tw), .45f, Offset(nx[i], ny[i]), blendMode = BlendMode.Plus)
     }
 
-    // 流星：偶爾劃過一道（約每 9～15 秒一顆）
+    // 流星：偶爾劃過一道（約每 12 秒有四分之三的機會）
     val period = 12f
     val ph = t / period
     val cyc = kotlin.math.floor(ph).toInt()
-    val u = (ph - cyc) * period // 這一輪開始後的秒數
+    val u = (ph - cyc) * period
     if (u < .9f && hash01(cyc, 51) > .25f) {
         val p = u / .9f
         val x0 = W * (.2f + .6f * hash01(cyc, 52)); val y0 = H * (.05f + .3f * hash01(cyc, 53))
@@ -423,11 +461,11 @@ private fun DrawScope.galaxy(st: BgState) {
         val tail = .22f
         val fade = sin(p * PI.toFloat())
         drawLine(
-            Brush.linearGradient(listOf(Color.Transparent, st.c(-6f, .3f, .9f, .7f * fade)), Offset(hx - dxs * tail, hy - dys * tail), Offset(hx, hy)),
-            Offset(hx - dxs * tail, hy - dys * tail), Offset(hx, hy), 1.1f, blendMode = BlendMode.Plus,
+            Brush.linearGradient(listOf(Color.Transparent, Color.White.copy(alpha = .7f * fade)), Offset(hx - dxs * tail, hy - dys * tail), Offset(hx, hy)),
+            Offset(hx - dxs * tail, hy - dys * tail), Offset(hx, hy), .7f, blendMode = BlendMode.Plus,
         )
     }
-    vignette(.4f)
+    vignette(.35f)
 }
 
 // ───────────── 6. 深海（只有光影：水面透下的體積光、晃動的光斑與陰影、懸浮微粒） ─────────────
