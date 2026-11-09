@@ -29,6 +29,22 @@ class LauncherSettings(context: Context) {
     var frameFeather by mutableIntStateOf(prefs.getInt("frame_feather", 0))
         private set
 
+    /** 背景模糊等級（0＝關，1～6）與紙張紋理強度（0＝關，1～5）。 */
+    var bgBlur by mutableIntStateOf(prefs.getInt("bg_blur", 0))
+        private set
+    var paperLevel by mutableIntStateOf(prefs.getInt("paper_level", 0))
+        private set
+
+    fun updateBgBlur(level: Int) {
+        bgBlur = level
+        prefs.edit().putInt("bg_blur", level).apply()
+    }
+
+    fun updatePaper(level: Int) {
+        paperLevel = level
+        prefs.edit().putInt("paper_level", level).apply()
+    }
+
     fun updateFrame(thickness: Int = frameThickness, radius: Int = frameRadius, feather: Int = frameFeather) {
         frameThickness = thickness; frameRadius = radius; frameFeather = feather
         prefs.edit().putInt("frame_thickness", thickness).putInt("frame_radius", radius).putInt("frame_feather", feather).apply()

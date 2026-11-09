@@ -349,6 +349,23 @@ fun HomeScreen(
         ), gearReq)
     }
 
+    fun textureSheet() {
+        fun blurText(v: Int) = if (v == 0) "關" else "$v・σ ${tw.liuli.launcher.ui.bg.BackgroundEngine.BLUR_SIGMAS[v].toInt()} px"
+        open(SheetSpec(
+            "背景質感", "左右鍵調整，即時預覽。模糊越強反而越省效能（背景改在小圖上算）；紙張紋理以原生解析度疊在背景上，跟著焦點輕輕位移。",
+            listOf(
+                SheetItem("背景模糊", liveDetail = { blurText(settings.bgBlur) },
+                    onAdjust = { d ->
+                        val v = (settings.bgBlur + d).coerceIn(0, tw.liuli.launcher.ui.bg.BackgroundEngine.BLUR_SIGMAS.lastIndex)
+                        settings.updateBgBlur(v); engine.applyBlur(v)
+                    }) { close() },
+                SheetItem("紙張紋理", liveDetail = { if (settings.paperLevel == 0) "關" else "${settings.paperLevel}" },
+                    onAdjust = { d -> settings.updatePaper((settings.paperLevel + d).coerceIn(0, tw.liuli.launcher.ui.bg.PAPER_ALPHAS.lastIndex)) }) { close() },
+                SheetItem("全部關閉") { settings.updateBgBlur(0); engine.applyBlur(0); settings.updatePaper(0); close() },
+            ),
+        ), gearReq)
+    }
+
     fun citySheet() {
         val idx = Cities.all.indexOfFirst { it.id == settings.cityId }.coerceAtLeast(0)
         open(SheetSpec("地點", "天氣使用縣市中心的大約位置，不讀取裝置定位。",
@@ -480,6 +497,10 @@ fun HomeScreen(
                     settings.updateBgFollow(on); engine.applyFollow(on); close()
                     toast("背景色系：" + if (on) "跟隨焦點" else "固定深藍")
                 },
+                SheetItem("背景質感", listOfNotNull(
+                    if (settings.bgBlur > 0) "模糊 ${settings.bgBlur}" else null,
+                    if (settings.paperLevel > 0) "紙紋 ${settings.paperLevel}" else null,
+                ).joinToString("・").ifEmpty { "關" }) { textureSheet() },
                 SheetItem("邊框", if (settings.frameThickness == 0 && settings.frameFeather == 0 && settings.frameRadius == 0) "關" else "粗 ${settings.frameThickness}・圓 ${settings.frameRadius}・漸 ${settings.frameFeather}") { frameSheet() },
                 SheetItem("顯示／隱藏 App", if (hidden.isEmpty()) null else "已隱藏 ${hidden.size} 個") { visibilitySheet(0) },
                 SheetItem("遙控器按鍵", "改綁、防誤入原廠主畫面") { keysSheet() },

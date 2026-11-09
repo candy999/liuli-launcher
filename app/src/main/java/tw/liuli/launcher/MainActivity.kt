@@ -5,6 +5,9 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.HandlerThread
+import android.view.FrameMetrics
 import android.view.KeyEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -43,6 +46,7 @@ import tw.liuli.launcher.ui.bg.BgColors
 import tw.liuli.launcher.ui.bg.BgLink
 import tw.liuli.launcher.ui.bg.BgStyle
 import tw.liuli.launcher.ui.bg.LocalBgLink
+import tw.liuli.launcher.ui.bg.PaperLayer
 import tw.liuli.launcher.ui.calendar.CalendarScreen
 import tw.liuli.launcher.ui.glass.GlassBackdrop
 import tw.liuli.launcher.ui.glass.LocalGlassBackdrop
@@ -60,6 +64,11 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         handleAction(intent)
+        // 每一幀的實際總耗時（vsync → 畫完）交給背景引擎決定解析度；在另一條執行緒回報，不佔主執行緒
+        val metricsThread = HandlerThread("liuli-frames").apply { start() }
+        window.addOnFrameMetricsAvailableListener({ _, m, _ ->
+            BackgroundEngine.active?.onFrameMetrics(m.getMetric(FrameMetrics.VSYNC_TIMESTAMP), m.getMetric(FrameMetrics.TOTAL_DURATION))
+        }, Handler(metricsThread.looper))
         val lensing = Build.VERSION.SDK_INT >= 33 &&
             !(getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager).isLowRamDevice
         setContent {
@@ -102,6 +111,7 @@ fun LiuliApp(lensing: Boolean, homePresses: Int, externalAction: Pair<Int, Strin
         BackgroundEngine().apply {
             applyStyle(BgStyle.byId(settings.bgStyle))
             applyFollow(settings.bgFollow)
+            applyBlur(settings.bgBlur)
         }
     }
     val scope = rememberCoroutineScope()
@@ -155,6 +165,8 @@ fun LiuliApp(lensing: Boolean, homePresses: Int, externalAction: Pair<Int, Strin
         }
 
         BackgroundLayer(engine, blurred = { pageBlur.value })
+        // 紙張紋理：背景之上、所有介面之下（黑框、App 列都在它上面），原生解析度
+        PaperLayer(engine, settings.paperLevel)
 
         CompositionLocalProvider(LocalGlassBackdrop provides backdrop, LocalBgLink provides link) {
             // 主畫面一直保留（App 清單、焦點都不會重來），子頁面疊在上面

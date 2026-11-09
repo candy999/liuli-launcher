@@ -11,6 +11,7 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.drawscope.translate
+import androidx.compose.ui.graphics.drawscope.withTransform
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.cos
@@ -43,6 +44,20 @@ private class Scratch {
     val sampleA = FloatArray(2)
     val sampleB = FloatArray(2)
     val field = FloatArray(CNX * CNY)
+    /** 等高線的靜態地形（5 座固定的小山，不隨焦點變）：只算一次，每幀省下 5/6 的 exp。 */
+    val bumpField = FloatArray(CNX * CNY).also { bf ->
+        val cw = W / (CNX - 1); val ch = H / (CNY - 1)
+        for (j in 0 until CNY) for (i in 0 until CNX) {
+            val x = i * cw; val y = j * ch
+            var f = 0f
+            for (b in bumps) { val s2 = b[3] * W; val dx = x - b[0] * W; val dy = y - b[1] * H; f += b[2] * exp(-(dx * dx + dy * dy) / (s2 * s2)) }
+            bf[j * CNX + i] = f
+        }
+    }
+    /** 絲綢每條布的取樣點（避免每幀配置 ArrayList<Float>）。 */
+    val silkX = FloatArray(SILK_N)
+    val silkTop = FloatArray(SILK_N)
+    val silkBot = FloatArray(SILK_N)
 }
 
 private val scratch: ThreadLocal<Scratch> = ThreadLocal.withInitial { Scratch() }
@@ -185,6 +200,8 @@ private fun DrawScope.triangles(st: BgState) {
         p.sy = p.y + (p.y - ly) * push * .8f - p.zz * .5f + cos(p.x * .04f + st.fx * 7) * 4 * st.pulse
     }
     val lX = -.36f; val lY = -.55f; val lZ = .75f
+    // 底色：反鋸齒的三角形邊緣會透出一點底下的顏色，鋪一層同色系的暗色，接縫就是淡淡的稜線而不是黑線
+    drawRect(st.c(0f, .75f, .07f), size = FULL)
     for (t in meshL.tris) {
         val a = t[0]; val b = t[1]; val c = t[2]
         val ux = b.sx - a.sx; val uy = b.sy - a.sy; val uz = b.zz - a.zz
@@ -199,7 +216,6 @@ private fun DrawScope.triangles(st: BgState) {
         val col = st.c((shade - .75f) * 24 + d * 10, .75f, .04f + .2f * shade.pow(3) * (.4f + .6f * near) + .04f * near)
         pathL.reset(); pathL.moveTo(a.sx, a.sy); pathL.lineTo(b.sx, b.sy); pathL.lineTo(c.sx, c.sy); pathL.close()
         drawPath(pathL, col)
-        drawPath(pathL, col, style = Stroke(.7f))
     }
     vignette(.38f)
 }
@@ -272,9 +288,12 @@ private fun DrawScope.flip(st: BgState) {
 
 // ───────────── 6. 絲綢 ─────────────
 
+private const val SILK_N = 80
+
 private fun DrawScope.silk(st: BgState) {
     val sc = scratch.get()!!
     val pathL = sc.path
+    val xsL = sc.silkX; val topsL = sc.silkTop; val botsL = sc.silkBot
     drawRect(Brush.linearGradient(listOf(st.c(-10f, .45f, .12f), st.c(12f, .5f, .2f)), Offset.Zero, Offset(W * .3f, H)), size = FULL)
     val lx = st.fx * W
     rotate(-6.9f, pivot = Offset(W / 2, H / 2)) {
@@ -284,17 +303,19 @@ private fun DrawScope.silk(st: BgState) {
             val ph = st.fx * (1.8f + i * .35f) + i * 1.7f + st.pulse * .35f * sin(i.toFloat())
             val thick = H * (.27f + .04f * cos(i * 1.3f))
             pathL.reset()
-            val xs = ArrayList<Float>(); val tops = ArrayList<Float>(); val bots = ArrayList<Float>()
+            var n = 0
             var x = -60f
-            while (x <= W + 60) {
-                val gather = exp(-(x - lx).pow(2) / (2 * (W * .24f).pow(2)))
+            val g2 = 2 * (W * .24f) * (W * .24f)
+            while (x <= W + 60 && n < SILK_N) {
+                val gather = exp(-(x - lx) * (x - lx) / g2)
                 val y = yc + a * sin(x / W * 3.4f + ph) - H * .045f * gather
-                xs += x; tops += y; bots += y + thick * (1 - .2f * gather)
+                xsL[n] = x; topsL[n] = y; botsL[n] = y + thick * (1 - .2f * gather)
+                n++
                 x += 8f
             }
-            pathL.moveTo(xs[0], tops[0])
-            for (k in xs.indices) pathL.lineTo(xs[k], tops[k])
-            for (k in xs.indices.reversed()) pathL.lineTo(xs[k], bots[k])
+            pathL.moveTo(xsL[0], topsL[0])
+            for (k in 0 until n) pathL.lineTo(xsL[k], topsL[k])
+            for (k in n - 1 downTo 0) pathL.lineTo(xsL[k], botsL[k])
             pathL.close()
             // 柔和陰影：往下錯開兩層半透明黑
             translate(0f, 3.5f) { drawPath(pathL, Color.Black.copy(alpha = .16f)) }
@@ -355,15 +376,15 @@ private fun DrawScope.contour(st: BgState) {
     val sc = scratch.get()!!
     val pathL = sc.path
     val fieldL = sc.field
+    val bumpL = sc.bumpField
     base(st); focusGlow(st, W * .5f, .16f)
     val cw = W / (CNX - 1); val ch = H / (CNY - 1)
     val lx = st.fx * W; val ly = st.fy * H
     val sf = W * (.17f + .02f * st.pulse)
     for (j in 0 until CNY) for (i in 0 until CNX) {
         val x = i * cw; val y = j * ch
-        var f = 1.25f * exp(-((x - lx).pow(2) + ((y - ly) * 1.15f).pow(2)) / (sf * sf))
-        for (b in bumps) { val s2 = b[3] * W; f += b[2] * exp(-((x - b[0] * W).pow(2) + (y - b[1] * H).pow(2)) / (s2 * s2)) }
-        fieldL[j * CNX + i] = f
+        val dx = x - lx; val dy = (y - ly) * 1.15f
+        fieldL[j * CNX + i] = 1.25f * exp(-(dx * dx + dy * dy) / (sf * sf)) + bumpL[j * CNX + i]
     }
     var lev = .08f; var li = 0
     val px = FloatArray(8)
@@ -421,18 +442,19 @@ private fun DrawScope.aurora(st: BgState) {
     val cfgs = arrayOf(floatArrayOf(0f, .3f, 1f), floatArrayOf(-38f, .38f, .8f), floatArrayOf(42f, .24f, .65f))
     for ((c, cfg) in cfgs.withIndex()) {
         val hc = cfg[0]; val baseY = H * cfg[1]; val amp = H * .07f; val shift = st.fx * 2.4f + c * 1.3f
+        val brush = Brush.verticalGradient(
+            0f to st.c(hc, .95f, .75f, 0f), .05f to st.c(hc, .95f, .68f, .55f), .3f to st.c(hc + 22, .9f, .5f, .22f), 1f to st.c(hc + 30, .9f, .45f, 0f),
+            startY = 0f, endY = 1f,
+        )
         var x = 0f
         while (x < W) {
             val yTop = baseY + amp * sin(x / W * 3.2f + shift) + amp * .4f * sin(x / W * 7.1f + c)
             val hgt = H * (.24f + .1f * sin(x / W * 5 + c * 2 + st.fx * 3)) * (1 + st.pulse * .12f)
-            val alpha = cfg[2] * (.45f + .55f * (.5f + .5f * sin(x * .09f + c * 3 + shift * 2)).pow(2))
-            drawRect(
-                Brush.verticalGradient(
-                    0f to st.c(hc, .95f, .75f, 0f), .05f to st.c(hc, .95f, .68f, .55f), .3f to st.c(hc + 22, .9f, .5f, .22f), 1f to st.c(hc + 30, .9f, .45f, 0f),
-                    startY = yTop, endY = yTop + hgt,
-                ),
-                Offset(x, yTop), Size(5.2f, hgt), alpha = alpha, blendMode = BlendMode.Plus,
-            )
+            val s01 = .5f + .5f * sin(x * .09f + c * 3 + shift * 2)
+            val alpha = cfg[2] * (.45f + .55f * s01 * s01)
+            withTransform({ translate(x, yTop); scale(1f, hgt, pivot = Offset.Zero) }) {
+                drawRect(brush, size = Size(5.2f, 1f), alpha = alpha, blendMode = BlendMode.Plus)
+            }
             x += 5f
         }
     }

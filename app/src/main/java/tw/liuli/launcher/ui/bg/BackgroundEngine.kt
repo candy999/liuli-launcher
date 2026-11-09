@@ -6,7 +6,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.withFrameMillis
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Canvas
 import androidx.compose.ui.graphics.ImageBitmap
@@ -22,7 +22,9 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.abs
+import kotlin.math.ceil
 import kotlin.math.exp
 import kotlin.math.floor
 import kotlin.math.ln
@@ -150,6 +152,42 @@ class BackgroundEngine {
     private var glassDirty = false
     /** 目前播放速度（1＝正常；GPU 跟不上時 <1）。 */
     private var speed = 1f
+    /** 最後一次按鍵的時間（靜止後補畫昂貴的原生解析度幀要避開操作）。 */
+    @Volatile private var inputAt = 0L
+
+    // ── 每種樣式最近量到的「每幀總耗時」與當時的解析度除數（推估付不付得起更清楚的檔位） ──
+    private val costLat = FloatArray(BgStyle.entries.size) { -1f }
+    private val costDiv = IntArray(BgStyle.entries.size) { 1 }
+
+    // ── FrameMetrics：背景格的 vsync 時間 ↔ 回報的總耗時 ──
+    private val metricLock = Any()
+    private val tickNs = LongArray(TICKS)
+    private val tickOk = BooleanArray(TICKS)
+    private var tickHead = 0
+    private val mVsync = LongArray(M_CAP)
+    private val mTotal = LongArray(M_CAP)
+    private var mCount = 0
+    private val latBuf = FloatArray(16)
+    private var latN = 0
+
+    // ── 背景模糊 ──
+    /** 背景模糊等級（0＝關，見 [BLUR_SIGMAS]）。 */
+    var blurLevel by mutableIntStateOf(0)
+        private set
+    private val blurOn get() = blurLevel > 0
+    /** 模糊後的小圖（GPU 雙線性放大到全螢幕）；尺寸隨等級改變。 */
+    var blurImage by mutableStateOf<ImageBitmap?>(null)
+        private set
+    /** [blurImage] 每更新一次加一。 */
+    var blurVersion by mutableLongStateOf(0L)
+        private set
+    private val blurReq = Channel<Unit>(Channel.CONFLATED)
+    private var viewW = 1920
+    private var viewH = 1080
+
+    init {
+        active = this
+    }
 
     /** 給玻璃取樣的小張背景（240×135，已模糊＋過曝）。只在主執行緒寫入。 */
     val glass: ImageBitmap = ImageBitmap(GLASS_W, GLASS_H)
@@ -238,19 +276,24 @@ class BackgroundEngine {
 
     /** 使用者按了鍵：接下來 [YIELD_MS] 內背景改用省力模式（÷3、15fps），GPU 留給 UI（焦點彈簧、捲動）。 */
     fun noteInput() {
-        yieldUntil = android.os.SystemClock.uptimeMillis() + YIELD_MS
+        val now = android.os.SystemClock.uptimeMillis()
+        inputAt = now
+        yieldUntil = now + YIELD_MS
     }
 
     /**
      * 由 LaunchedEffect 執行：被喚醒後推進背景，追上目標就停。
      *
      * 排程原則（UI 順暢優先）：
-     * 1. 讓路：按鍵後 [YIELD_MS] 內不更新背景，之後以較慢速度緩緩接回。
-     * 2. 畫質階梯（解析度 ÷1～÷5 ＋ 更新率）在轉場中雙向調整：
-     *    連續兩個量測窗都慢（或一次非常慢）才降一檔；連續兩個窗都夠快就升一檔。
-     *    升檔後馬上又變慢＝試探失敗，下次要等更久（退避時間加倍），避免忽高忽低。
-     * 3. 提前對焦：依剩餘動畫時間估算，在停止前就逐檔升解析度，剛好在停下時回到原生解析度。
+     * 1. 操作中（按鍵後 [YIELD_MS]）：背景照常動，但降到 ÷3、15fps，GPU 留給 UI（焦點彈簧、捲動）。
+     * 2. 畫質階梯（解析度 ÷1～÷5 ＋ 更新率）依「每一幀的實際總耗時」（FrameMetrics）調整。
+     *    GPU 跟不上時會把幀排隊：只看幀與幀的間隔會嚴重低估（海信實測：間隔 50ms、實際延遲 130ms，按鍵也跟著慢 0.1 秒）。
+     *    總耗時超過更新間隔＝開始排隊，連續兩窗就降一檔，超過 1.8 倍立刻降。
+     *    升檔前先用目前的成本推估下一檔（約 70% 成本跟像素數成正比），推估付得起才升，不會為了試探讓 UI 卡一下。
+     * 3. 提前對焦：依剩餘動畫時間逐檔升解析度，但只升到「這台機器付得起」的檔位；
+     *    更清楚的檔位（例如弱機上的原生解析度）等停下來、遙控器閒置一下再補畫——只有一幀，不影響操作。
      * 4. 播放速度平滑：每格最多推進 [MAX_STEP_MS]；變慢立即、變快緩慢。
+     * 5. 背景模糊開啟時：GPU 不畫向量，改由背景執行緒畫小圖＋模糊（[runBlur]），GPU 只放大一張圖。
      */
     suspend fun run() {
         var pending = false
@@ -260,16 +303,15 @@ class BackgroundEngine {
             lastT = 0L
             speed = 1f
             moving = true
-            val styleIdx = style.ordinal
-            var div = learnedDiv[styleIdx]
-            var iv = learnedIv[styleIdx]
+            val si = style.ordinal
+            var div = learnedDiv[si]
+            var iv = learnedIv[si]
             var interval = INTERVALS[iv]
             val forced = debugDiv in 1..MAX_DIV
-            // 降解析度立即生效（在動，看不出切換）
-            renderDiv = if (forced) debugDiv else div
+            if (!blurOn) renderDiv = if (forced) debugDiv else div // 降解析度立即生效（在動，看不出切換）
+            if (forced) interval = 16.7f * debugEvery.coerceIn(1, 8)
             // 剛降過解析度：下一個量測窗要確認有沒有變快（沒變快＝CPU 瓶頸）
             var checkDivFrom = 0f
-            if (forced) interval = 16.7f * debugEvery.coerceIn(1, 8)
             var done = false
             var lastBgT = 0L
             var wasBusy = false
@@ -278,28 +320,35 @@ class BackgroundEngine {
             var skipMeasure = 2
             var winSum = 0f
             var winN = 0
+            latN = 0
             var fastWins = 0
             var slowWins = 0
             var ramping = false
+            var rampTarget = 1
             var nextRampT = 0L
+            synchronized(metricLock) { mCount = 0 }
             while (!done) {
-                withFrameMillis<Unit> { t ->
+                withFrameNanos<Unit> { ns ->
+                    val t = ns / 1_000_000L
+                    val blur = blurOn
                     // 操作中（按鍵後一小段時間）：背景照常動，但降到 ÷3、15fps，把 GPU 留給 UI。
                     // 速度不變（每格推進 1/15 秒），所以不會停住、也不會變慢。
                     val busy = android.os.SystemClock.uptimeMillis() < yieldUntil
                     val due = if (busy) max(interval, BUSY_INTERVAL) else interval
-                    if (lastBgT != 0L && t - lastBgT < due - 6f) return@withFrameMillis
+                    if (lastBgT != 0L && t - lastBgT < due - 6f) return@withFrameNanos
+                    val divBefore = renderDiv
+                    var measure = false
                     if (busy) {
                         wasBusy = true
-                        if (!forced && renderDiv < BUSY_DIV) renderDiv = BUSY_DIV // 降解析度立即生效
+                        if (!forced && !blur && renderDiv < BUSY_DIV) renderDiv = BUSY_DIV // 降解析度立即生效
                     } else if (wasBusy) {
                         // 操作結束：重新量測，解析度之後逐檔拉回
                         wasBusy = false
                         skipMeasure = 2
                         nextRestoreT = t + RAMP_STEP_MS
                     } else if (lastBgT != 0L) {
-                        // 量測：兩格背景之間實際隔多久（GPU 跟不上時會比排定的間隔長）
-                        if (skipMeasure > 0) skipMeasure-- else { winSum += (t - lastBgT).toFloat(); winN++ }
+                        // 量測：兩格背景之間實際隔多久（備援指標；主要看 FrameMetrics 的總耗時）
+                        if (skipMeasure > 0) skipMeasure-- else { winSum += (t - lastBgT).toFloat(); winN++; measure = true }
                     }
                     lastBgT = t
                     if (holdMs > 0) { holdUntil = t + holdMs; holdMs = 0 }
@@ -308,62 +357,79 @@ class BackgroundEngine {
                     st.nowMs = t
                     st.record(t)
 
-                    // 操作結束後：解析度逐檔拉回到這段轉場的檔位（不一下子變清楚）
-                    if (!forced && !busy && !ramping && renderDiv > div && t >= nextRestoreT) {
-                        renderDiv--
-                        nextRestoreT = t + RAMP_STEP_MS
-                        skipMeasure = 2
-                    }
-
-                    // 提前對焦：剩餘時間只夠「每 RAMP_STEP_MS 升一檔」升回原生時，就開始逐檔升
-                    if (!forced && !busy && !done && renderDiv > 1) {
-                        if (!ramping) {
-                            val rem = max(remainingMs() / max(speed, 0.2f), (holdUntil - t).toFloat())
-                            if (rem < (renderDiv - 1) * RAMP_STEP_MS + RAMP_LEAD_MS) {
-                                ramping = true
-                                nextRampT = t
-                                Log.i(TAG, "${style.id} early sharpen: ${rem.toInt()}ms left, from div $renderDiv")
-                            }
-                        }
-                        if (ramping && t >= nextRampT) {
+                    if (!blur && !forced) {
+                        // 操作結束後：解析度逐檔拉回到這段轉場的檔位（不一下子變清楚）
+                        if (!busy && !ramping && renderDiv > div && t >= nextRestoreT) {
                             renderDiv--
-                            nextRampT = t + RAMP_STEP_MS
+                            nextRestoreT = t + RAMP_STEP_MS
+                            skipMeasure = 2
+                        }
+                        // 提前對焦：剩餘時間只夠「每 RAMP_STEP_MS 升一檔」升到付得起的檔位時，就開始逐檔升
+                        if (!busy && !done) {
+                            if (!ramping) {
+                                val target = affordableDiv(si, interval)
+                                if (renderDiv > target) {
+                                    val rem = max(remainingMs() / max(speed, 0.2f), (holdUntil - t).toFloat())
+                                    if (rem < (renderDiv - target) * RAMP_STEP_MS + RAMP_LEAD_MS) {
+                                        ramping = true
+                                        rampTarget = target
+                                        nextRampT = t
+                                        Log.i(TAG, "${style.id} early sharpen: ${rem.toInt()}ms left, div $renderDiv -> $target")
+                                    }
+                                }
+                            }
+                            if (ramping && renderDiv > rampTarget && t >= nextRampT) {
+                                renderDiv--
+                                nextRampT = t + RAMP_STEP_MS
+                            }
                         }
                     }
 
                     // 玻璃（畫小張背景＋高斯模糊）在背景執行緒做，主執行緒只送出要求；忙的話自動合併成一次
                     if (done || bgTicks++ % 2 == 0) requestGlass()
+                    if (blur) blurReq.trySend(Unit)
                     if (glassDirty) { glassDirty = false; glassVersion++ }
+                    // 這一格的實際耗時稍後由 FrameMetrics 送回；只採計「穩定在同一檔、不在操作中」的格
+                    noteTick(ns, measure && !blur && !forced && !ramping && renderDiv == div && renderDiv == divBefore)
                     frame++
                 }
-                if (!forced && !ramping && renderDiv == div && winN >= ADAPT_WINDOW) {
-                    // 背景格與格之間的平均間隔，和排定的間隔比：準時＝撐得住，明顯延遲＝要降
-                    val avg = winSum / winN
-                    val slowMs = interval * SLOW_RATIO
-                    val verySlowMs = interval * VERY_SLOW_RATIO
-                    val fastMs = interval * FAST_RATIO
-                    winSum = 0f; winN = 0
+                drainLatency()
+                if (!forced && !blurOn && !ramping && renderDiv == div && (latN >= LAT_WINDOW || winN >= ADAPT_WINDOW * 2)) {
+                    // 總耗時（中位數）：沒有排隊時就是這一幀真正的成本；超過更新間隔＝開始排隊
+                    val lat = if (latN > 0) median(latBuf, latN) else -1f
+                    val avg = if (winN > 0) winSum / winN else interval
+                    winSum = 0f; winN = 0; latN = 0
+                    if (lat >= 0f) { costLat[si] = lat; costDiv[si] = div }
+                    val cost = if (lat >= 0f) lat else avg
+                    val slow = avg > interval * SLOW_RATIO || lat > interval * LAT_SLOW
+                    val verySlow = avg > interval * VERY_SLOW_RATIO || lat > interval * LAT_VERY_SLOW
+                    // 升檔要「推估」付得起：先加回更新率，再加解析度
+                    val canUp = avg < interval * FAST_RATIO && when {
+                        iv > 0 -> lat < 0f || lat <= INTERVALS[iv - 1] * LAT_UP
+                        div > 1 -> lat < 0f || lat * scaleCost(div, div - 1) <= interval * LAT_UP
+                        else -> false
+                    }
                     val now = android.os.SystemClock.uptimeMillis()
                     val oldDiv = div
                     val oldIv = iv
                     if (checkDivFrom > 0f) {
                         // 降解析度後幾乎沒變快：這個樣式卡在 CPU，解析度還原、改降更新率
-                        if (avg > checkDivFrom * 0.85f && avg > fastMs) {
-                            cpuBound[styleIdx] = true
+                        if (cost > checkDivFrom * 0.85f && cost > interval * LAT_UP) {
+                            cpuBound[si] = true
                             div = max(1, div - 1)
-                            if (avg > slowMs && iv < INTERVALS.lastIndex) iv++
-                            Log.i(TAG, "${style.id} cpu-bound (${checkDivFrom.toInt()}ms -> ${avg.toInt()}ms), use fps instead")
+                            if (slow && iv < INTERVALS.lastIndex) iv++
+                            Log.i(TAG, "${style.id} cpu-bound (${checkDivFrom.toInt()}ms -> ${cost.toInt()}ms), use fps instead")
                         }
                         checkDivFrom = 0f
                     } else {
                         when {
-                            avg > slowMs -> {
+                            slow -> {
                                 fastWins = 0
-                                if (++slowWins >= 2 || avg > verySlowMs) {
+                                if (++slowWins >= 2 || verySlow) {
                                     slowWins = 0
-                                    if (!cpuBound[styleIdx] && div < MAX_DIV) {
+                                    if (!cpuBound[si] && div < MAX_DIV) {
                                         div++
-                                        checkDivFrom = avg
+                                        checkDivFrom = cost
                                     } else if (iv < INTERVALS.lastIndex) {
                                         iv++
                                     }
@@ -372,11 +438,10 @@ class BackgroundEngine {
                                     upBlockedUntil = now + upBackoff
                                 }
                             }
-                            avg < fastMs -> {
+                            canUp -> {
                                 slowWins = 0
-                                if (++fastWins >= 2 && now >= upBlockedUntil && (iv > 0 || div > 1)) {
+                                if (++fastWins >= 2 && now >= upBlockedUntil) {
                                     fastWins = 0
-                                    // 先把更新率加回來，再加解析度
                                     if (iv > 0) iv-- else div--
                                     lastUpgradeAt = now
                                 }
@@ -385,9 +450,9 @@ class BackgroundEngine {
                         }
                     }
                     if (div != oldDiv || iv != oldIv) {
-                        Log.i(TAG, "${style.id} div $oldDiv->$div, ${(1000f / INTERVALS[oldIv]).toInt()}->${(1000f / INTERVALS[iv]).toInt()}fps avg=${avg.toInt()}ms")
-                        learnedDiv[styleIdx] = div
-                        learnedIv[styleIdx] = iv
+                        Log.i(TAG, "${style.id} div $oldDiv->$div, ${(1000f / INTERVALS[oldIv]).toInt()}->${(1000f / INTERVALS[iv]).toInt()}fps lat=${lat.toInt()}ms gap=${avg.toInt()}ms")
+                        learnedDiv[si] = div
+                        learnedIv[si] = iv
                         interval = INTERVALS[iv]
                         renderDiv = div
                         skipMeasure = 2
@@ -395,15 +460,67 @@ class BackgroundEngine {
                 }
             }
             moving = false
+            if (blurOn) blurReq.trySend(Unit)
             if (glassDirty) { glassDirty = false; glassVersion++ }
             frame++
-            // 還沒回到原生解析度（例如轉場很短）：靜止後繼續逐檔升。新的焦點變化一來就中斷。
+            if (blurOn) continue
+            // 靜止後逐檔升回原生解析度。這台機器付不起的檔位（轉場中用不到的）要等遙控器閒置
+            // [STATIC_IDLE_MS] 才畫——只畫一幀，但弱機上這一幀可能要 0.1 秒，不能剛好擋到按鍵。新的焦點變化一來就中斷。
+            val afford = if (forced) 1 else affordableDiv(si, interval)
+            val stoppedAt = android.os.SystemClock.uptimeMillis()
             while (renderDiv > 1) {
-                delay(RAMP_STEP_MS)
-                if (wake.tryReceive().isSuccess) { pending = true; break }
+                val expensive = renderDiv - 1 < afford
+                var wait = RAMP_STEP_MS
+                if (expensive) wait = max(wait, max(inputAt, stoppedAt) + STATIC_IDLE_MS - android.os.SystemClock.uptimeMillis())
+                if (withTimeoutOrNull(wait) { wake.receive() } != null) { pending = true; break }
+                if (expensive && android.os.SystemClock.uptimeMillis() - inputAt < STATIC_IDLE_MS) continue
                 renderDiv--
                 frame++
             }
+        }
+    }
+
+    /** 目前這個樣式在轉場中付得起的最清楚解析度（由最近量到的總耗時推估）；還沒量過＝原生。 */
+    private fun affordableDiv(si: Int, interval: Float): Int {
+        val lat = costLat[si]
+        if (lat < 0f) return 1
+        val d0 = costDiv[si]
+        var d = d0
+        while (d > 1 && lat * scaleCost(d0, d - 1) <= interval * LAT_UP) d--
+        // 量到的檔位本身就付不起：至少維持在量到的檔位（降檔由控制器處理）
+        return d
+    }
+
+    /** 記下這一格背景的 vsync 時間；FrameMetrics 回報時用它對上是哪一格。 */
+    private fun noteTick(ns: Long, ok: Boolean) {
+        synchronized(metricLock) {
+            tickNs[tickHead] = ns
+            tickOk[tickHead] = ok
+            tickHead = (tickHead + 1) % TICKS
+        }
+    }
+
+    /** 把 FrameMetrics 回報的總耗時對到背景格，放進 [latBuf]。 */
+    private fun drainLatency() {
+        synchronized(metricLock) {
+            for (k in 0 until mCount) {
+                val v = mVsync[k]
+                for (j in 0 until TICKS) {
+                    if (tickOk[j] && abs(tickNs[j] - v) < 1_500_000L) {
+                        tickOk[j] = false
+                        if (latN < latBuf.size) latBuf[latN++] = mTotal[k] / 1e6f
+                        break
+                    }
+                }
+            }
+            mCount = 0
+        }
+    }
+
+    /** 由 Activity 的 FrameMetrics 監聽器（另一條執行緒）呼叫：每一幀的 vsync 時間與總耗時（奈秒）。 */
+    fun onFrameMetrics(vsyncNs: Long, totalNs: Long) {
+        synchronized(metricLock) {
+            if (mCount < M_CAP) { mVsync[mCount] = vsyncNs; mTotal[mCount] = totalNs; mCount++ }
         }
     }
 
@@ -485,6 +602,92 @@ class BackgroundEngine {
         }
     }
 
+    /**
+     * 背景模糊（[blurLevel] > 0）：在背景執行緒把樣式畫在小圖上、三次盒狀模糊（半徑 2，≈高斯 σ 2.45 個小圖像素），
+     * GPU 只負責把小圖雙線性放大到全螢幕——向量完全不上 GPU。
+     *
+     * 為什麼可以畫這麼小（docs/blur-shortcut.md 的實驗）：小圖上的模糊 σ ≥ 2 個小圖像素時，
+     * 「小圖＋模糊＋放大」和「原生解析度畫完再做高斯模糊」差異 ≤ 3／255，看不出來，也不會有鋸齒；
+     * 低於 2 個像素誤差會跳到 15～40 階（出現格子與鋸齒）。所以縮小倍數 f ＝ 目標 σ ÷ 2.5，模糊越強、小圖越小、越省。
+     */
+    suspend fun runBlur() {
+        val scope = CanvasDrawScope()
+        val state = BgState()
+        var work: ImageBitmap? = null
+        var canvas: Canvas? = null
+        var bpx = IntArray(0)
+        var btmp = IntArray(0)
+        var n = 0
+        var spent = 0L
+        while (true) {
+            blurReq.receive()
+            val lvl = blurLevel
+            if (lvl <= 0) { blurImage = null; continue }
+            val f = blurFactor(lvl)
+            val bw = max(8, ceil(viewW / f).toInt())
+            val bh = max(8, ceil(viewH / f).toInt())
+            if (work == null || work.width != bw || work.height != bh) {
+                work = ImageBitmap(bw, bh)
+                canvas = Canvas(work)
+                bpx = IntArray(bw * bh)
+                btmp = IntArray(bw * bh)
+            }
+            state.copyFrom(st)
+            val s = style
+            val wImg = work!!
+            val c = canvas!!
+            val px = bpx
+            val tmp = btmp
+            val t0 = android.os.SystemClock.uptimeMillis()
+            withContext(Dispatchers.Default) {
+                val bmp = wImg.asAndroidBitmap()
+                bmp.eraseColor(0xFF000000.toInt())
+                scope.draw(Density(1f), LayoutDirection.Ltr, c, Size(bw.toFloat(), bh.toFloat())) {
+                    scale(bw / LOGICAL_W, bh / LOGICAL_H, pivot = androidx.compose.ui.geometry.Offset.Zero) {
+                        drawStyle(s, state)
+                    }
+                }
+                bmp.getPixels(px, 0, bw, 0, 0, bw, bh)
+                repeat(3) {
+                    boxBlurH(px, tmp, bw, bh, BG_BLUR_R)
+                    boxBlurV(tmp, px, bw, bh, BG_BLUR_R)
+                }
+            }
+            // 輸出圖：尺寸變了才換一張；同尺寸只改像素（在主執行緒、兩幀之間改，RenderThread 不會讀到一半）
+            var out = blurImage
+            if (out == null || out.width != bw || out.height != bh) out = ImageBitmap(bw, bh)
+            out.asAndroidBitmap().setPixels(px, 0, bw, 0, 0, bw, bh)
+            blurImage = out
+            blurVersion++
+            spent += android.os.SystemClock.uptimeMillis() - t0
+            if (++n % 60 == 0) {
+                Log.i(TAG, "blur L$lvl ${bw}x$bh (f=${"%.1f".format(f)}): ${spent / 60}ms/frame")
+                spent = 0
+            }
+        }
+    }
+
+    /** 模糊等級 → 縮小倍數：σ（以 1080p 為準，依螢幕高度等比）÷ 2.5（三次半徑 2 盒狀模糊＋取樣＋放大的總 σ ≈ 2.5f）。 */
+    private fun blurFactor(level: Int): Float {
+        val sigma = BLUR_SIGMAS[level.coerceIn(0, BLUR_SIGMAS.lastIndex)] * viewH / 1080f
+        return max(1.5f, sigma / 2.5f)
+    }
+
+    /** 背景模糊等級：0＝關。 */
+    fun applyBlur(level: Int) {
+        blurLevel = level.coerceIn(0, BLUR_SIGMAS.lastIndex)
+        blurReq.trySend(Unit)
+        frame++
+    }
+
+    /** 由背景圖層告知實際的畫面像素尺寸（模糊小圖依此計算）。 */
+    fun setViewport(w: Int, h: Int) {
+        if (w > 0 && h > 0 && (w != viewW || h != viewH)) {
+            viewW = w; viewH = h
+            blurReq.trySend(Unit)
+        }
+    }
+
     companion object {
         const val LOGICAL_W = 480f
         const val LOGICAL_H = 270f
@@ -498,6 +701,31 @@ class BackgroundEngine {
         private const val TAU_PULSE_OUT = 600f
         private const val TAU_RIPPLE = 900f
         private const val BLUR_R = 5
+        /** 背景模糊在小圖上的盒狀模糊半徑（三次 ≈ 高斯 σ 2.45 個小圖像素，≥2 才不會有格子與鋸齒）。 */
+        private const val BG_BLUR_R = 2
+        /** 背景模糊等級對應的 σ（1080p 像素）。 */
+        val BLUR_SIGMAS = floatArrayOf(0f, 8f, 12f, 18f, 24f, 36f, 48f)
+
+        /** 目前的引擎（給 Activity 的 FrameMetrics 監聽器）。 */
+        @Volatile var active: BackgroundEngine? = null
+        private const val TICKS = 32
+        private const val M_CAP = 64
+        /** 每幾格（有 FrameMetrics 的）背景評估一次。 */
+        private const val LAT_WINDOW = 4
+        /** 總耗時超過更新間隔的倍數：1.0＝開始排隊（連續兩窗降檔）；1.8＝立刻降。 */
+        private const val LAT_SLOW = 1.0f
+        private const val LAT_VERY_SLOW = 1.8f
+        /** 推估的下一檔總耗時要在更新間隔的 85% 以內才升檔。 */
+        private const val LAT_UP = 0.85f
+        /** 靜止後，付不起的清楚檔位要等遙控器閒置這麼久才補畫。 */
+        private const val STATIC_IDLE_MS = 700L
+
+        /** 解析度除數 from → to 的成本倍數：約 30% 固定（CPU、合成）＋70% 跟像素數成正比。 */
+        private fun scaleCost(from: Int, to: Int) = 0.3f + 0.7f * (from * from).toFloat() / (to * to).toFloat()
+
+        private fun median(a: FloatArray, n: Int): Float {
+            val c = a.copyOf(n); c.sort(); return c[n / 2]
+        }
 
         private const val TAG = "LiuliBg"
 
