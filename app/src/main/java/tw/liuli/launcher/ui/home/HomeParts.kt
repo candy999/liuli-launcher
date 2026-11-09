@@ -57,6 +57,7 @@ import tw.liuli.launcher.context.LunarCalc
 import tw.liuli.launcher.data.AppEntry
 import tw.liuli.launcher.data.TvSource
 import tw.liuli.launcher.ui.bg.BgColors
+import tw.liuli.launcher.ui.bg.LocalBgLink
 import tw.liuli.launcher.ui.bg.bgTarget
 import tw.liuli.launcher.ui.components.AppTile
 import tw.liuli.launcher.ui.components.trapDirectionalFocus
@@ -360,7 +361,19 @@ fun AppDrawer(
     onLongClick: (AppEntry, FocusRequester) -> Unit,
 ) {
     val slide = remember { Animatable(1f) }
-    val drawerHeightPx = with(androidx.compose.ui.platform.LocalDensity.current) { 440.dp.toPx() }
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val drawerHeightPx = with(density) { 440.dp.toPx() }
+    // 告訴背景：抽屜蓋住的部分不用畫
+    val bgEngine = LocalBgLink.current?.engine
+    androidx.compose.runtime.DisposableEffect(bgEngine) {
+        bgEngine?.cover = tw.liuli.launcher.ui.bg.PanelCover(
+            height = drawerHeightPx,
+            inset = with(density) { 20.dp.toPx() },
+            corner = with(density) { 34.dp.toPx() },
+            slide = { slide.value },
+        )
+        onDispose { bgEngine?.cover = null }
+    }
     val first = remember { FocusRequester() }
     val gridState = androidx.compose.foundation.lazy.grid.rememberLazyGridState()
     var focused by remember { mutableIntStateOf(0) }

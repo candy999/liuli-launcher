@@ -149,6 +149,11 @@ class BackgroundEngine {
     private var upBlockedUntil = 0L
     private var lastUpgradeAt = 0L
     @Volatile private var yieldUntil = 0L
+    /** 蓋在背景上的不透明面板（目前只有 App 抽屜）：背景不畫被蓋住的部分。 */
+    var cover by mutableStateOf<PanelCover?>(null)
+    /** 背景壓暗（0～1，設定面板開著時）：在背景的小圖裡畫，不用全螢幕再疊一層半透明黑。 */
+    var dim by mutableStateOf(0f)
+
     /** 面板／抽屜滑入滑出的動畫期間：背景暫停（不推進、不重畫），GPU 全部留給動畫。 */
     @Volatile private var uiHoldUntil = 0L
     /** 面板或抽屜開著（背景大半被蓋住）：背景一直用省力模式（÷3、15fps，速度不變）。 */

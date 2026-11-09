@@ -22,6 +22,9 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.graphics.Color
 import androidx.compose.animation.core.FastOutSlowInEasing
 import kotlin.math.hypot
+import kotlin.math.floor
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.TransformOrigin
@@ -44,7 +47,7 @@ fun BackgroundLayer(engine: BackgroundEngine, blurred: () -> Float, modifier: Mo
     LaunchedEffect(engine) { engine.run() }
     LaunchedEffect(engine) { engine.runGlass() }
     LaunchedEffect(engine) { engine.runBlur() }
-    BoxWithConstraints(modifier.fillMaxSize().clipToBounds(), contentAlignment = Alignment.TopStart) {
+    BoxWithConstraints(modifier.fillMaxSize().coverClip(engine).clipToBounds(), contentAlignment = Alignment.TopStart) {
         val parallaxPx = NOISE_PARALLAX_DP * LocalDensity.current.density
         val fullW = constraints.maxWidth
         val fullH = constraints.maxHeight
@@ -88,6 +91,7 @@ fun BackgroundLayer(engine: BackgroundEngine, blurred: () -> Float, modifier: Mo
                     drawImage(engine.glass, dstSize = IntSize(fullW, fullH), filterQuality = FilterQuality.Low)
                 }
                 pageBlur(engine, blurred(), IntSize(fullW, fullH))
+                if (engine.dim > 0f) drawRect(Color.Black, alpha = engine.dim)
                 revealMask(from, reveal.value)
             }
             return@BoxWithConstraints
@@ -121,6 +125,8 @@ fun BackgroundLayer(engine: BackgroundEngine, blurred: () -> Float, modifier: Mo
                     drawStyle(engine.style, engine.st, noisePx = DitherScope.NOISE_PX / d, noiseShift = engine.st.noiseParallax(parallaxPx) / d.toFloat())
                 }
                 pageBlur(engine, blurred(), IntSize(w, h))
+                // 設定面板開著時壓暗：畫在 ÷d 的小圖裡，成本只有全螢幕的 1／d²
+                if (engine.dim > 0f) drawRect(Color.Black, alpha = engine.dim)
                 revealMask(from, reveal.value)
             }
         }
@@ -128,6 +134,26 @@ fun BackgroundLayer(engine: BackgroundEngine, blurred: () -> Float, modifier: Mo
 }
 
 private const val REVEAL_MS = 1400
+
+/**
+ * 不透明面板（App 抽屜）蓋住的那一塊背景不畫：分成上方、左邊、右邊三個矩形各畫一次背景（矩形裁切由 GPU 直接限制範圍，
+ * 被蓋住的像素完全不算）。抽屜滑動中範圍每格改變，只有這一層重新記錄，背景本身的圖層不用重畫。
+ */
+private fun Modifier.coverClip(engine: BackgroundEngine): Modifier = drawWithContent {
+    val c = engine.cover
+    val vis = if (c == null) 0f else floor((1f - c.slide()) * c.height - c.corner)
+    if (c == null || vis < 2f) { drawContent(); return@drawWithContent }
+    val top = size.height - vis
+    clipRect(0f, 0f, size.width, top) { this@drawWithContent.drawContent() }
+    clipRect(0f, top, c.inset, size.height) { this@drawWithContent.drawContent() }
+    clipRect(size.width - c.inset, top, size.width, size.height) { this@drawWithContent.drawContent() }
+}
+
+/**
+ * 蓋在背景上的不透明面板：從畫面底部往上 [height] 像素、左右各留 [inset] 像素、頂端圓角 [corner]（圓角處透出背景）。
+ * [slide]：0＝完全打開、1＝完全收起（在繪製階段讀取）。
+ */
+class PanelCover(val height: Float, val inset: Float, val corner: Float, val slide: () -> Float)
 
 /**
  * 冷啟動擴散：黑色蓋在背景上，中間挖一個從 [from]（畫面比例）往外長大的圓洞，邊緣柔和漸變。

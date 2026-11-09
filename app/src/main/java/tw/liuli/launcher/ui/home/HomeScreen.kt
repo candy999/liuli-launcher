@@ -770,6 +770,8 @@ fun HomeScreen(
     var overlaySeen by remember { mutableStateOf(false) }
     LaunchedEffect(drawerOpen, sheet?.spec) {
         engine.covered = overlay
+        // 設定面板開著：背景壓暗（以前是全螢幕疊一層半透明黑，每格多混一整個螢幕）
+        engine.dim = if (sheet != null) 0.22f else 0f
         if (overlaySeen || overlay) engine.holdForUi(UI_SLIDE_HOLD_MS)
         overlaySeen = true
     }
@@ -964,9 +966,6 @@ fun HomeScreen(
                 )
             }
 
-            if (sheet != null) {
-                Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.22f)))
-            }
             sheet?.let { s -> key(s.spec) { GlassSheet(s.spec) } }
         }
     }

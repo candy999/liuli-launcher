@@ -79,6 +79,9 @@ class MainActivity : ComponentActivity() {
         setContent {
             LiuliApp(lensing, homePresses.intValue, externalAction.value)
         }
+        // 第一格畫完就拿掉視窗底色：背景永遠蓋滿整個畫面，底色只是每格白白多塗一次全螢幕
+        // （海信 Mali-470 填色很慢，抽屜滑動時每格要填 4 個螢幕的像素，省一個很有感）
+        window.decorView.post { window.setBackgroundDrawable(null) }
     }
 
     // 螢幕小時鐘：琉璃在前景時隱藏（主畫面本來就有大時鐘），離開就出現
