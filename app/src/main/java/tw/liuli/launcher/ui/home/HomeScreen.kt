@@ -179,6 +179,8 @@ fun HomeScreen(
     // App 清單載入前不讓任何東西拿焦點（見下方 focusProperties）：否則系統會先把焦點給畫面上第一個元件（時鐘），
     // 清單載好再跳過去——焦點動畫、玻璃、背景都白白動一次，看起來會抖。確定位置之後只對焦一次。
     var initialFocusDone by remember { mutableStateOf(false) }
+    // 第一次進入主畫面時焦點要去的地方（focusProperties 的 enter 會直接導到這裡，不經過時鐘）
+    var initialTarget by remember { mutableStateOf<FocusRequester?>(null) }
     LaunchedEffect(apps, dock) {
         if (!initialFocusDone && apps.isNotEmpty()) {
             val installed = apps.map { it.packageName }.toSet()
@@ -186,9 +188,12 @@ fun HomeScreen(
             val i = shown.indexOf(lastDockPkg)
             if (i > 0) runCatching { dockListState.scrollToItem(i) }
             delay(32)
-            val target = if (i >= 0) dockRequesters[shown[i]] else null
-            initialFocusDone = (target != null && runCatching { target.requestFocus() }.isSuccess) ||
-                runCatching { firstDock.requestFocus() }.isSuccess
+            val target = (if (i > 0) dockRequesters[shown[i]] else null) ?: firstDock
+            initialTarget = target
+            initialFocusDone = true
+            runCatching { target.requestFocus() }
+            delay(1000)
+            initialTarget = null
         }
     }
     // 保險：清單一直沒載好（或沒有任何 App）也不能永遠沒有焦點
@@ -765,7 +770,14 @@ fun HomeScreen(
             Modifier
                 .fillMaxSize()
                 .graphicsLayer { alpha = if (active) 1f else 0f }
-                .focusProperties { enter = { if (active && initialFocusDone) FocusRequester.Default else FocusRequester.Cancel } }
+                .focusProperties {
+                    enter = {
+                        when {
+                            !active || !initialFocusDone -> FocusRequester.Cancel
+                            else -> initialTarget ?: FocusRequester.Default
+                        }
+                    }
+                }
                 .focusGroup(),
         ) {
             // ── 主畫面內容：抽屜或面板開啟時往後退。分成兩層，中間夾黑框 ──
