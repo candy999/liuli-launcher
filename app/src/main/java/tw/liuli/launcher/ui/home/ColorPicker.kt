@@ -93,15 +93,16 @@ fun ColorPickerPanel(
             GText("←→ 色相　↑↓ 鮮豔度\n確定：完成　返回：取消", size = 13.sp, color = Ink.Tertiary, maxLines = 2)
             Spacer(Modifier.height(20.dp))
             // 色盤：橫向一圈色相，越往下越灰；游標是一個白圈
+            // 不裁切畫布：游標在色盤邊緣時整圈仍看得到（色盤本身用圓角矩形畫）
             Canvas(
                 Modifier
                     .fillMaxWidth()
-                    .height(200.dp)
-                    .clip(RoundedCornerShape(16.dp)),
+                    .height(200.dp),
             ) {
                 val stops = (0..12).map { i -> i / 12f to Color.hsl(i * 30f % 360f, .8f, .5f) }.toTypedArray()
-                drawRect(Brush.horizontalGradient(*stops))
-                drawRect(Brush.verticalGradient(0f to Color(0x00777777), 1f to Color(0xFF6E6E6E)))
+                val cr = CornerRadius(16.dp.toPx())
+                drawRoundRect(Brush.horizontalGradient(*stops), cornerRadius = cr)
+                drawRoundRect(Brush.verticalGradient(0f to Color(0x00777777), 1f to Color(0xFF6E6E6E)), cornerRadius = cr)
                 val cx = hue / 360f * size.width
                 val cy = (1f - (sat - BG_SAT_MIN) / (BG_SAT_MAX - BG_SAT_MIN)) * size.height
                 val r = 13.dp.toPx()
