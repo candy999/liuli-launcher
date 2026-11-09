@@ -41,11 +41,10 @@ internal class DitherScope(
     /** 漸層＋一般填色＋（不透明度、SrcOver／Plus）→ 設好抖色 Paint；其他情況回傳 null 交給原本的 DrawScope。 */
     private fun prepare(brush: Brush, alpha: Float, style: DrawStyle, colorFilter: ColorFilter?, blendMode: BlendMode): android.graphics.Paint? {
         if (brush !is ShaderBrush || style != Fill || colorFilter != null) return null
-        val mode = when (blendMode) {
-            BlendMode.SrcOver -> null
-            BlendMode.Plus -> PLUS
-            else -> return null
-        }
+        // 只抖一般疊加的漸層（底色、光暈、色塊）。加法混合的通常是極光光簾這種一幀上百個的小亮條：
+        // 每個都多建一個合成著色器，弱電視上每幀多 15ms 以上；而且亮的加法光不是色帶的來源。
+        if (blendMode != BlendMode.SrcOver) return null
+        val mode: PorterDuffXfermode? = null
         val canvas = d.drawContext.canvas.nativeCanvas
         // 噪點貼圖對齊實際像素：local＝目前矩陣的反矩陣 × 放大 2 倍（樣式在 480×270 的邏輯座標裡畫，還可能有拉伸）
         @Suppress("DEPRECATION") canvas.getMatrix(m)
@@ -84,8 +83,6 @@ internal class DitherScope(
     }
 
     companion object {
-        private val PLUS = PorterDuffXfermode(PorterDuff.Mode.ADD)
-
         private const val NOISE_SCALE = 2f
         private const val NOISE_SIZE = 64
 
