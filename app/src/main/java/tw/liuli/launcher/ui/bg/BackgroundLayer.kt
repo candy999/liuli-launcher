@@ -7,6 +7,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.remember
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.Constraints
@@ -42,11 +46,26 @@ fun BackgroundLayer(engine: BackgroundEngine, blurred: () -> Float, modifier: Mo
         SideEffect { engine.setViewport(fullW, fullH) }
 
         if (engine.blurLevel > 0) {
+            // 背景執行緒每送來一張新圖，就從上一張交叉淡化過去（趕不上 30fps 時看起來仍然連續）
+            val version = engine.blurVersion
+            val fade = remember { Animatable(1f) }
+            LaunchedEffect(version) {
+                val ms = engine.blurFadeMs
+                if (ms > 0) { fade.snapTo(0f); fade.animateTo(1f, tween(ms, easing = LinearEasing)) } else fade.snapTo(1f)
+            }
             Canvas(Modifier.fillMaxSize()) {
                 @Suppress("UNUSED_VARIABLE") val v = engine.blurVersion // 訂閱：模糊小圖每更新一次就重畫
                 val img = engine.blurImage
+                val prev = engine.blurPrev
+                val a = fade.value
+                val full = IntSize(fullW, fullH)
                 if (img != null) {
-                    drawImage(img, dstSize = IntSize(fullW, fullH), filterQuality = FilterQuality.Low)
+                    if (prev != null && a < 0.999f) {
+                        drawImage(prev, dstSize = full, filterQuality = FilterQuality.Low)
+                        drawImage(img, dstSize = full, alpha = a, filterQuality = FilterQuality.Low)
+                    } else {
+                        drawImage(img, dstSize = full, filterQuality = FilterQuality.Low)
+                    }
                 } else {
                     // 第一張模糊圖還沒算好：先用玻璃的小圖（同樣是模糊過的背景）頂著
                     @Suppress("UNUSED_VARIABLE") val gv = engine.glassVersion

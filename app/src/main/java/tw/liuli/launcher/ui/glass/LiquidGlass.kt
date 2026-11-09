@@ -24,7 +24,9 @@ import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.graphics.asAndroidPath
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.unit.IntOffset
@@ -66,48 +68,61 @@ fun Modifier.liquidGlass(
         if (backdrop.lensing && image != null && Build.VERSION.SDK_INT >= 33) LensShader.create(image) else null
     }
 
+    // 背景小圖的貼圖著色器：用 local matrix 對齊到玻璃所在的位置，直接「填」圓角矩形，不用裁切。
+    // 弱 GPU（OpenGL ES 2.0）上，反鋸齒的路徑裁切常常要由 CPU 每幀畫一張遮罩（面板 680×1000 像素，RenderThread 40ms）；
+    // 圓角矩形填色則由 GPU 直接算，沒有遮罩。
+    val wall = remember(backdrop.image) {
+        backdrop.image?.let { img ->
+            android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG or android.graphics.Paint.FILTER_BITMAP_FLAG).apply {
+                shader = android.graphics.BitmapShader(
+                    img.asAndroidBitmap(),
+                    android.graphics.Shader.TileMode.CLAMP,
+                    android.graphics.Shader.TileMode.CLAMP,
+                )
+            }
+        }
+    }
+    val matrix = remember { android.graphics.Matrix() }
+
     this
         .onGloballyPositioned { origin = it.positionInRoot() }
         .drawWithCache {
             val outline = shape.createOutline(size, layoutDirection, this)
             val path = Path().apply { addOutline(outline) }
+            val androidPath = path.asAndroidPath()
             val blurred = backdrop.image
             val radiusPx = (shape as? RoundedCornerShape)?.topStart?.toPx(size, this) ?: 0f
 
             onDrawBehind {
                 @Suppress("UNUSED_VARIABLE") val v = backdrop.version() // 背景換色時跟著重畫
                 val hl = highlight()
-                clipPath(path) {
-                    // 1. 背景：預先模糊的桌布對應區域（含折射）
-                    if (blurred != null && backdrop.screen.width > 0f) {
-                        val sx = blurred.width / backdrop.screen.width
-                        val sy = blurred.height / backdrop.screen.height
-                        if (lens != null && Build.VERSION.SDK_INT >= 33) {
-                            drawRect(lens.brush(origin, size.width, size.height, radiusPx, sx, sy))
-                        } else {
-                            drawImage(
-                                blurred,
-                                srcOffset = IntOffset((origin.x * sx).roundToInt(), (origin.y * sy).roundToInt()),
-                                srcSize = IntSize(
-                                    (size.width * sx).roundToInt().coerceAtLeast(1),
-                                    (size.height * sy).roundToInt().coerceAtLeast(1),
-                                ),
-                                dstSize = IntSize(size.width.roundToInt(), size.height.roundToInt()),
-                            )
-                        }
-                    } else {
-                        drawRect(Color(0x99141A2E))
+                // 1. 背景：預先模糊的桌布對應區域（含折射）
+                if (blurred != null && backdrop.screen.width > 0f) {
+                    val sx = blurred.width / backdrop.screen.width
+                    val sy = blurred.height / backdrop.screen.height
+                    if (lens != null && Build.VERSION.SDK_INT >= 33) {
+                        drawPath(path, lens.brush(origin, size.width, size.height, radiusPx, sx, sy))
+                    } else if (wall != null) {
+                        // 貼圖座標＝（玻璃在畫面上的位置＋本地座標）× 小圖縮放
+                        matrix.setScale(1f / sx, 1f / sy)
+                        matrix.postTranslate(-origin.x, -origin.y)
+                        wall.shader.setLocalMatrix(matrix)
+                        drawIntoCanvas { it.nativeCanvas.drawPath(androidPath, wall) }
                     }
-                    // 2. 很淡的白色薄霧（焦點時再亮一點＝更過曝）
-                    drawRect(Color.White.copy(alpha = tint + 0.10f * hl))
-                    // 3. 由上往下非常淡的光，沒有任何描邊或線條
-                    drawRect(
-                        Brush.verticalGradient(
-                            0f to Color.White.copy(alpha = 0.06f + 0.06f * hl),
-                            0.6f to Color.Transparent,
-                        ),
-                    )
+                } else {
+                    drawPath(path, Color(0x99141A2E))
                 }
+                // 2＋3. 很淡的白色薄霧（焦點時再亮一點＝更過曝）＋由上往下非常淡的光，合成一次填色（弱 GPU 少填一層）。
+                // 兩層半透明白疊起來的透明度＝1-(1-a)(1-b)，結果和分開畫相同。沒有任何描邊或線條。
+                val mist = tint + 0.10f * hl
+                val glow = 0.06f + 0.06f * hl
+                drawPath(
+                    path,
+                    Brush.verticalGradient(
+                        0f to Color.White.copy(alpha = 1f - (1f - mist) * (1f - glow)),
+                        0.6f to Color.White.copy(alpha = mist),
+                    ),
+                )
             }
         }
 }

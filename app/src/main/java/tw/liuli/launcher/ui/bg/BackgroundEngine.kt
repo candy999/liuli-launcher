@@ -181,6 +181,12 @@ class BackgroundEngine {
     /** [blurImage] 每更新一次加一。 */
     var blurVersion by mutableLongStateOf(0L)
         private set
+    /** 上一張模糊圖：背景執行緒趕不上 30fps 時，GPU 在兩張之間交叉淡化（模糊的畫面內插起來很自然）。 */
+    var blurPrev: ImageBitmap? = null
+        private set
+    /** 交叉淡化的時間（＝最近兩張模糊圖的平均間隔；0＝不淡化）。 */
+    @Volatile var blurFadeMs = 0
+        private set
     private val blurReq = Channel<Unit>(Channel.CONFLATED)
     private var viewW = 1920
     private var viewH = 1080
@@ -620,11 +626,17 @@ class BackgroundEngine {
         var bpx = IntArray(0)
         var btmp = IntArray(0)
         var n = 0
-        var spent = 0L
+        var spentDraw = 0L
+        var spentBlur = 0L
+        // 三張輪替：一張正在顯示、一張是淡化的起點、一張給這次寫入
+        val ring = arrayOfNulls<ImageBitmap>(3)
+        var ri = 0
+        var lastOutAt = 0L
+        var gapAvg = 0f
         while (true) {
             blurReq.receive()
             val lvl = blurLevel
-            if (lvl <= 0) { blurImage = null; continue }
+            if (lvl <= 0) { blurImage = null; blurPrev = null; continue }
             val f = blurFactor(lvl)
             val bw = max(8, ceil(viewW / f).toInt())
             val bh = max(8, ceil(viewH / f).toInt())
@@ -640,6 +652,7 @@ class BackgroundEngine {
             val c = canvas!!
             val px = bpx
             val tmp = btmp
+            var tDraw = 0L
             val t0 = android.os.SystemClock.uptimeMillis()
             withContext(Dispatchers.Default) {
                 val bmp = wImg.asAndroidBitmap()
@@ -650,21 +663,32 @@ class BackgroundEngine {
                     }
                 }
                 bmp.getPixels(px, 0, bw, 0, 0, bw, bh)
+                tDraw = android.os.SystemClock.uptimeMillis()
                 repeat(3) {
                     boxBlurH(px, tmp, bw, bh, BG_BLUR_R)
                     boxBlurV(tmp, px, bw, bh, BG_BLUR_R)
                 }
             }
-            // 輸出圖：尺寸變了才換一張；同尺寸只改像素（在主執行緒、兩幀之間改，RenderThread 不會讀到一半）
-            var out = blurImage
-            if (out == null || out.width != bw || out.height != bh) out = ImageBitmap(bw, bh)
+            val t1 = android.os.SystemClock.uptimeMillis()
+            // 輸出圖：三張輪替（在主執行緒、兩幀之間寫入，RenderThread 不會讀到一半；正在顯示與淡化起點的那兩張不動）
+            ri = (ri + 1) % ring.size
+            var out = ring[ri]
+            if (out == null || out.width != bw || out.height != bh) { out = ImageBitmap(bw, bh); ring[ri] = out }
             out.asAndroidBitmap().setPixels(px, 0, bw, 0, 0, bw, bh)
+            val cur = blurImage
+            blurPrev = if (cur != null && cur.width == bw && cur.height == bh) cur else null
+            // 交叉淡化時間＝輸出間隔的平均；隔很久才來一張（靜止後第一張）就直接換
+            val gap = (t1 - lastOutAt).toFloat()
+            gapAvg = if (lastOutAt == 0L || gap > 600f) 0f else if (gapAvg == 0f) gap else gapAvg + (gap - gapAvg) * 0.3f
+            lastOutAt = t1
+            blurFadeMs = if (gapAvg > 45f && blurPrev != null) min(gapAvg, 300f).toInt() else 0
             blurImage = out
             blurVersion++
-            spent += android.os.SystemClock.uptimeMillis() - t0
+            spentDraw += tDraw - t0
+            spentBlur += t1 - tDraw
             if (++n % 60 == 0) {
-                Log.i(TAG, "blur L$lvl ${bw}x$bh (f=${"%.1f".format(f)}): ${spent / 60}ms/frame")
-                spent = 0
+                Log.i(TAG, "blur L$lvl ${bw}x$bh (f=${"%.1f".format(f)}): draw ${spentDraw / 60}ms + blur ${spentBlur / 60}ms, fade ${blurFadeMs}ms")
+                spentDraw = 0; spentBlur = 0
             }
         }
     }
@@ -799,20 +823,26 @@ class BackgroundEngine {
 
 // ───────────── 玻璃背景的影像處理（CPU，小圖） ─────────────
 
-/** 水平盒狀模糊：src → dst，半徑 r，邊緣延伸。 */
+/**
+ * 水平盒狀模糊：src → dst，半徑 r，邊緣延伸。
+ * 弱 CPU 上的寫法：除法換成「乘倒數再右移 16 位」，夾邊界只在左右兩端做（中間每個像素不呼叫 coerceIn）。
+ */
 private fun boxBlurH(src: IntArray, dst: IntArray, w: Int, h: Int, r: Int) {
-    val div = 2 * r + 1
+    val mul = (65536 + 2 * r) / (2 * r + 1) // 無條件進位：255 不會變 254
+    val last = w - 1
     for (y in 0 until h) {
         val row = y * w
         var sr = 0; var sg = 0; var sb = 0
         for (k in -r..r) {
-            val c = src[row + k.coerceIn(0, w - 1)]
+            val c = src[row + (if (k < 0) 0 else if (k > last) last else k)]
             sr += (c shr 16) and 0xFF; sg += (c shr 8) and 0xFF; sb += c and 0xFF
         }
         for (x in 0 until w) {
-            dst[row + x] = (0xFF shl 24) or ((sr / div) shl 16) or ((sg / div) shl 8) or (sb / div)
-            val out = src[row + (x - r).coerceIn(0, w - 1)]
-            val inn = src[row + (x + r + 1).coerceIn(0, w - 1)]
+            dst[row + x] = (0xFF shl 24) or (((sr * mul) ushr 16) shl 16) or (((sg * mul) ushr 16) shl 8) or ((sb * mul) ushr 16)
+            val xo = x - r
+            val xi = x + r + 1
+            val out = src[row + (if (xo < 0) 0 else xo)]
+            val inn = src[row + (if (xi > last) last else xi)]
             sr += ((inn shr 16) and 0xFF) - ((out shr 16) and 0xFF)
             sg += ((inn shr 8) and 0xFF) - ((out shr 8) and 0xFF)
             sb += (inn and 0xFF) - (out and 0xFF)
@@ -820,22 +850,27 @@ private fun boxBlurH(src: IntArray, dst: IntArray, w: Int, h: Int, r: Int) {
     }
 }
 
-/** 垂直盒狀模糊：src → dst。 */
+/** 垂直盒狀模糊：src → dst（同上的寫法）。 */
 private fun boxBlurV(src: IntArray, dst: IntArray, w: Int, h: Int, r: Int) {
-    val div = 2 * r + 1
+    val mul = (65536 + 2 * r) / (2 * r + 1) // 無條件進位：255 不會變 254
+    val last = h - 1
     for (x in 0 until w) {
         var sr = 0; var sg = 0; var sb = 0
         for (k in -r..r) {
-            val c = src[k.coerceIn(0, h - 1) * w + x]
+            val c = src[(if (k < 0) 0 else if (k > last) last else k) * w + x]
             sr += (c shr 16) and 0xFF; sg += (c shr 8) and 0xFF; sb += c and 0xFF
         }
+        var idx = x
         for (y in 0 until h) {
-            dst[y * w + x] = (0xFF shl 24) or ((sr / div) shl 16) or ((sg / div) shl 8) or (sb / div)
-            val out = src[(y - r).coerceIn(0, h - 1) * w + x]
-            val inn = src[(y + r + 1).coerceIn(0, h - 1) * w + x]
+            dst[idx] = (0xFF shl 24) or (((sr * mul) ushr 16) shl 16) or (((sg * mul) ushr 16) shl 8) or ((sb * mul) ushr 16)
+            val yo = y - r
+            val yi = y + r + 1
+            val out = src[(if (yo < 0) 0 else yo) * w + x]
+            val inn = src[(if (yi > last) last else yi) * w + x]
             sr += ((inn shr 16) and 0xFF) - ((out shr 16) and 0xFF)
             sg += ((inn shr 8) and 0xFF) - ((out shr 8) and 0xFF)
             sb += (inn and 0xFF) - (out and 0xFF)
+            idx += w
         }
     }
 }
