@@ -208,7 +208,7 @@ fun HomeScreen(
     }
     LaunchedEffect(homePresses) {
         if (homePresses == 0) return@LaunchedEffect
-        sheet = null; drawerOpen = false
+        sheet = null; exitingSheet = null; drawerOpen = false
         delay(16)
         runCatching { firstDock.requestFocus() }
     }
@@ -251,6 +251,7 @@ fun HomeScreen(
 
     fun open(spec: SheetSpec, returnTo: FocusRequester?) {
         android.util.Log.i("LiuliUi", "sheet: ${spec.title}")
+        exitingSheet = null // 開新面板時，還在收起的舊面板直接拿掉（不然之後會被誤顯示）
         sheet = OpenSheet(spec, returnTo ?: sheet?.returnTo)
     }
 
@@ -343,7 +344,7 @@ fun HomeScreen(
             return@LaunchedEffect
         }
         if (externalAction.first > 0 && externalAction.second == MainActivity.ACTION_INPUTS) {
-            sheet = null; drawerOpen = false
+            sheet = null; exitingSheet = null; drawerOpen = false
             delay(32)
             runCatching { firstInput.requestFocus() }
         }
@@ -731,7 +732,7 @@ fun HomeScreen(
                     "perf" -> perfSheet()
                     "clock" -> clockSheet()
                 }
-                "drawer" -> { sheet = null; drawerOpen = true }
+                "drawer" -> { sheet = null; exitingSheet = null; drawerOpen = true }
                 "probe" -> tw.liuli.launcher.ui.bg.PerfProbe.apply(arg)
                 "clock" -> settings.updateClock(on = arg == "1" || arg == "on")
             }
