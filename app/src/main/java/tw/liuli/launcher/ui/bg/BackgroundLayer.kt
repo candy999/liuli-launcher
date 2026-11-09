@@ -129,13 +129,29 @@ fun BackgroundLayer(engine: BackgroundEngine, blurred: () -> Float, modifier: Mo
                 revealMask(from, reveal.value)
             }
         }
-        // 需要原生解析度細節的樣式（星空銀河的星點）：在背景圖層之上、以原生解析度另外畫
+        // 星空銀河的星點：以原生解析度另外畫在背景之上。不會動的星點畫成快取圖層、每格只移動位置（視差）；
+        // 只有十幾顆會閃爍的亮星每格重畫
         if (engine.style == BgStyle.GALAXY) {
+            val sx = fullW / BackgroundEngine.LOGICAL_W
+            val sy = fullH / BackgroundEngine.LOGICAL_H
+            Canvas(
+                Modifier.fillMaxSize().graphicsLayer {
+                    @Suppress("UNUSED_VARIABLE") val f = engine.frame
+                    compositingStrategy = CompositingStrategy.Offscreen
+                    translationX = -(engine.st.fx - .5f) * fullW * .02f
+                },
+            ) { scale(sx, sy, pivot = Offset.Zero) { galaxyCloudStars() } }
+            Canvas(
+                Modifier.fillMaxSize().graphicsLayer {
+                    @Suppress("UNUSED_VARIABLE") val f = engine.frame
+                    compositingStrategy = CompositingStrategy.Offscreen
+                    translationX = -(engine.st.fx - .5f) * fullW * .035f
+                    translationY = -(engine.st.fy - .5f) * fullH * .015f
+                },
+            ) { scale(sx, sy, pivot = Offset.Zero) { galaxyFieldStars() } }
             Canvas(Modifier.fillMaxSize()) {
                 @Suppress("UNUSED_VARIABLE") val f = engine.frame
-                scale(fullW / BackgroundEngine.LOGICAL_W, fullH / BackgroundEngine.LOGICAL_H, pivot = Offset.Zero) {
-                    drawStyleOverlay(engine.style, engine.st)
-                }
+                scale(sx, sy, pivot = Offset.Zero) { galaxyBrightStars(engine.st) }
             }
         }
         // 子頁面的模糊桌布畫在背景圖層「外面」：淡入淡出時每格只多貼一張小圖，背景本身維持快取不用重畫
