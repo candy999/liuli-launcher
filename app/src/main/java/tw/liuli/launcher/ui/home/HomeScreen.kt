@@ -126,6 +126,9 @@ fun HomeScreen(
     var hidden by remember { mutableStateOf(hiddenStore.load()) }
     var reloadKey by remember { mutableIntStateOf(0) }
     var sheet by remember { mutableStateOf<OpenSheet?>(null) }
+    // 按鍵測試：最後收到的按鍵
+    var lastKeyText by remember { mutableStateOf("（還沒按）") }
+    val keyTestTitle = "按鍵測試"
     var drawerOpen by remember { mutableStateOf(false) }
     var pendingFocus by remember { mutableStateOf<FocusRequester?>(null) }
     var dockLabel by remember { mutableStateOf("") }
@@ -397,50 +400,116 @@ fun HomeScreen(
         ), gearReq)
     }
 
-    fun chooseKeyAction(code: Int, long: Boolean) {
-        val label = KeyMapStore.keyName(code) + if (long) "・長按" else "・短按"
-        fun save(action: KeyAction) {
-            if (KeyRemapService.isProtected(code)) { close(); toast("這是基本鍵，不能改綁"); return }
-            KeyMapStore.put(context, KeyBinding(code, long, action))
-            KeyRemapService.instance?.reload()
-            close()
-            toast("$label → ${action.label}")
-        }
-        val items = KeyAction.fixed.map { a -> SheetItem(a.label) { save(a) } } +
-            SheetItem("開啟指定 App…") {
-                open(SheetSpec("$label：開啟哪個 App", null, apps.map { app ->
-                    SheetItem(app.label, if (app.isTvApp) null else "手機版") { save(KeyAction.OpenApp(app.packageName, app.label)) }
-                }), gearReq)
-            }
-        open(SheetSpec(label, "只設長按時，除了返回與 Home 鍵，短按會失去原本功能。", items), gearReq)
+    // ───────────── 遙控器按鍵 ─────────────
+    // 流程：新增綁定 → 按一下要改的鍵 → 選「按一下」或「按住半秒」→ 選動作 → 回到「已綁定的按鍵」清單
+    val learnTitle = "按一下要改的鍵"
+    fun pressName(long: Boolean) = if (long) "按住半秒" else "按一下"
+    fun bindingTitle(code: Int, long: Boolean) = KeyMapStore.keyName(code) + "・" + pressName(long)
+
+    /** 儲存（action＝null：刪除，恢復原本的功能）。 */
+    fun saveBinding(code: Int, long: Boolean, action: KeyAction?) {
+        if (KeyRemapService.isProtected(code)) { toast("這是基本鍵，不能改綁"); return }
+        if (action == null) KeyMapStore.remove(context, code, long) else KeyMapStore.put(context, KeyBinding(code, long, action))
+        KeyRemapService.instance?.reload()
+        toast(bindingTitle(code, long) + " → " + (action?.label ?: "原本的功能"))
     }
 
-    fun learnKey() {
+    // 這顆鍵（這種按法）要做什麼；[after] 存好之後要去哪裡（通常是綁定清單）
+    fun chooseKeyAction(code: Int, long: Boolean, after: () -> Unit) {
+        val title = bindingTitle(code, long)
+        val current = KeyMapStore.load(context).firstOrNull { it.keyCode == code && it.long == long }?.action
+        fun pick(action: KeyAction?) { saveBinding(code, long, action); after() }
+        val items = buildList {
+            KeyAction.fixed.forEach { act -> add(SheetItem(act.label, selected = current == act) { pick(act) }) }
+            add(SheetItem("開啟指定 App…", (current as? KeyAction.OpenApp)?.label, selected = current is KeyAction.OpenApp) {
+                open(SheetSpec("$title：開啟哪個 App", null, apps.map { app ->
+                    SheetItem(app.label, if (app.isTvApp) null else "手機版") { pick(KeyAction.OpenApp(app.packageName, app.label)) }
+                }), gearReq)
+            })
+            if (current != null) add(SheetItem("還原成原本的功能", "刪除這個綁定") { pick(null) })
+        }
+        val note = if (long) "只設「按住半秒」時，這顆鍵按一下會失去原本的功能（返回鍵、Home 鍵除外）：琉璃攔下按鍵後，沒辦法再把原本的按鍵送回去。" else "目前：" + (current?.label ?: "原本的功能")
+        open(SheetSpec("$title 要做什麼？", note, items), gearReq)
+    }
+
+    // 收到按鍵後：要改哪一種按法（右邊顯示目前的設定）
+    fun choosePress(code: Int, after: () -> Unit) {
+        val rules = KeyMapStore.load(context).filter { it.keyCode == code }
+        fun cur(long: Boolean) = rules.firstOrNull { it.long == long }?.action?.label ?: "原本的功能"
+        open(SheetSpec(KeyMapStore.keyName(code), "收到了！要改這顆鍵的哪一種按法？右邊是目前的設定。", listOf(
+            SheetItem("按一下", cur(false)) { chooseKeyAction(code, false, after) },
+            SheetItem("按住半秒", cur(true)) { chooseKeyAction(code, true, after) },
+        )), gearReq)
+    }
+
+    // 按鍵測試：按任何鍵，顯示琉璃收到了什麼（收不到＝電視系統直接處理，無法改綁）
+    fun keyTestSheet() {
+        lastKeyText = "（還沒按）"
+        open(SheetSpec(
+            keyTestTitle,
+            "按遙控器上的任何鍵，琉璃收到的按鍵會顯示在下面。按了卻沒有變化＝這顆鍵由電視系統直接處理（常見於 Netflix、YouTube 等品牌鍵），琉璃收不到，也就無法改綁。按返回結束。",
+            listOf(SheetItem("收到的按鍵", liveDetail = { lastKeyText }) { }),
+        ), gearReq)
+    }
+
+    fun learnKey(after: () -> Unit) {
         if (KeyRemapService.instance == null) {
-            toast("按鍵服務尚未啟動，請稍候幾秒再試")
+            toast("按鍵服務還在啟動，請過幾秒再試")
             return
         }
         open(SheetSpec(
-            "按下要改綁的鍵",
-            "15 秒內按一下遙控器上要改綁的鍵，例如 Netflix、YouTube 或彩色鍵。方向鍵、確定、返回、音量、電源等基本鍵受保護，不能改綁（按了會用來取消）。",
+            learnTitle,
+            "15 秒內，按一下遙控器上要改的那顆鍵（例如 Netflix、YouTube、彩色鍵、節目表鍵）。方向、確定、返回、音量、電源是基本鍵，受保護不能改，按了不會被當成要改的鍵。",
             listOf(SheetItem("取消") { close() }),
         ), gearReq)
-        KeyRemapService.learner = { code ->
-            if (KeyRemapService.isProtected(code)) {
-                toast("${KeyMapStore.keyName(code)} 是基本鍵，受保護不能改綁")
-            } else {
-                open(SheetSpec(KeyMapStore.keyName(code), "要設定短按還是長按？", listOf(
-                    SheetItem("短按") { chooseKeyAction(code, false) },
-                    SheetItem("長按（按住約半秒）") { chooseKeyAction(code, true) },
-                )), gearReq)
+        val learner: (Int) -> Unit = { code -> choosePress(code, after) }
+        KeyRemapService.learner = learner
+        scope.launch {
+            delay(15_000)
+            // 15 秒都沒收到：說明原因，而不是默默關掉
+            if (KeyRemapService.learner === learner && sheet?.spec?.title == learnTitle) {
+                KeyRemapService.learner = null
+                open(SheetSpec(
+                    "沒有收到按鍵",
+                    "15 秒內琉璃沒有收到可以改的鍵。可能是：那顆鍵由電視系統直接處理（常見於 Netflix、YouTube 等品牌鍵），琉璃收不到；或按鍵服務被系統停用了。可以用「按鍵測試」看看哪些鍵收得到。",
+                    listOf(
+                        SheetItem("再試一次") { learnKey(after) },
+                        SheetItem("按鍵測試") { keyTestSheet() },
+                        SheetItem("關閉") { close() },
+                    ),
+                ), gearReq)
             }
         }
     }
-    LaunchedEffect(sheet?.spec?.title) {
-        if (sheet?.spec?.title == "按下要改綁的鍵") {
-            delay(15_000)
-            if (KeyRemapService.learner != null && sheet?.spec?.title == "按下要改綁的鍵") close()
+
+    // 已綁定的按鍵：每一條都能修改或刪除
+    fun bindingsSheet() {
+        val rules = KeyMapStore.load(context)
+        val items = buildList {
+            if (rules.isEmpty()) add(SheetItem("還沒有任何綁定", "回上一層按「新增綁定」開始") { close() })
+            rules.forEach { r ->
+                val title = bindingTitle(r.keyCode, r.long)
+                add(SheetItem(title, r.action.label) {
+                    open(SheetSpec(title, "目前：${r.action.label}", listOf(
+                        SheetItem("改成其他動作") { chooseKeyAction(r.keyCode, r.long) { bindingsSheet() } },
+                        SheetItem("刪除這個綁定", "這顆鍵恢復原本的功能") { saveBinding(r.keyCode, r.long, null); bindingsSheet() },
+                        SheetItem("返回清單") { bindingsSheet() },
+                    )), gearReq)
+                })
+            }
+            if (rules.size > 1) add(SheetItem("全部刪除") {
+                open(SheetSpec("刪除全部 ${rules.size} 個綁定？", "所有按鍵都會恢復原本的功能。", listOf(
+                    SheetItem("全部刪除") {
+                        rules.forEach { KeyMapStore.remove(context, it.keyCode, it.long) }
+                        KeyRemapService.instance?.reload()
+                        toast("已刪除全部綁定")
+                        bindingsSheet()
+                    },
+                    SheetItem("取消") { bindingsSheet() },
+                )), gearReq)
+            })
         }
+        open(SheetSpec("已綁定的按鍵（${rules.size}）", "按確定可以修改或刪除。右邊是這顆鍵現在會做的事。", items), gearReq)
     }
 
     // 透過本機網路 ADB 自我授權開啟無障礙服務（電視常常沒有無障礙設定選單）
@@ -530,24 +599,25 @@ fun HomeScreen(
 
     fun keysSheet() {
         val enabled = KeyMapStore.isServiceEnabled(context)
+        val n = KeyMapStore.load(context).size
         val items = buildList {
-            if (!enabled) add(SheetItem("啟用按鍵服務", "自我授權，不需電腦") { selfGrant() })
-            add(SheetItem("新增按鍵對應", if (enabled) null else "需先啟用") {
-                if (enabled) learnKey() else toast("請先啟用按鍵服務")
+            if (!enabled) add(SheetItem("啟用按鍵服務", "第一步：自我授權，不需電腦") { selfGrant() })
+            add(SheetItem("新增綁定", if (enabled) "按一下要改的鍵 → 選按法 → 選動作" else "需先啟用按鍵服務") {
+                if (enabled) learnKey { bindingsSheet() } else toast("請先啟用按鍵服務")
+            })
+            add(SheetItem("已綁定的按鍵", if (n == 0) "還沒有" else "$n 個") { bindingsSheet() })
+            add(SheetItem("按鍵測試", "看看哪些鍵琉璃收得到") {
+                if (enabled) keyTestSheet() else toast("請先啟用按鍵服務")
             })
             add(SheetItem("防止回到原廠主畫面", if (KeyMapStore.guardHome(context)) "開" else "關") {
                 KeyMapStore.setGuardHome(context, !KeyMapStore.guardHome(context)); close()
             })
-            KeyMapStore.load(context).forEach { r ->
-                add(SheetItem(KeyMapStore.keyName(r.keyCode) + if (r.long) "・長按" else "・短按", r.action.label + "・刪除") {
-                    KeyMapStore.remove(context, r.keyCode, r.long)
-                    KeyRemapService.instance?.reload()
-                    close()
-                    toast("已刪除")
-                })
-            }
         }
-        val status = if (enabled) "服務已啟用。" else "服務未啟用。若無障礙選單找不到，可用電腦執行：${KeyMapStore.adbEnableCommand(context)}"
+        val status = when {
+            !enabled -> "按鍵服務：未啟用。改綁按鍵、防止回到原廠主畫面、螢幕小時鐘都需要它。也可以用電腦執行：${KeyMapStore.adbEnableCommand(context)}"
+            KeyRemapService.instance == null -> "按鍵服務：已啟用，正在啟動…"
+            else -> "按鍵服務：已啟用。"
+        }
         open(SheetSpec("遙控器按鍵", status, items), gearReq)
     }
 
@@ -569,7 +639,11 @@ fun HomeScreen(
                 SheetItem("邊框", if (settings.frameThickness == 0 && settings.frameFeather == 0 && settings.frameRadius == 0) "關" else "粗 ${settings.frameThickness}・圓 ${settings.frameRadius}・漸 ${settings.frameFeather}") { frameSheet() },
                 SheetItem("顯示／隱藏 App", if (hidden.isEmpty()) null else "已隱藏 ${hidden.size} 個") { visibilitySheet(0) },
                 SheetItem("螢幕小時鐘", if (settings.clockOn) "${tw.liuli.launcher.keys.ClockOverlay.CORNERS[settings.clockCorner.coerceIn(0, 3)]}・${settings.clockSize} sp" else "關") { clockSheet() },
-                SheetItem("遙控器按鍵", "改綁、防誤入原廠主畫面") { keysSheet() },
+                SheetItem("遙控器按鍵", when {
+                    !KeyMapStore.isServiceEnabled(context) -> "按鍵服務未啟用"
+                    KeyMapStore.load(context).isEmpty() -> "改綁、防誤入原廠主畫面"
+                    else -> "已綁定 ${KeyMapStore.load(context).size} 個"
+                }) { keysSheet() },
                 SheetItem("效能最佳化", "預先編譯，操作更順") { perfSheet() },
                 SheetItem("系統設定") { close(); SystemActions.systemSettings(context) },
                 SheetItem("網路") { close(); SystemActions.networkSettings(context) },
@@ -597,6 +671,19 @@ fun HomeScreen(
                     "clock" -> clockSheet()
                 }
                 "clock" -> settings.updateClock(on = arg == "1" || arg == "on")
+            }
+        }
+    }
+
+    // 按鍵測試面板開著時才監聽按鍵
+    val keyTesting = sheet?.spec?.title == keyTestTitle
+    LaunchedEffect(keyTesting) {
+        KeyRemapService.monitor = if (!keyTesting) null else { code ->
+            val bound = KeyMapStore.load(context).filter { it.keyCode == code }
+            lastKeyText = KeyMapStore.keyName(code) + when {
+                KeyRemapService.isProtected(code) -> "・基本鍵（不能改）"
+                bound.isNotEmpty() -> "・已綁定"
+                else -> "・可以改綁"
             }
         }
     }

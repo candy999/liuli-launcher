@@ -108,7 +108,7 @@ fun GlassSheet(spec: SheetSpec) {
             GText(spec.title, Modifier.padding(horizontal = 12.dp), size = 22.sp, weight = FontWeight.Medium)
             if (spec.subtitle != null) {
                 Spacer(Modifier.height(4.dp))
-                GText(spec.subtitle, Modifier.padding(horizontal = 12.dp), size = 13.sp, color = Ink.Tertiary, maxLines = 3)
+                GText(spec.subtitle, Modifier.padding(horizontal = 12.dp), size = 13.sp, color = Ink.Tertiary, maxLines = 7)
             }
             Spacer(Modifier.height(16.dp))
             LazyColumn(Modifier.weight(1f), state = listState, verticalArrangement = Arrangement.spacedBy(4.dp)) {

@@ -54,6 +54,11 @@ class KeyRemapService : AccessibilityService() {
     override fun onKeyEvent(event: KeyEvent): Boolean {
         val code = event.keyCode
 
+        // 按鍵測試：每顆收到的鍵都回報給設定畫面（只看不攔，按鍵照常作用）
+        if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+            monitor?.let { m -> handler.post { m(code) } }
+        }
+
         // 學習模式：下一顆按下的鍵交給設定畫面
         learner?.let { callback ->
             // 受保護的基本鍵（方向、確定、返回、音量、電源）一律放行：
@@ -184,5 +189,9 @@ class KeyRemapService : AccessibilityService() {
         /** 設定畫面用：下一顆按鍵會回傳給 callback（在主執行緒）。 */
         @Volatile
         var learner: ((Int) -> Unit)? = null
+
+        /** 按鍵測試：每顆收到的按鍵都通知（在主執行緒），不影響按鍵本身。 */
+        @Volatile
+        var monitor: ((Int) -> Unit)? = null
     }
 }
