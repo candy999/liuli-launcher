@@ -58,10 +58,6 @@ private class Scratch {
             bf[j * CNX + i] = f
         }
     }
-    /** 絲綢每條布的取樣點（避免每幀配置 ArrayList<Float>）。 */
-    val silkX = FloatArray(SILK_N)
-    val silkTop = FloatArray(SILK_N)
-    val silkBot = FloatArray(SILK_N)
 }
 
 private val scratch: ThreadLocal<Scratch> = ThreadLocal.withInitial { Scratch() }
@@ -87,12 +83,12 @@ private fun DrawScope.drawStyleRaw(style: BgStyle, st: BgState) {
         BgStyle.BOKEH -> bokeh(st)
         BgStyle.TRIANGLES -> triangles(st)
         BgStyle.DOTS -> dots(st)
-        BgStyle.FLIP -> flip(st)
-        BgStyle.SILK -> silk(st)
+        BgStyle.RAIN -> rain(st)
+        BgStyle.DEEPSEA -> deepsea(st)
         BgStyle.TRAILS -> trails(st)
         BgStyle.CONTOUR -> contour(st)
         BgStyle.PAPER -> paper(st)
-        BgStyle.AURORA -> aurora(st)
+        BgStyle.BEAMS -> beams(st)
         BgStyle.SOLID -> solid(st)
         BgStyle.BLACK -> black(st)
     }
@@ -144,33 +140,60 @@ private fun DrawScope.waves(st: BgState) {
     vignette(.35f)
 }
 
-// ───────────── 2. 光斑 ─────────────
+// ───────────── 2. 光斑（三層景深：遠小近大、遠慢近快的視差） ─────────────
 
-private class Bokeh(val x: Float, val y: Float, val r: Float, val d: Float, val h: Float, val ring: Boolean)
+/**
+ * 一顆光斑：[layer] 0＝遠（小、清楚、密）、1＝中、2＝近（大、很柔、稀疏、半透明）。
+ * 大小用冪次分佈：大多數是小的、少數很大，看起來才有「大小錯落」。
+ */
+private class Bokeh(val x: Float, val y: Float, val r: Float, val layer: Int, val h: Float, val a: Float)
 
-private val bokehs = Random(7).let { rnd ->
-    List(34) { i -> Bokeh(rnd.nextFloat() * W, rnd.nextFloat() * H, 6 + rnd.nextFloat() * 34, .25f + rnd.nextFloat() * .75f, (rnd.nextFloat() - .5f) * 50, i % 4 == 0) }
+private val bokehs: List<Bokeh> = Random(7).let { rnd ->
+    val out = ArrayList<Bokeh>()
+    // 位置鋪得比畫面寬（視差移動時邊緣不會空掉）；遠景最多、近景最少
+    repeat(54) { out += Bokeh(rnd.nextFloat() * W * 1.3f - W * .15f, rnd.nextFloat() * H, 1.1f + rnd.nextFloat().pow(2.2f) * 4.2f, 0, (rnd.nextFloat() - .5f) * 70, .35f + rnd.nextFloat() * .55f) }
+    repeat(20) { out += Bokeh(rnd.nextFloat() * W * 1.4f - W * .2f, rnd.nextFloat() * H, 7f + rnd.nextFloat().pow(1.6f) * 13f, 1, (rnd.nextFloat() - .5f) * 60, .45f + rnd.nextFloat() * .5f) }
+    repeat(7) { out += Bokeh(rnd.nextFloat() * W * 1.6f - W * .3f, rnd.nextFloat() * H, 26f + rnd.nextFloat() * 36f, 2, (rnd.nextFloat() - .5f) * 50, .5f + rnd.nextFloat() * .5f) }
+    out
 }
 
+/** 每一層的視差量（焦點從畫面一端移到另一端時，這一層移動畫面寬度的幾成）：遠景幾乎不動、近景移動最多。 */
+private val BOKEH_PARALLAX = floatArrayOf(.05f, .16f, .4f)
+
 private fun DrawScope.bokeh(st: BgState) {
-    base(st)
+    drawRect(Brush.linearGradient(listOf(st.c(-8f, .7f, .045f), st.c(14f, .8f, .11f)), Offset.Zero, Offset(W * .25f, H)), size = FULL)
+    focusGlow(st, W * .55f, .1f)
     for (b in bokehs) {
-        val c = Offset(b.x + (st.fx - .5f) * W * .3f * b.d, b.y + (st.fy - .5f) * H * .1f * b.d)
-        val r = b.r * (1 + st.pulse * .35f * b.d)
-        if (b.ring) {
-            drawCircle(st.c(b.h, .9f, .7f, .18f * b.d), r, c, style = Stroke(1f), blendMode = BlendMode.Plus)
-        } else {
-            drawCircle(
+        val k = BOKEH_PARALLAX[b.layer]
+        // 鏡頭跟著焦點：焦點往右，畫面往左帶——近的移得多、遠的移得少
+        val c = Offset(b.x - (st.fx - .5f) * W * k, b.y - (st.fy - .5f) * H * k * .5f)
+        val r = b.r * (1 + st.pulse * (.12f + .14f * b.layer))
+        when (b.layer) {
+            // 遠：小而清楚的光點
+            0 -> drawCircle(st.c(b.h, .85f, .7f, .5f * b.a), r, c, blendMode = BlendMode.Plus)
+            // 中：柔邊光斑，邊緣一圈稍亮（鏡頭散景的光圈邊）
+            1 -> drawCircle(
                 Brush.radialGradient(
-                    0f to st.c(b.h, .9f, .6f, .32f * b.d), .7f to st.c(b.h, .9f, .55f, .12f * b.d), 1f to st.c(b.h, .9f, .5f, 0f),
+                    0f to st.c(b.h, .9f, .6f, .26f * b.a), .74f to st.c(b.h, .9f, .58f, .22f * b.a),
+                    .9f to st.c(b.h, .9f, .66f, .34f * b.a), 1f to st.c(b.h, .9f, .5f, 0f),
+                    center = c, radius = r,
+                ),
+                r, c, blendMode = BlendMode.Plus,
+            )
+            // 近：很大、很淡、很柔（離焦最嚴重），只隱約一圈邊
+            else -> drawCircle(
+                Brush.radialGradient(
+                    0f to st.c(b.h, .8f, .55f, .13f * b.a), .6f to st.c(b.h, .8f, .55f, .11f * b.a),
+                    .86f to st.c(b.h, .8f, .62f, .16f * b.a), 1f to st.c(b.h, .8f, .5f, 0f),
                     center = c, radius = r,
                 ),
                 r, c, blendMode = BlendMode.Plus,
             )
         }
     }
-    vignette(.4f)
+    vignette(.42f)
 }
+
 
 // ───────────── 3. 幾何三角（頂點會移動的低多邊形曲面） ─────────────
 
@@ -262,87 +285,146 @@ private fun DrawScope.dots(st: BgState) {
     vignette(.4f)
 }
 
-// ───────────── 5. 翻牌方陣（色彩波從焦點擴散） ─────────────
+// ───────────── 5. 雨窗（毛玻璃上的雨滴：小水珠累積、大水滴滑落留下水痕） ─────────────
 
-
-private fun DrawScope.flip(st: BgState) {
-    val sc = scratch.get()!!
-    val sampleAL = sc.sampleA
-    val sampleBL = sc.sampleB
-    drawRect(Color(0xFF04050A), size = FULL)
-    val sz = 30f; val gap = 2.5f; val lx = st.fx * W; val ly = st.fy * H
-    var iy = 0; var y = -4f
-    while (y < H + sz) {
-        var ix = 0; var x = -8f
-        while (x < W + sz) {
-            val cx = x + sz / 2; val cy = y + sz / 2
-            val d = hypot(cx - lx, cy - ly) / W
-            val delay = d * 1100
-            st.sampleAt(delay, sampleAL); st.sampleAt(delay + 160, sampleBL)
-            val dh = abs(((sampleAL[0] - sampleBL[0] + 540f) % 360f) - 180f) + abs(sampleAL[1] - sampleBL[1]) * 120
-            val flip = min(1f, dh / 9f)
-            val wScale = max(.06f, cos(flip * 1.35f))
-            val spot = exp(-d * d * 6)
-            val checker = if ((ix + iy) % 2 == 1) .012f else 0f
-            val l = .06f + .13f * spot + checker + (1 - wScale) * .1f
-            val w = (sz - gap) * wScale; val h = sz - gap
-            val hue = sampleAL[0]; val sat = sampleAL[1]
-            drawRect(
-                Brush.horizontalGradient(listOf(hsl(hue - 6, .75f * sat * 1.6f, l * .75f), hsl(hue + 8, .8f * sat * 1.6f, l * 1.15f)), cx - w / 2, cx + w / 2),
-                Offset(cx - w / 2, cy - h / 2), Size(w, h),
-            )
-            if (spot > .2f) drawRect(Color.White.copy(alpha = .07f * spot), Offset(cx - w / 2, cy - h / 2), Size(w, 1f))
-            ix++; x += sz
-        }
-        iy++; y += sz
-    }
-    vignette(.45f)
+/** 由兩個整數得到 0～1 的固定亂數（同樣的輸入永遠同樣的值；主執行緒與背景執行緒畫出來一致）。 */
+private fun hash01(a: Int, b: Int): Float {
+    var x = a * 374761393 + b * 668265263
+    x = (x xor (x ushr 13)) * 1274126177
+    return ((x xor (x ushr 16)) and 0xFFFFFF) / 16777216f
 }
 
-// ───────────── 6. 絲綢 ─────────────
+private fun frac(v: Float) = v - kotlin.math.floor(v)
 
-private const val SILK_N = 80
+/** 一顆水珠：底下一點暗影、主體是透過去更亮的背景色、左上角一點高光。 */
+private fun DrawScope.drop(st: BgState, c: Offset, r: Float, a: Float, hOff: Float) {
+    if (a <= .01f || r <= .2f) return
+    drawCircle(Color.Black.copy(alpha = .22f * a), r * 1.05f, c + Offset(0f, r * .3f))
+    drawCircle(st.c(hOff, .55f, .42f, .55f * a), r, c)
+    drawCircle(st.c(hOff, .35f, .7f, .28f * a), r * .62f, c + Offset(0f, r * .15f))
+    drawCircle(Color.White.copy(alpha = .55f * a), r * .28f, c + Offset(-r * .32f, -r * .38f))
+}
 
-private fun DrawScope.silk(st: BgState) {
-    val sc = scratch.get()!!
-    val pathL = sc.path
-    val xsL = sc.silkX; val topsL = sc.silkTop; val botsL = sc.silkBot
-    drawRect(Brush.linearGradient(listOf(st.c(-10f, .45f, .12f), st.c(12f, .5f, .2f)), Offset.Zero, Offset(W * .3f, H)), size = FULL)
-    val lx = st.fx * W
-    rotate(-6.9f, pivot = Offset(W / 2, H / 2)) {
-        for (i in 0 until 5) {
-            val yc = H * (-.02f + i * .23f)
-            val a = H * (.05f + .015f * sin(i * 2.1f))
-            val ph = st.fx * (1.8f + i * .35f) + i * 1.7f + st.pulse * .35f * sin(i.toFloat())
-            val thick = H * (.27f + .04f * cos(i * 1.3f))
-            pathL.reset()
-            var n = 0
-            var x = -60f
-            val g2 = 2 * (W * .24f) * (W * .24f)
-            while (x <= W + 60 && n < SILK_N) {
-                val gather = exp(-(x - lx) * (x - lx) / g2)
-                val y = yc + a * sin(x / W * 3.4f + ph) - H * .045f * gather
-                xsL[n] = x; topsL[n] = y; botsL[n] = y + thick * (1 - .2f * gather)
-                n++
-                x += 8f
-            }
-            pathL.moveTo(xsL[0], topsL[0])
-            for (k in 0 until n) pathL.lineTo(xsL[k], topsL[k])
-            for (k in n - 1 downTo 0) pathL.lineTo(xsL[k], botsL[k])
-            pathL.close()
-            // 柔和陰影：往下錯開兩層半透明黑
-            translate(0f, 3.5f) { drawPath(pathL, Color.Black.copy(alpha = .16f)) }
-            drawPath(
-                pathL,
-                Brush.verticalGradient(
-                    0f to st.c(i * 4 - 8f, .42f, .13f), .4f to st.c(i * 4 - 4f, .45f, .22f + .02f * i),
-                    .52f to st.c(i * 4f, .38f, .33f + .015f * i), .64f to st.c(i * 4 + 4f, .45f, .21f + .015f * i), 1f to st.c(i * 4 + 8f, .42f, .13f),
-                    startY = yc - a, endY = yc + thick + a,
-                ),
+private fun DrawScope.rain(st: BgState) {
+    val t = st.at
+    // 毛玻璃後面：深色底＋幾團柔和的光暈（像窗外的燈），跟著主色；視差很小（遠在窗外）
+    drawRect(Brush.verticalGradient(listOf(st.c(-6f, .5f, .06f), st.c(10f, .55f, .11f)), 0f, H), size = FULL)
+    val px = -(st.fx - .5f) * W * .06f
+    val glows = arrayOf(
+        floatArrayOf(st.fx * W, st.fy * H, W * .42f, 0f, .32f),
+        floatArrayOf(W * .18f, H * .3f, W * .3f, -28f, .2f),
+        floatArrayOf(W * .82f, H * .62f, W * .34f, 26f, .22f),
+        floatArrayOf(W * .55f, H * .08f, W * .26f, 40f, .14f),
+    )
+    for (g in glows) {
+        val c = Offset(g[0] + px, g[1])
+        drawRect(Brush.radialGradient(listOf(st.c(g[3], .85f, .5f, g[4]), st.c(g[3], .85f, .45f, 0f)), center = c, radius = g[2]), size = FULL)
+    }
+    // 霧面：整片很淡的白霧，玻璃的感覺
+    drawRect(Color.White.copy(alpha = .03f), size = FULL)
+
+    // 小水珠：位置固定一陣子，慢慢浮現、停留、淡出，再換到別的地方（雨一直在累積的感覺）
+    for (i in 0 until 150) {
+        val period = 9f + 9f * hash01(i, 7)
+        val ph = t / period + hash01(i, 3)
+        val cyc = kotlin.math.floor(ph).toInt()
+        val u = ph - cyc
+        val a = (min(1f, u * 6f) * min(1f, (1f - u) * 4f))
+        val x = hash01(i, cyc * 2 + 11) * W
+        val y = hash01(i, cyc * 2 + 12) * H
+        val r = .5f + 1.6f * hash01(i, cyc + 5).pow(2.5f)
+        drop(st, Offset(x, y), r, a, (hash01(i, 9) - .5f) * 30)
+    }
+
+    // 大水滴：先在原地慢慢長大（小水珠匯聚），重到撐不住就加速往下滑，身後留下一道較清透的水痕
+    for (lane in 0 until 13) {
+        val period = 6f + 6f * hash01(lane, 31)
+        val ph = t / period + hash01(lane, 37)
+        val cyc = kotlin.math.floor(ph).toInt()
+        val u = ph - cyc
+        val x0 = (.04f + .92f * hash01(lane, cyc * 3 + 1)) * W
+        val y0 = (.02f + .55f * hash01(lane, cyc * 3 + 2)) * H
+        val rMax = 2.2f + 2.2f * hash01(lane, cyc * 3 + 3)
+        val hOff = (hash01(lane, 41) - .5f) * 30
+        if (u < .55f) {
+            val g = u / .55f
+            drop(st, Offset(x0, y0), rMax * (.35f + .65f * g), min(1f, u * 8f), hOff)
+        } else {
+            val s = (u - .55f) / .45f
+            val y = y0 + (H - y0 + 12f) * s * s // 重力：越滑越快
+            val x = x0 + 2.5f * sin(s * 7f + lane)
+            // 水痕：被水滴擦過的地方比較清透（稍亮、稍飽和），上淡下濃
+            val w = rMax * .9f
+            drawRect(
+                Brush.verticalGradient(listOf(st.c(hOff, .5f, .5f, 0f), st.c(hOff, .5f, .55f, .2f)), y0, y),
+                Offset(x0 - w / 2, y0), Size(w, max(0f, y - y0)),
             )
+            // 水痕上殘留的小水珠
+            for (k in 0 until 4) {
+                val ky = y0 + (y - y0) * hash01(lane * 7 + k, cyc)
+                if (ky < y - rMax * 2) drop(st, Offset(x0 + (hash01(k, cyc + lane) - .5f) * w, ky), .6f + .6f * hash01(k, lane), .8f, hOff)
+            }
+            drop(st, Offset(x, y), rMax * (1f - .15f * s), 1f, hOff)
         }
     }
-    focusGlow(st, W * .5f, .1f); vignette(.25f)
+    vignette(.4f)
+}
+
+// ───────────── 6. 深海（水面波動的光紋、灑下的光束、緩緩飄落的微粒） ─────────────
+
+private fun DrawScope.deepsea(st: BgState) {
+    val sc = scratch.get()!!
+    val pathL = sc.path
+    val t = st.at
+    // 水深：上方透光、往下越深越暗
+    drawRect(
+        Brush.verticalGradient(0f to st.c(-14f, .75f, .22f), .3f to st.c(-6f, .8f, .12f), .7f to st.c(4f, .85f, .05f), 1f to st.c(10f, .85f, .02f), startY = 0f, endY = H),
+        size = FULL,
+    )
+    val lx = st.fx * W
+    // 光束：從水面斜射下來，跟著水面的波浪慢慢搖擺、明暗起伏；焦點附近的光束較亮
+    for (i in 0 until 7) {
+        val bx = W * (-.08f + i * .18f) + 16f * sin(t * .21f + i * 1.7f) - (st.fx - .5f) * W * .1f
+        val wt = 10f + 14f * hash01(i, 1)
+        val wb = 50f + 50f * hash01(i, 2)
+        val skew = 40f + 30f * hash01(i, 3)
+        val near = exp(-((bx - lx) / (W * .22f)).pow(2))
+        val a = (.07f + .05f * sin(t * .55f + i * 2.3f) + .1f * near).coerceAtLeast(0f)
+        pathL.reset()
+        pathL.moveTo(bx - wt / 2, -2f); pathL.lineTo(bx + wt / 2, -2f)
+        pathL.lineTo(bx + skew + wb / 2, H); pathL.lineTo(bx + skew - wb / 2, H); pathL.close()
+        drawPath(
+            pathL,
+            Brush.verticalGradient(0f to st.c(-10f, .45f, .78f, a), .55f to st.c(-6f, .5f, .6f, a * .3f), 1f to st.c(0f, .5f, .5f, 0f), startY = 0f, endY = H),
+            blendMode = BlendMode.Plus,
+        )
+    }
+    // 水面光紋（焦散）：上方交錯流動的亮紋，越深越淡、越寬越散
+    val stroke = Stroke(1.1f)
+    for (k in 0 until 10) {
+        val yb = H * (.015f + k * .045f)
+        val fade = (1f - k / 10f).pow(1.6f)
+        pathL.reset()
+        var x = -8f
+        var first = true
+        while (x <= W + 8f) {
+            val y = yb + 3.2f * sin(x * .045f + t * 1.05f + k * 1.3f) + 2.4f * sin(x * .11f - t * 1.6f + k * .7f) +
+                1.2f * sin(x * .23f + t * 2.3f + k)
+            if (first) { pathL.moveTo(x, y); first = false } else pathL.lineTo(x, y)
+            x += 6f
+        }
+        val glow = .14f * fade * (.75f + .25f * sin(t * .8f + k))
+        drawPath(pathL, st.c(-12f, .35f, .82f, glow), style = stroke, blendMode = BlendMode.Plus)
+    }
+    // 懸浮微粒（海雪）：慢慢往下飄；近的大、亮、飄得快、視差大
+    for (p in 0 until 46) {
+        val d = .2f + .8f * hash01(p, 5)
+        val x = frac(hash01(p, 1) + t * .004f * (hash01(p, 6) - .5f)) * W * 1.2f - W * .1f - (st.fx - .5f) * W * .12f * d
+        val y = frac(hash01(p, 2) + t * (.006f + .014f * d)) * (H + 10f) - 5f
+        val a = .1f + .28f * d * (1f - y / H * .6f)
+        drawCircle(st.c(-8f, .3f, .8f, a), .4f + 1.1f * d, Offset(x, y))
+    }
+    vignette(.32f)
 }
 
 // ───────────── 7. 光軌 ─────────────
@@ -448,30 +530,45 @@ private fun DrawScope.paper(st: BgState) {
     vignette(.3f)
 }
 
-// ───────────── 10. 極光 ─────────────
+// ───────────── 10. 光束（粗細不一的垂直光束，呼吸、流動，往焦點聚攏） ─────────────
 
-private fun DrawScope.aurora(st: BgState) {
-    drawRect(Brush.verticalGradient(listOf(st.c(-10f, .6f, .04f), st.c(10f, .7f, .11f)), 0f, H), size = FULL)
-    val cfgs = arrayOf(floatArrayOf(0f, .3f, 1f), floatArrayOf(-38f, .38f, .8f), floatArrayOf(42f, .24f, .65f))
-    for ((c, cfg) in cfgs.withIndex()) {
-        val hc = cfg[0]; val baseY = H * cfg[1]; val amp = H * .07f; val shift = st.fx * 2.4f + c * 1.3f
-        val brush = Brush.verticalGradient(
-            0f to st.c(hc, .95f, .75f, 0f), .05f to st.c(hc, .95f, .68f, .55f), .3f to st.c(hc + 22, .9f, .5f, .22f), 1f to st.c(hc + 30, .9f, .45f, 0f),
-            startY = 0f, endY = 1f,
+private fun DrawScope.beams(st: BgState) {
+    val t = st.at
+    drawRect(Brush.verticalGradient(listOf(st.c(-10f, .6f, .025f), st.c(10f, .7f, .06f)), 0f, H), size = FULL)
+    val lx = st.fx * W
+    focusGlow(st, W * .45f, .08f)
+    for (i in 0 until 56) {
+        val h1 = hash01(i, 1); val h2 = hash01(i, 2); val h3 = hash01(i, 3); val h4 = hash01(i, 4)
+        val base = h1 * W * 1.3f - W * .15f
+        // 寬度：大多數是細線，少數是寬的光帶
+        val w = .5f + 10f * h2.pow(3.2f)
+        // 往焦點聚攏一些（越近聚得越多），再加上緩慢的左右飄移
+        val pull = .22f * exp(-((base - lx) / (W * .3f)).pow(2))
+        val x = base + (lx - base) * pull + 7f * sin(t * (.12f + .22f * h3) + i * 1.9f) - (st.fx - .5f) * W * .08f * (1f - h2)
+        // 亮度：各自緩慢呼吸；焦點附近整體亮一些
+        val breathe = .5f + .5f * sin(t * (.25f + .55f * h4) + i * 2.1f)
+        val a = (.12f + .55f * breathe * breathe) * (.45f + .7f * exp(-((x - lx) / (W * .28f)).pow(2))) * (.6f + .4f * (1f - h2))
+        // 每條光束最亮的位置上下緩慢游移，兩端淡出
+        val yc = H * (.5f + .22f * sin(t * (.1f + .15f * h3) + i))
+        val span = H * (.55f + .45f * h4)
+        val hOff = (h3 - .5f) * 80f
+        drawRect(
+            Brush.verticalGradient(
+                0f to st.c(hOff, .95f, .55f, 0f), .3f to st.c(hOff, .95f, .55f, a * .55f), .5f to st.c(hOff, .9f, .62f, a),
+                .7f to st.c(hOff, .95f, .55f, a * .55f), 1f to st.c(hOff, .95f, .5f, 0f),
+                startY = yc - span, endY = yc + span,
+            ),
+            Offset(x - w / 2, 0f), Size(w, H), blendMode = BlendMode.Plus,
         )
-        var x = 0f
-        while (x < W) {
-            val yTop = baseY + amp * sin(x / W * 3.2f + shift) + amp * .4f * sin(x / W * 7.1f + c)
-            val hgt = H * (.24f + .1f * sin(x / W * 5 + c * 2 + st.fx * 3)) * (1 + st.pulse * .12f)
-            val s01 = .5f + .5f * sin(x * .09f + c * 3 + shift * 2)
-            val alpha = cfg[2] * (.45f + .55f * s01 * s01)
-            withTransform({ translate(x, yTop); scale(1f, hgt, pivot = Offset.Zero) }) {
-                drawRect(brush, size = Size(5.2f, 1f), alpha = alpha, blendMode = BlendMode.Plus)
-            }
-            x += 5f
+        // 寬的光帶中間加一條更亮的細芯
+        if (w > 4f) {
+            drawRect(
+                Brush.verticalGradient(0f to Color.Transparent, .5f to st.c(hOff, .6f, .8f, a * .5f), 1f to Color.Transparent, startY = yc - span * .8f, endY = yc + span * .8f),
+                Offset(x - w * .12f, 0f), Size(w * .24f, H), blendMode = BlendMode.Plus,
+            )
         }
     }
-    vignette(.35f)
+    vignette(.3f)
 }
 
 // ───────────── 11. 純色、12. 純黑 ─────────────

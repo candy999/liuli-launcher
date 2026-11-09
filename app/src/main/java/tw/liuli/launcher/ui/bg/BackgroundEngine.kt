@@ -31,23 +31,32 @@ import kotlin.math.ln
 import kotlin.math.max
 import kotlin.math.min
 
-/** 背景樣式（與 design/home-v4.html 相同）。 */
-enum class BgStyle(val id: String, val label: String, val note: String) {
+/**
+ * 背景樣式。[ambient]＝一直在動（雨滴滑落、水面光紋、光束流動）：轉場結束也不停，
+ * 用 [BgState.at] 這個「只在背景真的有畫的時候才前進」的時鐘，暫停（面板滑動、離開琉璃）後接著動、不會跳。
+ */
+enum class BgStyle(val id: String, val label: String, val note: String, val ambient: Boolean = false) {
     WAVES("waves", "流線浪潮", "波峰朝焦點聚集"),
     BOKEH("bokeh", "光斑", "前後景深視差，焦點時光斑脈動"),
     TRIANGLES("triangles", "幾何三角", "曲面隆起並跟著焦點移動，三角面拉伸變形"),
     DOTS("dots", "波點圓圈", "遠近兩層波點，焦點處聚光"),
-    FLIP("flip", "翻牌方陣", "新顏色像波一樣擴散，方塊依序翻面"),
-    SILK("silk", "絲綢", "柔光布料皺褶往焦點聚攏"),
+    RAIN("rain", "雨窗", "毛玻璃上的雨滴累積、滑落，後面透出主色光暈", ambient = true),
+    DEEPSEA("deepsea", "深海", "水面波動的光紋與光束灑進深海，微粒緩緩飄落", ambient = true),
     TRAILS("trails", "光軌", "長曝光光軌，兩端交錯開合"),
     CONTOUR("contour", "等高線", "焦點是山峰，等高線跟著流動"),
     PAPER("paper", "紙雕層疊", "多層山巒剪影，前景移動較多"),
-    AURORA("aurora", "極光", "帶垂直紋理的極光簾幕"),
+    BEAMS("beams", "光束", "粗細不一的垂直光束呼吸、流動，往焦點聚攏", ambient = true),
     SOLID("solid", "純色", "雙色漸層純色"),
     BLACK("black", "純黑（OLED）", "幾乎全黑，焦點下方一抹主色");
 
     companion object {
-        fun byId(id: String?) = entries.firstOrNull { it.id == id } ?: WAVES
+        fun byId(id: String?) = entries.firstOrNull { it.id == id } ?: when (id) {
+            // 舊版樣式改名：翻牌方陣 → 雨窗、絲綢 → 深海、極光 → 光束
+            "flip" -> RAIN
+            "silk" -> DEEPSEA
+            "aurora" -> BEAMS
+            else -> WAVES
+        }
     }
 }
 
@@ -64,6 +73,8 @@ class BgState {
     var dir = 0f
     var ripple = 0f
     var nowMs = 0L
+    /** 持續動畫的時鐘（秒）：只在背景真的有畫的時候前進，每格最多 0.1 秒（暫停後接著動，不跳）。 */
+    var at = 0f
 
     // 色彩歷史：翻牌方陣用「過去某時間點的顏色」做出從焦點擴散的色彩波
     private val ht = LongArray(HISTORY)
@@ -94,7 +105,7 @@ class BgState {
 
     /** 整份複製（給背景執行緒畫玻璃用的快照，避免畫到一半被主執行緒改掉）。 */
     fun copyFrom(o: BgState) {
-        h = o.h; s = o.s; fx = o.fx; fy = o.fy; pulse = o.pulse; dir = o.dir; ripple = o.ripple; nowMs = o.nowMs
+        h = o.h; s = o.s; fx = o.fx; fy = o.fy; pulse = o.pulse; dir = o.dir; ripple = o.ripple; nowMs = o.nowMs; at = o.at
         o.ht.copyInto(ht); o.hh.copyInto(hh); o.hs.copyInto(hs)
         count = o.count; head = o.head
     }
@@ -272,9 +283,17 @@ class BackgroundEngine {
         wake.trySend(Unit)
     }
 
-    fun applyFollow(f: Boolean) {
+    /** 自動色彩（跟著焦點）開關；關閉時背景用固定的 [hue]／[sat]。 */
+    fun applyFollow(f: Boolean, hue: Float = 228f, sat: Float = 0.5f) {
         follow = f
-        if (!f) { tH = 228f; tS = 0.5f }
+        if (!f) { tH = hue; tS = sat }
+        wake.trySend(Unit)
+    }
+
+    /** 固定顏色（色彩選擇器移動時即時預覽；引擎本身的緩衝讓換色平滑）。 */
+    fun applyFixedColor(hue: Float, sat: Float) {
+        if (follow) return
+        tH = hue; tS = sat
         wake.trySend(Unit)
     }
 
@@ -315,7 +334,6 @@ class BackgroundEngine {
             charge = min(0.45f, charge + 0.45f)
             rippleTarget = floor(rippleTarget) + 1f
             // 只有翻牌方陣需要讓色彩波傳完（其他樣式追上目標就停）
-            if (style == BgStyle.FLIP) holdMs = 1600
             wake.trySend(Unit)
         }
     }
@@ -383,6 +401,7 @@ class BackgroundEngine {
             var nextRampT = 0L
             synchronized(metricLock) { mCount = 0 }
             var held = false
+            var lastAmbT = 0L
             while (!done) {
                 withFrameNanos<Unit> { ns ->
                     val t = ns / 1_000_000L
@@ -392,7 +411,7 @@ class BackgroundEngine {
                         held = true
                         return@withFrameNanos
                     }
-                    if (held) { held = false; lastT = 0L; lastBgT = 0L; skipMeasure = 2 }
+                    if (held) { held = false; lastT = 0L; lastBgT = 0L; lastAmbT = 0L; skipMeasure = 2 }
                     // 操作中（按鍵後一小段時間）或面板／抽屜開著：背景照常動，但降到 ÷3、15fps，把 GPU 留給 UI。
                     // 速度不變（每格推進 1/15 秒），所以不會停住、也不會變慢。
                     val busy = android.os.SystemClock.uptimeMillis() < yieldUntil || covered
@@ -414,8 +433,11 @@ class BackgroundEngine {
                     }
                     lastBgT = t
                     if (holdMs > 0) { holdUntil = t + holdMs; holdMs = 0 }
-                    done = step(t) && t > holdUntil
+                    // 持續動畫的樣式（雨窗、深海、光束）追上目標也不停
+                    done = step(t) && t > holdUntil && !style.ambient
                     if (done) snapToTarget()
+                    if (lastAmbT != 0L) st.at += min(t - lastAmbT, 100L) / 1000f
+                    lastAmbT = t
                     st.nowMs = t
                     st.record(t)
 

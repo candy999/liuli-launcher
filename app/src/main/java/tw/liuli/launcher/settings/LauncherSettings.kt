@@ -17,6 +17,16 @@ class LauncherSettings(context: Context) {
     /** 背景色系是否跟著焦點項目變化。 */
     var bgFollow by mutableStateOf(prefs.getBoolean("bg_follow", true))
         private set
+    /** 自動色彩關閉時的固定顏色：色相（0～360）、鮮豔度（引擎飽和度 0.05～0.62）。 */
+    var bgHue by mutableStateOf(prefs.getFloat("bg_hue", 228f))
+        private set
+    var bgSat by mutableStateOf(prefs.getFloat("bg_sat", 0.5f))
+        private set
+
+    fun updateBgColor(hue: Float, sat: Float) {
+        bgHue = hue; bgSat = sat
+        prefs.edit().putFloat("bg_hue", hue).putFloat("bg_sat", sat).apply()
+    }
 
     var cityId by mutableStateOf(prefs.getString("city", "taipei") ?: "taipei")
         private set

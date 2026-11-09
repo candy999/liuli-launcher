@@ -129,6 +129,9 @@ fun HomeScreen(
     var reloadKey by remember { mutableIntStateOf(0) }
     var sheet by remember { mutableStateOf<OpenSheet?>(null) }
     var exitingSheet by remember { mutableStateOf<SheetSpec?>(null) }
+    // 背景顏色選擇器（色盤）：開著時、打開前的顏色（取消時還原）
+    var picking by remember { mutableStateOf(false) }
+    var pickerOrigin by remember { mutableStateOf<Pair<Float, Float>?>(null) }
     // 按鍵測試：最後收到的按鍵
     var lastKeyText by remember { mutableStateOf("（還沒按）") }
     val keyTestTitle = "按鍵測試"
@@ -399,6 +402,30 @@ fun HomeScreen(
                 SheetItem("細緻噪點", liveDetail = { grainText(settings.grain) },
                     onAdjust = { d -> settings.updateGrain((settings.grain + d).coerceIn(0, grainNames.lastIndex)) }) { close() },
                 SheetItem("全部關閉") { settings.updateBgBlur(0); engine.applyBlur(0); settings.updateGrain(0); close() },
+            ),
+        ), gearReq)
+    }
+
+    // 背景色系：自動色彩開關＋固定顏色的二維色盤
+    fun colorSheet() {
+        fun setAuto(on: Boolean) {
+            settings.updateBgFollow(on)
+            engine.applyFollow(on, settings.bgHue, settings.bgSat)
+        }
+        open(SheetSpec(
+            "背景色系",
+            "自動色彩：背景跟著焦點項目的主題色變化（例如停在 Netflix 就偏紅）。關閉後使用你選的固定顏色。",
+            listOf(
+                SheetItem("自動色彩", liveDetail = { if (settings.bgFollow) "開" else "關" },
+                    onAdjust = { setAuto(!settings.bgFollow) }) { setAuto(!settings.bgFollow) },
+                SheetItem("選擇顏色", liveDetail = { "色相 ${settings.bgHue.roundToInt()}°" }) {
+                    // 選顏色＝要固定顏色：自動色彩一起關掉
+                    setAuto(false)
+                    pickerOrigin = settings.bgHue to settings.bgSat
+                    close()
+                    pendingFocus = null // 焦點交給色盤，不要還原到設定按鈕
+                    picking = true
+                },
             ),
         ), gearReq)
     }
@@ -692,11 +719,7 @@ fun HomeScreen(
             listOf(
                 SheetItem("地點", Cities.byId(settings.cityId).name) { citySheet() },
                 SheetItem("背景樣式", engine.style.label) { styleSheet() },
-                SheetItem("背景色系", if (engine.follow) "跟隨焦點" else "固定深藍") {
-                    val on = !engine.follow
-                    settings.updateBgFollow(on); engine.applyFollow(on); close()
-                    toast("背景色系：" + if (on) "跟隨焦點" else "固定深藍")
-                },
+                SheetItem("背景色系", if (settings.bgFollow) "自動（跟著焦點）" else "固定・色相 ${settings.bgHue.roundToInt()}°") { colorSheet() },
                 SheetItem("背景質感", listOfNotNull(
                     if (settings.bgBlur > 0) "模糊 ${settings.bgBlur}" else null,
                     if (settings.grain > 0) "噪點 ${tw.liuli.launcher.ui.bg.GRAIN_LABELS[settings.grain]}" else null,
@@ -733,6 +756,11 @@ fun HomeScreen(
                     "frame" -> frameSheet()
                     "perf" -> perfSheet()
                     "clock" -> clockSheet()
+                    "color" -> colorSheet()
+                }
+                "picker" -> {
+                    settings.updateBgFollow(false); engine.applyFollow(false, settings.bgHue, settings.bgSat)
+                    pickerOrigin = settings.bgHue to settings.bgSat; sheet = null; picking = true
                 }
                 "drawer" -> { sheet = null; exitingSheet = null; drawerOpen = true }
                 "probe" -> tw.liuli.launcher.ui.bg.PerfProbe.apply(arg)
@@ -764,6 +792,7 @@ fun HomeScreen(
     // 返回鍵：面板 → 抽屜 → 回到第一個 App（主畫面不會離開）
     BackHandler(enabled = active) {
         when {
+            picking -> { pickerOrigin?.let { (h, s) -> settings.updateBgColor(h, s); engine.applyFixedColor(h, s) }; picking = false; pendingFocus = gearReq }
             movingPkg != null -> { dock = moveOrigin; movingPkg = null }
             sheet != null -> close(cancel = true)
             drawerOpen -> closeDrawer()
@@ -772,9 +801,9 @@ fun HomeScreen(
     }
 
     // 面板／抽屜開關（含面板換頁）：滑動動畫期間背景暫停；開著的時候背景用省力模式
-    val overlay = drawerOpen || sheet != null
+    val overlay = drawerOpen || sheet != null || picking
     var overlaySeen by remember { mutableStateOf(false) }
-    LaunchedEffect(drawerOpen, sheet?.spec) {
+    LaunchedEffect(drawerOpen, sheet?.spec, picking) {
         engine.covered = overlay
         // 設定面板開著：背景壓暗（以前是全螢幕疊一層半透明黑，每格多混一整個螢幕）
         engine.dim = if (sheet != null) 0.22f else 0f
@@ -784,7 +813,7 @@ fun HomeScreen(
 
     val visibleApps = remember(apps, hidden) { apps.filter { it.packageName !in hidden } }
     val dockApps = remember(apps, dock) { dock.mapNotNull { pkg -> apps.firstOrNull { it.packageName == pkg } } }
-    val recede = animateFloatAsState(if (drawerOpen || sheet != null) 1f else 0f, tween(380), label = "recede")
+    val recede = animateFloatAsState(if (drawerOpen || sheet != null || picking) 1f else 0f, tween(380), label = "recede")
 
     CompositionLocalProvider(LocalBringIntoViewSpec provides keepVisible) {
         Box(
@@ -978,6 +1007,17 @@ fun HomeScreen(
                 )
             }
 
+            if (picking) {
+                ColorPickerPanel(
+                    hue = settings.bgHue, sat = settings.bgSat,
+                    onChange = { h, s -> settings.updateBgColor(h, s); engine.applyFixedColor(h, s) },
+                    onDone = { picking = false; pendingFocus = gearReq },
+                    onCancel = {
+                        pickerOrigin?.let { (h, s) -> settings.updateBgColor(h, s); engine.applyFixedColor(h, s) }
+                        picking = false; pendingFocus = gearReq
+                    },
+                )
+            }
             // 開著的面板；關閉後同一個面板（同一個 key，不重新組合）切到收起動畫，滑出後才拿掉
             (sheet?.spec ?: exitingSheet)?.let { s ->
                 key(s) {
