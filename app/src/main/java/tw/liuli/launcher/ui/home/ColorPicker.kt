@@ -110,16 +110,31 @@ fun ColorPickerPanel(
                 drawCircle(Color.White, r, Offset(cx, cy), style = Stroke(3.dp.toPx()))
             }
             Spacer(Modifier.height(20.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                // 預覽：背景實際會用的深色調（和桌布一樣暗）＋同色的亮版
-                Canvas(Modifier.size(56.dp, 40.dp)) {
+            Row(verticalAlignment = Alignment.Bottom) {
+                // 預覽：一張 16:9 的迷你桌面——和背景一樣的暗色漸層＋主色光暈，上面幾個小方塊代表 App
+                Canvas(Modifier.size(176.dp, 99.dp)) {
                     val cr = CornerRadius(10.dp.toPx())
-                    drawRoundRect(Color.hsl(hue, (sat * 1.6f).coerceIn(0f, 1f), .14f), cornerRadius = cr)
+                    val sv = (sat * 1.6f).coerceIn(0f, 1f)
+                    fun col(dh: Float, s: Float, l: Float, a: Float = 1f) =
+                        Color.hsl(((hue + dh) % 360f + 360f) % 360f, (s * sv).coerceIn(0f, 1f), l, a)
                     drawRoundRect(
-                        Color.hsl(hue, (sat * 1.6f).coerceIn(0f, 1f), .5f),
-                        topLeft = Offset(size.width * .55f, 0f),
-                        size = androidx.compose.ui.geometry.Size(size.width * .45f, size.height), cornerRadius = cr,
+                        Brush.linearGradient(listOf(col(-8f, .7f, .06f), col(14f, .8f, .16f)), Offset.Zero, Offset(size.width * .4f, size.height)),
+                        cornerRadius = cr,
                     )
+                    drawRoundRect(
+                        Brush.radialGradient(listOf(col(0f, .9f, .5f, .5f), col(0f, .9f, .5f, 0f)), center = Offset(size.width * .3f, size.height * .62f), radius = size.width * .55f),
+                        cornerRadius = cr,
+                    )
+                    // 時鐘一小條＋一排 App 方塊
+                    val u = size.width / 32f
+                    drawRoundRect(Color.White.copy(alpha = .85f), Offset(u * 2f, u * 2f), androidx.compose.ui.geometry.Size(u * 7f, u * 2.2f), CornerRadius(u))
+                    drawRoundRect(Color.White.copy(alpha = .4f), Offset(u * 2f, u * 5f), androidx.compose.ui.geometry.Size(u * 10f, u * .9f), CornerRadius(u * .45f))
+                    for (k in 0 until 5) {
+                        drawRoundRect(
+                            Color.White.copy(alpha = if (k == 0) .95f else .7f),
+                            Offset(u * (2f + k * 5.8f), u * 9.5f), androidx.compose.ui.geometry.Size(u * 5f, u * 2.9f), CornerRadius(u * .7f),
+                        )
+                    }
                 }
                 Spacer(Modifier.width(16.dp))
                 Column {
