@@ -852,7 +852,7 @@ fun HomeScreen(
                                     // 列捲動或移動位置後，名稱跟著焦點圖塊的實際位置走
                                     if (app.packageName == lastDockPkg) labelX = cx
                                 }
-                                .bgTarget(app.themeColor),
+                                .bgTarget(app.themeColor, isApp = true),
                         )
                         }
                     }

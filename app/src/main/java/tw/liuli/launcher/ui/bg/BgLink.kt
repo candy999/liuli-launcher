@@ -18,10 +18,10 @@ class BgLink(
     /** 最後一次左右鍵的方向（-1、0、1），給翻轉、擺動類樣式用。 */
     val lastDir: () -> Int,
 ) {
-    fun focus(color: Int?, cx: Float, cy: Float) {
+    fun focus(color: Int?, cx: Float, cy: Float, isApp: Boolean = false) {
         val s = screen()
         if (s.width <= 0f || s.height <= 0f) return
-        engine.focus(scope, color, cx / s.width, cy / s.height, lastDir())
+        engine.focus(scope, color, cx / s.width, cy / s.height, lastDir(), isApp)
     }
 }
 
@@ -42,7 +42,7 @@ object BgColors {
 /**
  * 放在 focusTarget 之前：記下元件中心位置，取得焦點時通知背景換色、移動焦點位置。
  */
-fun Modifier.bgTarget(color: Int?): Modifier = composed {
+fun Modifier.bgTarget(color: Int?, isApp: Boolean = false): Modifier = composed {
     val link = LocalBgLink.current
     val center = remember { FloatArray(2) }
     this
@@ -50,5 +50,5 @@ fun Modifier.bgTarget(color: Int?): Modifier = composed {
             val b = c.boundsInRoot()
             center[0] = b.center.x; center[1] = b.center.y
         }
-        .onFocusChanged { if (it.isFocused) link?.focus(color ?: BgColors.NEUTRAL, center[0], center[1]) }
+        .onFocusChanged { if (it.isFocused) link?.focus(color ?: BgColors.NEUTRAL, center[0], center[1], isApp) }
 }

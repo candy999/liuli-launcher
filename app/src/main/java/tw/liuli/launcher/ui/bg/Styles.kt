@@ -40,6 +40,9 @@ private val FULL = Size(W, H)
  */
 private class Scratch {
     val ditherPaint = DitherScope.newPaint()
+    val ditherNoise = DitherScope.newNoise()
+    val ditherM = android.graphics.Matrix()
+    val ditherInv = android.graphics.Matrix()
     val path = Path()
     val mesh = buildMesh()
     val sampleA = FloatArray(2)
@@ -71,7 +74,8 @@ private fun BgState.c(hOff: Float, sat: Float, l: Float, a: Float = 1f) = hsl(h 
 
 fun DrawScope.drawStyle(style: BgStyle, st: BgState) {
     // 所有漸層開抖色（見 DitherScope）：8 bit 面板上的大面積暗色漸層不再一圈一圈斷開
-    DitherScope(this, scratch.get()!!.ditherPaint).drawStyleRaw(style, st)
+    val sc = scratch.get()!!
+    DitherScope(this, sc.ditherPaint, sc.ditherNoise, sc.ditherM, sc.ditherInv).drawStyleRaw(style, st)
 }
 
 private fun DrawScope.drawStyleRaw(style: BgStyle, st: BgState) {

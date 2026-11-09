@@ -249,7 +249,10 @@ class BackgroundEngine {
 
     /** 等到冷啟動擴散開始（最多 [REVEAL_FALLBACK_MS]）。 */
     private suspend fun awaitStart() {
-        if (withTimeoutOrNull(REVEAL_FALLBACK_MS) { started.await() } == null) startReveal(0.5f, 0.5f)
+        // 等太久都沒有 App 取得焦點（例如常用列是空的）：從最後的焦點位置開始；連焦點都沒有就從中央
+        if (withTimeoutOrNull(REVEAL_FALLBACK_MS) { started.await() } == null) {
+            if (first) startReveal(0.5f, 0.5f) else startReveal(tFx, tFy)
+        }
     }
 
     fun applyStyle(s: BgStyle) {
@@ -268,9 +271,10 @@ class BackgroundEngine {
     /**
      * 焦點改變：主題色（ARGB，null＝不換色）、焦點中心在畫面上的位置（0～1）、移動方向（-1/0/1）。
      */
-    fun focus(scope: CoroutineScope, color: Int?, fx: Float, fy: Float, dir: Int) {
-        if (first) {
-            // 開機第一次直接定位，不做轉場
+    fun focus(scope: CoroutineScope, color: Int?, fx: Float, fy: Float, dir: Int, isApp: Boolean = false) {
+        if (!started.isCompleted) {
+            // 冷啟動、擴散開始之前：直接定位、不做轉場（背景還是黑的）。
+            // App 清單載入前焦點可能先停在時鐘上——等焦點落到 App 磚（預設第一個）才從那裡擴散，顏色也是那個 App 的
             first = false
             if (follow && color != null) {
                 val hs = colorToHs(color)
@@ -281,7 +285,7 @@ class BackgroundEngine {
             tFy = fy; mFy = fy; st.fy = fy
             requestGlass()
             frame++
-            startReveal(fx, fy)
+            if (isApp) startReveal(fx, fy)
             return
         }
         dwellJob?.cancel()

@@ -391,7 +391,7 @@ fun AppDrawer(
                         onFocused = { focused = i },
                         onClick = { onLaunch(app) },
                         onLongClick = { fr -> onLongClick(app, fr) },
-                        extra = Modifier.bgTarget(app.themeColor),
+                        extra = Modifier.bgTarget(app.themeColor, isApp = true),
                     )
                 }
             }
