@@ -185,7 +185,7 @@ fun LiuliApp(lensing: Boolean, homePresses: Int, externalAction: Pair<Int, Strin
 
         BackgroundLayer(engine, blurred = { pageBlur.value })
         // 細緻噪點：背景之上、所有介面之下（黑框、App 列都在它上面），原生解析度
-        GrainLayer(settings.grain)
+        GrainLayer(engine, settings.grain)
 
         CompositionLocalProvider(LocalGlassBackdrop provides backdrop, LocalBgLink provides link) {
             // 主畫面一直保留（App 清單、焦點都不會重來），子頁面疊在上面

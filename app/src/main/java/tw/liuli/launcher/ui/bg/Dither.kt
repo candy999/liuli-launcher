@@ -25,7 +25,9 @@ import kotlin.math.roundToInt
  *
  * 做法：把樣式的 DrawScope 包一層，漸層（ShaderBrush）改用原生 Paint 畫，著色器＝漸層 ADD 一張噪點貼圖（[ComposeShader]）。
  * 兩者在 GPU 的片段著色器裡以浮點相加，最後寫入畫面時才四捨五入成 8 bit——噪點加在「量化之前」，這才是真正的抖色。
- * 噪點貼圖每個通道各自是 0 或 1 階（R、G、B 互相獨立），以雙線性放大 2 倍取樣，取樣值就是 0～1 階之間的連續小數。
+ * 噪點貼圖每個通道各自是 0 或 1 階（R、G、B 互相獨立），雙線性取樣、實體螢幕上 2 像素一格，取樣值就是 0～1 階之間的連續小數。
+ * 噪點跟著焦點做小數像素的視差位移（[noiseParallax]，用背景已經平滑過的焦點位置），和背景一起滑動，
+ * 不會像固定在螢幕上的紗窗；背景切換解析度時顆粒大小也不變。
  * 平均多 ½ 階，看不出來。純色、描邊等其他繪圖照舊交給原本的 DrawScope。
  *
  * 只設 Paint.DITHER_FLAG 不夠：海信（Android 9、Mali-470）實測開了旗標，像素和沒開完全一樣。
@@ -36,6 +38,10 @@ internal class DitherScope(
     private val noise: android.graphics.BitmapShader,
     private val m: android.graphics.Matrix,
     private val inv: android.graphics.Matrix,
+    /** 噪點一格＝畫布上幾個像素（BackgroundLayer 傳 2／d：不管背景用哪一檔解析度，實體螢幕上永遠是 2 像素一格）。 */
+    private val noisePx: Float,
+    /** 噪點的視差位移（畫布像素，可以是小數）：跟著焦點平滑移動，不是固定在螢幕上。 */
+    private val noiseShift: Offset,
 ) : DrawScope by d {
 
     /** 漸層＋一般填色＋（不透明度、SrcOver／Plus）→ 設好抖色 Paint；其他情況回傳 null 交給原本的 DrawScope。 */
@@ -46,9 +52,14 @@ internal class DitherScope(
         if (blendMode != BlendMode.SrcOver) return null
         val mode: PorterDuffXfermode? = null
         val canvas = d.drawContext.canvas.nativeCanvas
-        // 噪點貼圖對齊實際像素：local＝目前矩陣的反矩陣 × 放大 2 倍（樣式在 480×270 的邏輯座標裡畫，還可能有拉伸）
+        // 噪點貼圖對齊畫布像素：local＝目前矩陣的反矩陣 × 視差位移 × 一格的大小
+        // （樣式在 480×270 的邏輯座標裡畫，還可能有拉伸；反矩陣把這些都抵銷掉）
         @Suppress("DEPRECATION") canvas.getMatrix(m)
-        if (m.invert(inv)) { inv.preScale(NOISE_SCALE, NOISE_SCALE); noise.setLocalMatrix(inv) }
+        if (m.invert(inv)) {
+            inv.preTranslate(noiseShift.x, noiseShift.y)
+            inv.preScale(noisePx, noisePx)
+            noise.setLocalMatrix(inv)
+        }
         paint.shader = android.graphics.ComposeShader(brush.createShader(d.drawContext.size), noise, PorterDuff.Mode.ADD)
         paint.alpha = (alpha.coerceIn(0f, 1f) * 255f).roundToInt()
         paint.xfermode = mode
@@ -83,7 +94,8 @@ internal class DitherScope(
     }
 
     companion object {
-        private const val NOISE_SCALE = 2f
+        /** 噪點一格在實體螢幕上的大小（像素）。 */
+        const val NOISE_PX = 2f
         private const val NOISE_SIZE = 64
 
         fun newPaint() = android.graphics.Paint(
@@ -110,3 +122,13 @@ internal class DitherScope(
         }
     }
 }
+
+/** 噪點視差的最大位移（dp）：焦點從畫面一端到另一端，噪點反向滑動這麼多。 */
+const val NOISE_PARALLAX_DP = 18f
+
+/**
+ * 噪點的視差位移（實體像素，小數）：焦點往右，噪點往左，像背景表面有一層細砂跟著輕輕滑動。
+ * 用 [BgState.fx]／[BgState.fy]——引擎已經做過兩段平滑（有緩衝），不會一下跳過去。
+ */
+fun BgState.noiseParallax(rangePx: Float): Offset =
+    Offset(-(fx - .5f) * 2f * rangePx, -(fy - .5f) * 2f * rangePx * .6f)

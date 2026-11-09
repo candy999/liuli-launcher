@@ -18,6 +18,7 @@ import androidx.compose.ui.layout.layout
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.graphics.Color
 import androidx.compose.animation.core.FastOutSlowInEasing
 import kotlin.math.hypot
@@ -44,6 +45,7 @@ fun BackgroundLayer(engine: BackgroundEngine, blurred: () -> Float, modifier: Mo
     LaunchedEffect(engine) { engine.runGlass() }
     LaunchedEffect(engine) { engine.runBlur() }
     BoxWithConstraints(modifier.fillMaxSize().clipToBounds(), contentAlignment = Alignment.TopStart) {
+        val parallaxPx = NOISE_PARALLAX_DP * LocalDensity.current.density
         val fullW = constraints.maxWidth
         val fullH = constraints.maxHeight
         SideEffect { engine.setViewport(fullW, fullH) }
@@ -115,7 +117,8 @@ fun BackgroundLayer(engine: BackgroundEngine, blurred: () -> Float, modifier: Mo
                 val sx = fullW / d.toFloat() / BackgroundEngine.LOGICAL_W
                 val sy = fullH / d.toFloat() / BackgroundEngine.LOGICAL_H
                 scale(sx, sy, pivot = Offset.Zero) {
-                    drawStyle(engine.style, engine.st)
+                    // 抖色噪點：實體螢幕上固定 2 像素一格（畫布是 ÷d，所以一格＝2／d 個畫布像素），跟著焦點平滑視差
+                    drawStyle(engine.style, engine.st, noisePx = DitherScope.NOISE_PX / d, noiseShift = engine.st.noiseParallax(parallaxPx) / d.toFloat())
                 }
                 pageBlur(engine, blurred(), IntSize(w, h))
                 revealMask(from, reveal.value)

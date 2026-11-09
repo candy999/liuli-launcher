@@ -922,11 +922,12 @@ private fun boxBlurV(src: IntArray, dst: IntArray, w: Int, h: Int, r: Int, dithe
     }
 }
 
-private var ditherSeed = 0x2545F491
+private const val DITHER_SEED = 0x2545F491
 
 private fun boxBlurVDither(src: IntArray, dst: IntArray, w: Int, h: Int, r: Int, mul: Int) {
     val last = h - 1
-    var z = ditherSeed
+    // 每次都用同一組亂數：噪點圖樣固定，模糊圖一張張更新時不會閃（每張重新亂數＝畫面一直沸騰）
+    var z = DITHER_SEED
     for (x in 0 until w) {
         var sr = 0; var sg = 0; var sb = 0
         for (k in -r..r) {
@@ -954,7 +955,6 @@ private fun boxBlurVDither(src: IntArray, dst: IntArray, w: Int, h: Int, r: Int,
             idx += w
         }
     }
-    ditherSeed = z
 }
 
 /**

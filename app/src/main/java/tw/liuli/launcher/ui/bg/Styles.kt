@@ -72,10 +72,13 @@ private fun hsl(h: Float, s: Float, l: Float, a: Float = 1f): Color =
 /** 以目前主色為中心取色；飽和度乘上主色飽和度，背景永遠是暗、同色系。 */
 private fun BgState.c(hOff: Float, sat: Float, l: Float, a: Float = 1f) = hsl(h + hOff, sat * s * 1.6f, l, a)
 
-fun DrawScope.drawStyle(style: BgStyle, st: BgState) {
+fun DrawScope.drawStyle(
+    style: BgStyle, st: BgState,
+    noisePx: Float = 2f, noiseShift: Offset = Offset.Zero,
+) {
     // 所有漸層開抖色（見 DitherScope）：8 bit 面板上的大面積暗色漸層不再一圈一圈斷開
     val sc = scratch.get()!!
-    DitherScope(this, sc.ditherPaint, sc.ditherNoise, sc.ditherM, sc.ditherInv).drawStyleRaw(style, st)
+    DitherScope(this, sc.ditherPaint, sc.ditherNoise, sc.ditherM, sc.ditherInv, noisePx, noiseShift).drawStyleRaw(style, st)
 }
 
 private fun DrawScope.drawStyleRaw(style: BgStyle, st: BgState) {
