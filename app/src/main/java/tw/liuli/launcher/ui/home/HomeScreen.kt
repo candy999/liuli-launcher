@@ -351,18 +351,27 @@ fun HomeScreen(
     }
 
     fun textureSheet() {
+        val maxBlur = tw.liuli.launcher.ui.bg.BackgroundEngine.BLUR_SIGMAS.lastIndex
         fun blurText(v: Int) = if (v == 0) "關" else "$v・σ ${tw.liuli.launcher.ui.bg.BackgroundEngine.BLUR_SIGMAS[v].toInt()} px"
+        // 紋理左右切換：關 → 纖維紙 → … → 再生紙 → 關
+        val kinds = listOf<tw.liuli.launcher.ui.bg.BgTexture?>(null) + tw.liuli.launcher.ui.bg.BgTexture.entries
+        fun current() = tw.liuli.launcher.ui.bg.BgTexture.byId(settings.texture)
         open(SheetSpec(
-            "背景質感", "左右鍵調整，即時預覽。模糊越強反而越省效能（背景改在小圖上算）；紙張紋理以原生解析度疊在背景上，跟著焦點輕輕位移。",
+            "背景質感", "左右鍵調整，即時預覽。模糊越強反而越省效能（背景改在小圖上算）；紋理以原生解析度疊在背景上，跟著焦點輕輕位移。",
             listOf(
                 SheetItem("背景模糊", liveDetail = { blurText(settings.bgBlur) },
                     onAdjust = { d ->
-                        val v = (settings.bgBlur + d).coerceIn(0, tw.liuli.launcher.ui.bg.BackgroundEngine.BLUR_SIGMAS.lastIndex)
+                        val v = (settings.bgBlur + d).coerceIn(0, maxBlur)
                         settings.updateBgBlur(v); engine.applyBlur(v)
                     }) { close() },
-                SheetItem("紙張紋理", liveDetail = { if (settings.paperLevel == 0) "關" else "${settings.paperLevel}" },
-                    onAdjust = { d -> settings.updatePaper((settings.paperLevel + d).coerceIn(0, tw.liuli.launcher.ui.bg.PAPER_ALPHAS.lastIndex)) }) { close() },
-                SheetItem("全部關閉") { settings.updateBgBlur(0); engine.applyBlur(0); settings.updatePaper(0); close() },
+                SheetItem("紋理", liveDetail = { current()?.label ?: "關" },
+                    onAdjust = { d ->
+                        val i = (kinds.indexOf(current()) + d + kinds.size) % kinds.size
+                        settings.updateTexture(id = kinds[i]?.id ?: "")
+                    }) { close() },
+                SheetItem("紋理不透明度", liveDetail = { "${settings.textureOpacity}%" },
+                    onAdjust = { d -> settings.updateTexture(opacity = (settings.textureOpacity + d * 5).coerceIn(5, 100)) }) { close() },
+                SheetItem("全部關閉") { settings.updateBgBlur(0); engine.applyBlur(0); settings.updateTexture(id = ""); close() },
             ),
         ), gearReq)
     }
@@ -527,7 +536,7 @@ fun HomeScreen(
                 },
                 SheetItem("背景質感", listOfNotNull(
                     if (settings.bgBlur > 0) "模糊 ${settings.bgBlur}" else null,
-                    if (settings.paperLevel > 0) "紙紋 ${settings.paperLevel}" else null,
+                    tw.liuli.launcher.ui.bg.BgTexture.byId(settings.texture)?.let { "${it.label} ${settings.textureOpacity}%" },
                 ).joinToString("・").ifEmpty { "關" }) { textureSheet() },
                 SheetItem("邊框", if (settings.frameThickness == 0 && settings.frameFeather == 0 && settings.frameRadius == 0) "關" else "粗 ${settings.frameThickness}・圓 ${settings.frameRadius}・漸 ${settings.frameFeather}") { frameSheet() },
                 SheetItem("顯示／隱藏 App", if (hidden.isEmpty()) null else "已隱藏 ${hidden.size} 個") { visibilitySheet(0) },
@@ -541,7 +550,7 @@ fun HomeScreen(
         ), gearReq)
     }
 
-    // 量測用（adb）：ACTION=blur:3、paper:2、sheet:texture、sheet:settings（不用遙控器導覽，避免誤開 App）
+    // 量測用（adb）：ACTION=blur:3、texture:washi、opacity:40、sheet:texture、sheet:settings（不用遙控器導覽，避免誤開 App）
     // 放在所有面板函式宣告之後（區域函式要先宣告才能用）
     LaunchedEffect(externalAction) {
         val ext = externalAction.second
@@ -549,7 +558,8 @@ fun HomeScreen(
             val arg = ext.substringAfter(':', "")
             when (ext.substringBefore(':')) {
                 "blur" -> { val v = arg.toIntOrNull() ?: 0; settings.updateBgBlur(v); engine.applyBlur(v) }
-                "paper" -> settings.updatePaper(arg.toIntOrNull() ?: 0)
+                "texture" -> settings.updateTexture(id = if (arg == "off") "" else arg)
+                "opacity" -> settings.updateTexture(opacity = (arg.toIntOrNull() ?: 35).coerceIn(5, 100))
                 "sheet" -> when (arg) {
                     "texture" -> textureSheet()
                     "settings" -> openSettings()

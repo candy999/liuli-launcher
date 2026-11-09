@@ -29,10 +29,13 @@ class LauncherSettings(context: Context) {
     var frameFeather by mutableIntStateOf(prefs.getInt("frame_feather", 0))
         private set
 
-    /** 背景模糊等級（0＝關，1～6）與紙張紋理強度（0＝關，1～5）。 */
+    /** 背景模糊等級（0＝關，1～6）。 */
     var bgBlur by mutableIntStateOf(prefs.getInt("bg_blur", 0))
         private set
-    var paperLevel by mutableIntStateOf(prefs.getInt("paper_level", 0))
+    /** 背景紋理 id（空字串＝關，見 BgTexture）與不透明度（5～100%）。 */
+    var texture by mutableStateOf(prefs.getString("texture", "") ?: "")
+        private set
+    var textureOpacity by mutableIntStateOf(prefs.getInt("texture_opacity", 35))
         private set
 
     fun updateBgBlur(level: Int) {
@@ -40,9 +43,9 @@ class LauncherSettings(context: Context) {
         prefs.edit().putInt("bg_blur", level).apply()
     }
 
-    fun updatePaper(level: Int) {
-        paperLevel = level
-        prefs.edit().putInt("paper_level", level).apply()
+    fun updateTexture(id: String = texture, opacity: Int = textureOpacity) {
+        texture = id; textureOpacity = opacity
+        prefs.edit().putString("texture", id).putInt("texture_opacity", opacity).apply()
     }
 
     fun updateFrame(thickness: Int = frameThickness, radius: Int = frameRadius, feather: Int = frameFeather) {
