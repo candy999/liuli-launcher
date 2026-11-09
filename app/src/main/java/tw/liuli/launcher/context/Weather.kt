@@ -226,7 +226,7 @@ object WeatherRepository {
 
 /**
  * 主畫面上「明天」的一句話：看明天天氣的人想決定的是要不要帶傘、要不要加衣服，
- * 所以只講跟今天比會改變決定的事，依重要性只挑一項：會下雨（哪個時段）→ 溫度明顯變化 → 紫外線過量 → 差不多。
+ * 所以只講跟今天比會改變決定的事，依重要性只挑一項：會下雨（哪個時段）→ 雨停 → 溫度明顯變化 → 紫外線過量 → 差不多。
  */
 fun Weather.tomorrowHint(): String? {
     val t = tomorrow ?: return null
@@ -245,6 +245,8 @@ fun Weather.tomorrowHint(): String? {
         return "明天${names}可能下雨 $top%"
     }
     if (t.rainChance >= 40) return "明天可能下雨 ${t.rainChance}%"
+    // 今天下雨、明天不太會下：「雨停了」本身就是有用的消息
+    if (today != null && today.rainChance >= 60 && t.rainChance < 30) return "明天雨停，降雨 ${t.rainChance}%"
     // 2. 溫度：最高溫差 3° 以上、或早上明顯變冷
     if (today != null) {
         val dMax = (t.max - today.max).roundToInt()
