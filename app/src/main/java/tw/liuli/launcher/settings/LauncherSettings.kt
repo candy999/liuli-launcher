@@ -48,6 +48,29 @@ class LauncherSettings(context: Context) {
         prefs.edit().putString("texture", id).putInt("texture_opacity", opacity).apply()
     }
 
+    /** 螢幕小時鐘（看其他 App 時角落的時間）：開關、角落（0 左上 1 右上 2 左下 3 右下）、字級 sp、往內位移 dp、背景（0 陰影 1 半透明底）。 */
+    var clockOn by mutableStateOf(prefs.getBoolean("clock_on", false))
+        private set
+    var clockCorner by mutableIntStateOf(prefs.getInt("clock_corner", 1))
+        private set
+    var clockSize by mutableIntStateOf(prefs.getInt("clock_size", 22))
+        private set
+    var clockX by mutableIntStateOf(prefs.getInt("clock_x", 40))
+        private set
+    var clockY by mutableIntStateOf(prefs.getInt("clock_y", 28))
+        private set
+    var clockBg by mutableIntStateOf(prefs.getInt("clock_bg", 0))
+        private set
+
+    fun updateClock(
+        on: Boolean = clockOn, corner: Int = clockCorner, size: Int = clockSize,
+        x: Int = clockX, y: Int = clockY, bg: Int = clockBg,
+    ) {
+        clockOn = on; clockCorner = corner; clockSize = size; clockX = x; clockY = y; clockBg = bg
+        prefs.edit().putBoolean("clock_on", on).putInt("clock_corner", corner).putInt("clock_size", size)
+            .putInt("clock_x", x).putInt("clock_y", y).putInt("clock_bg", bg).apply()
+    }
+
     fun updateFrame(thickness: Int = frameThickness, radius: Int = frameRadius, feather: Int = frameFeather) {
         frameThickness = thickness; frameRadius = radius; frameFeather = feather
         prefs.edit().putInt("frame_thickness", thickness).putInt("frame_radius", radius).putInt("frame_feather", feather).apply()

@@ -500,6 +500,34 @@ fun HomeScreen(
         ), gearReq)
     }
 
+    // 螢幕小時鐘：看其他 App 時角落的時間（由按鍵服務疊在最上層）
+    fun clockSheet() {
+        val corners = tw.liuli.launcher.keys.ClockOverlay.CORNERS
+        val items = buildList {
+            if (!KeyMapStore.isServiceEnabled(context)) {
+                add(SheetItem("先啟用按鍵服務", "小時鐘由按鍵服務顯示在其他 App 上層") { selfGrant() })
+            }
+            add(SheetItem("顯示小時鐘", liveDetail = { if (settings.clockOn) "開" else "關" },
+                onAdjust = { settings.updateClock(on = !settings.clockOn) }) { settings.updateClock(on = !settings.clockOn) })
+            add(SheetItem("位置", liveDetail = { corners[settings.clockCorner.coerceIn(0, 3)] },
+                onAdjust = { d -> settings.updateClock(corner = (settings.clockCorner + d + 4) % 4) }) { close() })
+            add(SheetItem("文字大小", liveDetail = { "${settings.clockSize} sp" },
+                onAdjust = { d -> settings.updateClock(size = (settings.clockSize + d * 2).coerceIn(12, 72)) }) { close() })
+            add(SheetItem("水平位移（往內）", liveDetail = { "${settings.clockX} dp" },
+                onAdjust = { d -> settings.updateClock(x = (settings.clockX + d * 4).coerceIn(0, 480)) }) { close() })
+            add(SheetItem("垂直位移（往內）", liveDetail = { "${settings.clockY} dp" },
+                onAdjust = { d -> settings.updateClock(y = (settings.clockY + d * 4).coerceIn(0, 270)) }) { close() })
+            add(SheetItem("背景", liveDetail = { if (settings.clockBg == 1) "半透明底" else "只有陰影" },
+                onAdjust = { settings.updateClock(bg = 1 - settings.clockBg) }) { settings.updateClock(bg = 1 - settings.clockBg) })
+            add(SheetItem("恢復預設位置與大小") { settings.updateClock(corner = 1, size = 22, x = 40, y = 28, bg = 0) })
+        }
+        open(SheetSpec(
+            "螢幕小時鐘",
+            "看 Netflix、YouTube 等其他 App 時，角落仍看得到時間；回到琉璃主畫面會自動隱藏。左右鍵調整，設定時主畫面上也會顯示方便預覽。每分鐘微移幾個像素，避免烙印。",
+            items,
+        ), gearReq)
+    }
+
     fun keysSheet() {
         val enabled = KeyMapStore.isServiceEnabled(context)
         val items = buildList {
@@ -540,6 +568,7 @@ fun HomeScreen(
                 ).joinToString("・").ifEmpty { "關" }) { textureSheet() },
                 SheetItem("邊框", if (settings.frameThickness == 0 && settings.frameFeather == 0 && settings.frameRadius == 0) "關" else "粗 ${settings.frameThickness}・圓 ${settings.frameRadius}・漸 ${settings.frameFeather}") { frameSheet() },
                 SheetItem("顯示／隱藏 App", if (hidden.isEmpty()) null else "已隱藏 ${hidden.size} 個") { visibilitySheet(0) },
+                SheetItem("螢幕小時鐘", if (settings.clockOn) "${tw.liuli.launcher.keys.ClockOverlay.CORNERS[settings.clockCorner.coerceIn(0, 3)]}・${settings.clockSize} sp" else "關") { clockSheet() },
                 SheetItem("遙控器按鍵", "改綁、防誤入原廠主畫面") { keysSheet() },
                 SheetItem("效能最佳化", "預先編譯，操作更順") { perfSheet() },
                 SheetItem("系統設定") { close(); SystemActions.systemSettings(context) },
@@ -565,9 +594,18 @@ fun HomeScreen(
                     "settings" -> openSettings()
                     "frame" -> frameSheet()
                     "perf" -> perfSheet()
+                    "clock" -> clockSheet()
                 }
+                "clock" -> settings.updateClock(on = arg == "1" || arg == "on")
             }
         }
+    }
+
+    // 小時鐘設定面板開著時，主畫面上也顯示小時鐘（即時預覽）
+    val clockPreview = sheet?.spec?.title == "螢幕小時鐘"
+    LaunchedEffect(clockPreview) {
+        tw.liuli.launcher.keys.ClockOverlay.preview = clockPreview
+        tw.liuli.launcher.keys.ClockOverlay.refresh()
     }
 
     // 返回鍵：面板 → 抽屜 → 回到第一個 App（主畫面不會離開）

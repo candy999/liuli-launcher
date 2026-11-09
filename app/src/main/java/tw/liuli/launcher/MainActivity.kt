@@ -82,6 +82,19 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    // 螢幕小時鐘：琉璃在前景時隱藏（主畫面本來就有大時鐘），離開就出現
+    override fun onResume() {
+        super.onResume()
+        tw.liuli.launcher.keys.ClockOverlay.liuliResumed = true
+        tw.liuli.launcher.keys.ClockOverlay.refresh()
+    }
+
+    override fun onPause() {
+        tw.liuli.launcher.keys.ClockOverlay.liuliResumed = false
+        tw.liuli.launcher.keys.ClockOverlay.refresh()
+        super.onPause()
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         if (!handleAction(intent) && intent.hasCategory(Intent.CATEGORY_HOME)) homePresses.intValue++

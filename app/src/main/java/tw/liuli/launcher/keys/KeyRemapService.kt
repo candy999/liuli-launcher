@@ -13,9 +13,10 @@ import tw.liuli.launcher.system.SystemActions
 /**
  * 遙控器按鍵重新對應＋主畫面保護。
  *
- * 只做兩件事：
+ * 只做三件事：
  * 1. 攔截按鍵（onKeyEvent），依使用者設定的規則改做別的事。
  * 2. 從視窗切換事件取得「前景 App 的套件名稱」，原廠主畫面跑出來時切回琉璃。
+ * 3. 螢幕小時鐘：在其他 App 上層的角落顯示時間（[ClockOverlay]）。
  * 不讀取任何畫面內容（canRetrieveWindowContent=false），也不連網。
  */
 class KeyRemapService : AccessibilityService() {
@@ -27,12 +28,19 @@ class KeyRemapService : AccessibilityService() {
     private var downCode = 0
     private var lastGuardJump = 0L
 
+    /** 螢幕小時鐘（疊在其他 App 上）。 */
+    var clock: ClockOverlay? = null
+        private set
+
     override fun onServiceConnected() {
         instance = this
         reload()
+        clock = ClockOverlay(this).also { it.start() }
     }
 
     override fun onDestroy() {
+        clock?.stop()
+        clock = null
         if (instance === this) instance = null
         super.onDestroy()
     }
