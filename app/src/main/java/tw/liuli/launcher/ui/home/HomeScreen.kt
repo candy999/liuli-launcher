@@ -765,6 +765,15 @@ fun HomeScreen(
         }
     }
 
+    // 面板／抽屜開關（含面板換頁）：滑動動畫期間背景暫停；開著的時候背景用省力模式
+    val overlay = drawerOpen || sheet != null
+    var overlaySeen by remember { mutableStateOf(false) }
+    LaunchedEffect(drawerOpen, sheet?.spec) {
+        engine.covered = overlay
+        if (overlaySeen || overlay) engine.holdForUi(UI_SLIDE_HOLD_MS)
+        overlaySeen = true
+    }
+
     val visibleApps = remember(apps, hidden) { apps.filter { it.packageName !in hidden } }
     val dockApps = remember(apps, dock) { dock.mapNotNull { pkg -> apps.firstOrNull { it.packageName == pkg } } }
     val recede = animateFloatAsState(if (drawerOpen || sheet != null) 1f else 0f, tween(380), label = "recede")
@@ -980,3 +989,6 @@ private suspend fun keepDockItemVisible(state: androidx.compose.foundation.lazy.
         item.offset + item.size > end -> state.animateScrollBy(item.offset + item.size - end)
     }
 }
+
+/** 面板／抽屜滑動動畫的長度（背景在這段時間暫停）：彈簧動畫約 0.4 秒、主畫面淡出 0.38 秒。 */
+private const val UI_SLIDE_HOLD_MS = 450L

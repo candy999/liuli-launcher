@@ -149,6 +149,10 @@ class BackgroundEngine {
     private var upBlockedUntil = 0L
     private var lastUpgradeAt = 0L
     @Volatile private var yieldUntil = 0L
+    /** 面板／抽屜滑入滑出的動畫期間：背景暫停（不推進、不重畫），GPU 全部留給動畫。 */
+    @Volatile private var uiHoldUntil = 0L
+    /** 面板或抽屜開著（背景大半被蓋住）：背景一直用省力模式（÷3、15fps，速度不變）。 */
+    @Volatile var covered = false
     private var glassDirty = false
     /** 目前播放速度（1＝正常；GPU 跟不上時 <1）。 */
     private var speed = 1f
@@ -294,7 +298,7 @@ class BackgroundEngine {
         // 從第一次變化起最多等 MAX_WAIT 就套用目前的焦點，背景跟著走（約每 0.45 秒更新一次目標）。
         val now = android.os.SystemClock.uptimeMillis()
         if (pendingSince == 0L) pendingSince = now
-        val wait = if (now - pendingSince >= MAX_WAIT) 0L else DWELL
+        val wait = max(if (now - pendingSince >= MAX_WAIT) 0L else DWELL, uiHoldUntil - now)
         dwellJob = scope.launch {
             delay(wait)
             pendingSince = 0L
@@ -309,6 +313,14 @@ class BackgroundEngine {
             if (style == BgStyle.FLIP) holdMs = 1600
             wake.trySend(Unit)
         }
+    }
+
+    /**
+     * 介面要做一段滑入／滑出動畫（面板、抽屜）：接下來 [ms] 背景暫停，焦點造成的換色也延到動畫結束才開始。
+     * 海信實測：抽屜一打開焦點落到第一個 App，背景 0.18 秒後開始換色，剛好和還在滑的抽屜疊在一起，每格延遲 50～86ms。
+     */
+    fun holdForUi(ms: Long) {
+        uiHoldUntil = max(uiHoldUntil, android.os.SystemClock.uptimeMillis() + ms)
     }
 
     /** 使用者按了鍵：接下來 [YIELD_MS] 內背景改用省力模式（÷3、15fps），GPU 留給 UI（焦點彈簧、捲動）。 */
@@ -365,13 +377,20 @@ class BackgroundEngine {
             var rampTarget = 1
             var nextRampT = 0L
             synchronized(metricLock) { mCount = 0 }
+            var held = false
             while (!done) {
                 withFrameNanos<Unit> { ns ->
                     val t = ns / 1_000_000L
                     val blur = blurOn
-                    // 操作中（按鍵後一小段時間）：背景照常動，但降到 ÷3、15fps，把 GPU 留給 UI。
+                    // 面板／抽屜滑動中：暫停（下一格從這裡接著走，不會跳）
+                    if (android.os.SystemClock.uptimeMillis() < uiHoldUntil) {
+                        held = true
+                        return@withFrameNanos
+                    }
+                    if (held) { held = false; lastT = 0L; lastBgT = 0L; skipMeasure = 2 }
+                    // 操作中（按鍵後一小段時間）或面板／抽屜開著：背景照常動，但降到 ÷3、15fps，把 GPU 留給 UI。
                     // 速度不變（每格推進 1/15 秒），所以不會停住、也不會變慢。
-                    val busy = android.os.SystemClock.uptimeMillis() < yieldUntil
+                    val busy = android.os.SystemClock.uptimeMillis() < yieldUntil || covered
                     val due = if (busy) max(interval, BUSY_INTERVAL) else interval
                     if (lastBgT != 0L && t - lastBgT < due - 6f) return@withFrameNanos
                     val divBefore = renderDiv
