@@ -129,6 +129,15 @@ fun BackgroundLayer(engine: BackgroundEngine, blurred: () -> Float, modifier: Mo
                 revealMask(from, reveal.value)
             }
         }
+        // 需要原生解析度細節的樣式（星空銀河的星點）：在背景圖層之上、以原生解析度另外畫
+        if (engine.style == BgStyle.GALAXY) {
+            Canvas(Modifier.fillMaxSize()) {
+                @Suppress("UNUSED_VARIABLE") val f = engine.frame
+                scale(fullW / BackgroundEngine.LOGICAL_W, fullH / BackgroundEngine.LOGICAL_H, pivot = Offset.Zero) {
+                    drawStyleOverlay(engine.style, engine.st)
+                }
+            }
+        }
         // 子頁面的模糊桌布畫在背景圖層「外面」：淡入淡出時每格只多貼一張小圖，背景本身維持快取不用重畫
         // （以前畫在裡面：背景靜止時已升到原生解析度，過場的每一格都要把整個背景重畫一次）
         Canvas(Modifier.fillMaxSize()) { pageBlur(engine, blurred(), IntSize(fullW, fullH)) }

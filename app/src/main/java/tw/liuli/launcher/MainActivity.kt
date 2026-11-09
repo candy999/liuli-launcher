@@ -176,7 +176,14 @@ fun LiuliApp(lensing: Boolean, homePresses: Int, externalAction: Pair<Int, Strin
     var lastPage by remember { mutableStateOf(Screen.Weather) }
     if (screen != Screen.Home) lastPage = screen
     var pagesReady by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) { kotlinx.coroutines.delay(4000); pagesReady = true }
+    // 預熱：組合好之後，用肉眼看不到的透明度（約 0.4%）把兩頁真的畫一次，
+    // 讓中文字形快取、圖示貼圖先建好（只組合不畫的話，第一次打開仍要卡 0.3 秒左右）
+    var warmPages by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        kotlinx.coroutines.delay(4000); pagesReady = true
+        kotlinx.coroutines.delay(600); warmPages = true
+        kotlinx.coroutines.delay(400); warmPages = false
+    }
     val homeVis = animateFloatAsState(
         if (screen == Screen.Home) 1f else 0f,
         if (screen == Screen.Home) tween(PAGE_IN_MS, delayMillis = PAGE_OUT_MS, easing = LinearOutSlowInEasing)
@@ -237,10 +244,10 @@ fun LiuliApp(lensing: Boolean, homePresses: Int, externalAction: Pair<Int, Strin
             // 打開時只剩淡入。以前每次打開才組合：天氣頁第一格主執行緒卡 0.3～0.7 秒、月曆 0.2 秒以上。
             for (page in PAGES) {
                 val isLast = page == lastPage
-                val placed = isLast && (screen == page || pageVis.value > 0.001f)
+                val placed = (isLast && (screen == page || pageVis.value > 0.001f)) || (warmPages && screen == Screen.Home)
                 if (pagesReady || placed) {
                     key(page) {
-                        PageHost(placed, alpha = { if (isLast) pageVis.value else 0f }) {
+                        PageHost(placed, alpha = { if (warmPages && screen == Screen.Home) WARM_ALPHA else if (isLast) pageVis.value else 0f }) {
                             when (page) {
                                 Screen.Calendar -> CalendarScreen(home.now, calendarStart ?: home.now.toLocalDate(), active = screen == Screen.Calendar)
                                 else -> WeatherScreen(home, active = screen == Screen.Weather)
@@ -264,6 +271,7 @@ private const val PAGE_OUT_MS = 150
 private const val PAGE_IN_MS = 260
 
 private val PAGES = listOf(Screen.Calendar, Screen.Weather)
+private const val WARM_ALPHA = .004f
 
 /**
  * 子頁面的外殼：一直組合著，[placed] 為 false 時只量尺寸、不擺放（不畫、拿不到焦點）。

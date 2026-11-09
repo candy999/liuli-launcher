@@ -393,12 +393,7 @@ private fun DrawScope.galaxy(st: BgState) {
                     )
                 }
             }
-            // 星雲：無數細星點（約一個像素），越靠中線越密
-            paint.strokeWidth = 1.1f / ppu
-            for (b in 0 until BUCKETS) {
-                paint.color = Color.hsl(40f, .15f, .9f, CLOUD_ALPHA[b]).toArgb()
-                points(StarField.cloud[b], paint)
-            }
+            // 星雲的細星點在原生解析度另外畫（galaxyStars）：這裡只畫柔光與暗塵帶
             // 暗塵帶：沿著中線、彎彎曲曲斷斷續續的暗紋（高斯暈開）
             for (k in 0 until 14) {
                 val cx = W * (-.05f + .085f * k) + 6f * (hash01(k, 7) - .5f)
@@ -411,23 +406,13 @@ private fun DrawScope.galaxy(st: BgState) {
         }
     }
 
-    // 滿天的背景星：幾乎都是一個像素的點；近的（亮組）視差稍大
-    paint.strokeWidth = 1.3f / ppu
-    for (b in 0 until BUCKETS) {
-        val k = .01f + .02f * b
-        translate(par * W * k, parY * H * k * .5f) {
-            paint.color = Color.hsl(220f, .1f, .92f, FIELD_ALPHA[b]).toArgb()
-            points(StarField.field[b], paint)
-        }
-    }
-    // 少數亮星：一點核心＋很小的柔光，各自緩慢閃爍
+    // 少數亮星的柔光（核心與所有星點在原生解析度另外畫）
     for (i in 0 until 14) {
         val x = hash01(i, 121) * W + par * W * .04f
         val y = hash01(i, 122) * H + parY * H * .02f
         val tw = .6f + .4f * sin(t * (.7f + 1.5f * hash01(i, 123)) + i * 2.3f)
         val warm = if (hash01(i, 124) > .6f) 30f else 215f
         drawRect(gaussBrush(Color.hsl(warm, .35f, .85f, .22f * tw), Offset(x, y), 2.6f), Offset(x - 2.6f, y - 2.6f), Size(5.2f, 5.2f), blendMode = BlendMode.Plus)
-        drawCircle(Color.hsl(warm, .2f, .95f, .85f * tw), 1f / ppu, Offset(x, y), blendMode = BlendMode.Plus)
     }
 
     // 星座網：一群緩慢漂移的星點，彼此靠近時連出極細的線、遠離時淡去——網子一直在重組
@@ -472,6 +457,51 @@ private fun DrawScope.galaxy(st: BgState) {
         )
     }
     vignette(.35f)
+}
+
+/**
+ * 星空銀河的星點：在「原生解析度」的畫布上畫（背景本身可能是 ÷2～÷5 再放大，一個像素的星會變成 2～5 像素的方塊）。
+ * 兩千多顆星分 8 組批次畫，成本很小。座標仍是 480×270 的邏輯座標（呼叫端縮放）。
+ */
+private fun DrawScope.galaxyStars(st: BgState) {
+    val t = st.at
+    val paint = scratch.get()!!.starPaint
+    val par = -(st.fx - .5f)
+    val parY = -(st.fy - .5f)
+    val ppu = android.graphics.Matrix().let { m ->
+        @Suppress("DEPRECATION") drawContext.canvas.nativeCanvas.getMatrix(m)
+        m.mapRadius(1f).coerceAtLeast(.1f)
+    }
+    val gx = par * W * .02f
+    withTransform({ rotate(-24f, pivot = Offset(W / 2 + gx, H / 2)) }) {
+        translate(gx, 0f) {
+            paint.strokeWidth = 1.3f / ppu
+            for (b in 0 until BUCKETS) {
+                paint.color = Color.hsl(40f, .15f, .9f, CLOUD_ALPHA[b]).toArgb()
+                points(StarField.cloud[b], paint)
+            }
+        }
+    }
+    paint.strokeWidth = 1.6f / ppu
+    for (b in 0 until BUCKETS) {
+        val k = .01f + .02f * b
+        translate(par * W * k, parY * H * k * .5f) {
+            paint.color = Color.hsl(220f, .1f, .92f, FIELD_ALPHA[b]).toArgb()
+            points(StarField.field[b], paint)
+        }
+    }
+    for (i in 0 until 14) {
+        val x = hash01(i, 121) * W + par * W * .04f
+        val y = hash01(i, 122) * H + parY * H * .02f
+        val tw = .6f + .4f * sin(t * (.7f + 1.5f * hash01(i, 123)) + i * 2.3f)
+        val warm = if (hash01(i, 124) > .6f) 30f else 215f
+        drawCircle(Color.hsl(warm, .2f, .95f, .9f * tw), 1.4f / ppu, Offset(x, y), blendMode = BlendMode.Plus)
+    }
+}
+
+/** 需要原生解析度細節的樣式，在背景圖層之上另外畫的一層（目前只有星空銀河的星點）。 */
+fun DrawScope.drawStyleOverlay(style: BgStyle, st: BgState) {
+    if (style == BgStyle.GALAXY) galaxyStars(st)
 }
 
 // ───────────── 6. 深海（只有光影：水面透下的體積光、晃動的光斑與陰影、懸浮微粒） ─────────────
