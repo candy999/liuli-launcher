@@ -7,6 +7,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.time.LocalDate
 import java.time.LocalDateTime
+import kotlin.math.roundToInt
 
 /** 縣市（大約位置）。只用縣市中心座標，不取用裝置定位。 */
 data class City(val id: String, val name: String, val lat: Double, val lon: Double)
@@ -221,4 +222,39 @@ object WeatherRepository {
             fetchedAt = System.currentTimeMillis(),
         )
     }
+}
+
+/**
+ * 主畫面上「明天」的一句話：看明天天氣的人想決定的是要不要帶傘、要不要加衣服，
+ * 所以只講跟今天比會改變決定的事，依重要性只挑一項：會下雨（哪個時段）→ 溫度明顯變化 → 紫外線過量 → 差不多。
+ */
+fun Weather.tomorrowHint(): String? {
+    val t = tomorrow ?: return null
+    val today = today
+    val hours = hourly.filter { it.time.toLocalDate() == t.date }
+    // 1. 雨：找出降雨機率 ≥ 40% 的時段
+    val periods = listOf("凌晨" to 0..5, "早上" to 6..11, "下午" to 12..17, "晚上" to 18..23)
+    val wet = periods.mapNotNull { (name, range) ->
+        val p = hours.filter { it.time.hour in range }.maxOfOrNull { it.rainChance } ?: return@mapNotNull null
+        if (p >= 40) name to p else null
+    }
+    if (wet.size >= 3) return "明天整天有雨，記得帶傘"
+    if (wet.isNotEmpty()) {
+        val top = wet.maxOf { it.second }
+        val names = if (wet.size == 2) wet.joinToString("、") { it.first } else wet.maxBy { it.second }.first
+        return "明天${names}可能下雨 $top%"
+    }
+    if (t.rainChance >= 40) return "明天可能下雨 ${t.rainChance}%"
+    // 2. 溫度：最高溫差 3° 以上、或早上明顯變冷
+    if (today != null) {
+        val dMax = (t.max - today.max).roundToInt()
+        val dMin = (t.min - today.min).roundToInt()
+        if (dMax <= -3) return "明天轉涼，最高 ${t.max.roundToInt()}°（低 ${-dMax}°）"
+        if (dMax >= 3) return "明天回暖，最高 ${t.max.roundToInt()}°（高 ${dMax}°）"
+        if (dMin <= -3) return "明早較冷，最低 ${t.min.roundToInt()}°"
+    }
+    // 3. 紫外線
+    if (t.uvMax >= 8) return "明天紫外線${uvLevel(t.uvMax)}，注意防曬"
+    // 4. 沒有特別的變化
+    return "明天和今天差不多，${t.max.roundToInt()}° / ${t.min.roundToInt()}°"
 }
