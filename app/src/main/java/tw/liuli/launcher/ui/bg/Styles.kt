@@ -366,6 +366,12 @@ private fun DrawScope.galaxy(st: BgState) {
     val paint = sc.starPaint
     val par = -(st.fx - .5f)
     val parY = -(st.fy - .5f)
+    // 星點大小用「畫布像素」算：背景可能是 ÷1～÷5 的解析度，邏輯座標 1 單位可能是 1～4 個像素；
+    // 星點固定約 1 個畫布像素，不會在高解析度時變成一顆顆大圓點
+    val ppu = android.graphics.Matrix().let { m ->
+        @Suppress("DEPRECATION") drawContext.canvas.nativeCanvas.getMatrix(m)
+        m.mapRadius(1f).coerceAtLeast(.1f)
+    }
     // 深空：幾乎全黑，帶一點主色
     drawRect(Brush.linearGradient(listOf(st.c(-10f, .5f, .018f), st.c(14f, .55f, .045f)), Offset.Zero, Offset(W * .3f, H)), size = FULL)
 
@@ -388,7 +394,7 @@ private fun DrawScope.galaxy(st: BgState) {
                 }
             }
             // 星雲：無數細星點（約一個像素），越靠中線越密
-            paint.strokeWidth = .55f
+            paint.strokeWidth = 1.1f / ppu
             for (b in 0 until BUCKETS) {
                 paint.color = Color.hsl(40f, .15f, .9f, CLOUD_ALPHA[b]).toArgb()
                 points(StarField.cloud[b], paint)
@@ -406,7 +412,7 @@ private fun DrawScope.galaxy(st: BgState) {
     }
 
     // 滿天的背景星：幾乎都是一個像素的點；近的（亮組）視差稍大
-    paint.strokeWidth = .6f
+    paint.strokeWidth = 1.3f / ppu
     for (b in 0 until BUCKETS) {
         val k = .01f + .02f * b
         translate(par * W * k, parY * H * k * .5f) {
@@ -421,7 +427,7 @@ private fun DrawScope.galaxy(st: BgState) {
         val tw = .6f + .4f * sin(t * (.7f + 1.5f * hash01(i, 123)) + i * 2.3f)
         val warm = if (hash01(i, 124) > .6f) 30f else 215f
         drawRect(gaussBrush(Color.hsl(warm, .35f, .85f, .22f * tw), Offset(x, y), 2.6f), Offset(x - 2.6f, y - 2.6f), Size(5.2f, 5.2f), blendMode = BlendMode.Plus)
-        drawCircle(Color.hsl(warm, .2f, .95f, .85f * tw), .45f, Offset(x, y), blendMode = BlendMode.Plus)
+        drawCircle(Color.hsl(warm, .2f, .95f, .85f * tw), 1f / ppu, Offset(x, y), blendMode = BlendMode.Plus)
     }
 
     // 星座網：一群緩慢漂移的星點，彼此靠近時連出極細的線、遠離時淡去——網子一直在重組
@@ -440,12 +446,12 @@ private fun DrawScope.galaxy(st: BgState) {
             val wave = .5f + .5f * sin(t * .3f + (i * 7 + j * 13) * .37f)
             val a = (1f - dist / maxD).pow(1.6f) * .2f * wave
             if (a < .015f) continue
-            drawLine(st.c(-6f, .35f, .8f, a), Offset(nx[i], ny[i]), Offset(nx[j], ny[j]), .4f, blendMode = BlendMode.Plus)
+            drawLine(st.c(-6f, .35f, .8f, a), Offset(nx[i], ny[i]), Offset(nx[j], ny[j]), 1f / ppu, blendMode = BlendMode.Plus)
         }
     }
     for (i in 0 until NET_N) {
         val tw = .6f + .4f * sin(t * (.8f + hash01(i, 45)) + i)
-        drawCircle(st.c(-6f, .25f, .9f, .6f * tw), .45f, Offset(nx[i], ny[i]), blendMode = BlendMode.Plus)
+        drawCircle(st.c(-6f, .25f, .9f, .6f * tw), .9f / ppu, Offset(nx[i], ny[i]), blendMode = BlendMode.Plus)
     }
 
     // 流星：偶爾劃過一道（約每 12 秒有四分之三的機會）
