@@ -969,8 +969,12 @@ fun HomeScreen(
                 )
             }
 
-            exitingSheet?.let { s -> key(s, "exit") { GlassSheet(s, exiting = true, onExited = { if (exitingSheet === s) exitingSheet = null }) } }
-            sheet?.let { s -> key(s.spec) { GlassSheet(s.spec) } }
+            // 開著的面板；關閉後同一個面板（同一個 key，不重新組合）切到收起動畫，滑出後才拿掉
+            (sheet?.spec ?: exitingSheet)?.let { s ->
+                key(s) {
+                    GlassSheet(s, exiting = sheet == null, onExited = { if (exitingSheet === s) exitingSheet = null })
+                }
+            }
         }
     }
 }

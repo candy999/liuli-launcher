@@ -90,11 +90,13 @@ fun GlassSheet(
     onExited: () -> Unit = {},
 ) {
     val first = remember { FocusRequester() }
-    val slide = remember { Animatable(if (exiting) 0f else 1f) }
-    // 打開後 0.5 秒內整塊面板維持一張離屏圖（滑入、主畫面淡出、背景暫停都結束才回到一般繪製）；收起時整段都是
+    val slide = remember { Animatable(1f) }
+    // 打開後 0.5 秒內整塊面板維持一張離屏圖（滑入、主畫面淡出、背景暫停都結束才回到一般繪製）；收起時整段都是。
+    // 收起沿用同一個元件（不重新組合整個清單——弱電視上要 100ms 以上，收起動畫會被吃掉）
     var asLayer by remember { androidx.compose.runtime.mutableStateOf(true) }
-    LaunchedEffect(Unit) {
+    LaunchedEffect(exiting) {
         if (exiting) {
+            asLayer = true
             slide.animateTo(1f, SheetExit)
             onExited()
         } else {
