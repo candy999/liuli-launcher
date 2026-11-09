@@ -435,8 +435,8 @@ private fun DrawScope.deepsea(st: BgState) {
         val w = 18f + 110f * h2 * h2
         val flicker = .55f + .45f * sin(t * (.25f + .45f * h3) + i * 2.7f) * sin(t * (.11f + .2f * h4) + i)
         val near = exp(-((sx + (H * .5f - sy) * kotlin.math.tan(deg * PI.toFloat() / 180f) - st.fx * W) / (W * .4f)).pow(2))
-        val a = (.035f + .09f * (1f - h2) * h3 + .035f * near) * flicker
-        if (a < .008f) continue
+        val a = (.07f + .17f * (1f - h2) * h3 + .07f * near) * flicker
+        if (a < .012f) continue
         val len = (H - sy) * 1.25f
         val col = st.c(-10f + 14f * (h4 - .5f), .42f, .78f)
         withTransform({ rotate(deg, pivot = Offset(sx, sy)) }) {
