@@ -27,6 +27,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -51,6 +52,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import tw.liuli.launcher.context.Festivals
 import tw.liuli.launcher.context.HomeContext
 import tw.liuli.launcher.context.LunarCalc
@@ -377,20 +379,25 @@ fun AppDrawer(
     val first = remember { FocusRequester() }
     val gridState = androidx.compose.foundation.lazy.grid.rememberLazyGridState()
     var focused by remember { mutableIntStateOf(0) }
+    // 打開後 0.5 秒內（滑入＋主畫面淡出＋背景暫停都還在進行）整塊抽屜維持一張離屏圖，之後才回到一般繪製
+    var asLayer by remember { mutableStateOf(false) }
     LaunchedEffect(open) {
         if (open) {
+            asLayer = true
             focused = 0
             runCatching { gridState.scrollToItem(0) }
             delay(16)
             runCatching { first.requestFocus() }
+            launch { delay(PANEL_LAYER_MS); asLayer = false }
             slide.animateTo(0f, SheetSpring)
         } else {
+            asLayer = false
             slide.snapTo(1f)
         }
     }
 
     // 滑入中：焦點效果直接到位（整塊抽屜是一張離屏圖，第一格的焦點彈簧會讓整張圖每格重畫）
-    androidx.compose.runtime.CompositionLocalProvider(tw.liuli.launcher.ui.components.LocalFocusSnap provides { slide.value > 0.001f }) {
+    androidx.compose.runtime.CompositionLocalProvider(tw.liuli.launcher.ui.components.LocalFocusSnap provides { slide.value > 0.001f || asLayer }) {
     Box(
         Modifier
             .fillMaxSize()
@@ -409,7 +416,7 @@ fun AppDrawer(
                     translationY = slide.value * size.height
                     // 滑動中：整塊抽屜（玻璃＋App 格子）畫成一張離屏圖、只移動位置，GPU 每格只貼一個四邊形。
                     // 停下來就恢復一般繪製（停住時不多一層）。
-                    compositingStrategy = if (slide.value > 0.001f) CompositingStrategy.Offscreen else CompositingStrategy.Auto
+                    compositingStrategy = if (asLayer || slide.value > 0.001f) CompositingStrategy.Offscreen else CompositingStrategy.Auto
                 }
                 .liquidGlass(
                     RoundedCornerShape(topStart = 34.dp, topEnd = 34.dp), tint = 0.09f,
@@ -458,3 +465,6 @@ fun AppDrawer(
 
 
 private fun drawerSlideOffset(slide: Float, heightPx: Float) = androidx.compose.ui.geometry.Offset(0f, slide * heightPx)
+
+/** 面板／抽屜打開後維持離屏圖的時間：滑入彈簧約 0.33 秒、主畫面淡出 0.38 秒、背景暫停 0.45 秒，全部結束才回到一般繪製。 */
+internal const val PANEL_LAYER_MS = 500L

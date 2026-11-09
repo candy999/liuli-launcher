@@ -21,6 +21,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import kotlinx.coroutines.delay
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
@@ -82,7 +85,12 @@ data class SheetSpec(
 fun GlassSheet(spec: SheetSpec) {
     val first = remember { FocusRequester() }
     val slide = remember { Animatable(1f) }
-    LaunchedEffect(Unit) { slide.animateTo(0f, SheetSpring) }
+    // 打開後 0.5 秒內整塊面板維持一張離屏圖（滑入、主畫面淡出、背景暫停都結束才回到一般繪製）
+    var asLayer by remember { androidx.compose.runtime.mutableStateOf(true) }
+    LaunchedEffect(Unit) {
+        launch { delay(500); asLayer = false }
+        slide.animateTo(0f, SheetSpring)
+    }
     val sheetWidthPx = with(androidx.compose.ui.platform.LocalDensity.current) { 340.dp.toPx() }
     val gapPx = with(androidx.compose.ui.platform.LocalDensity.current) { 40.dp.toPx() }
     val focusAt = spec.focusIndex.coerceIn(0, (spec.items.size - 1).coerceAtLeast(0))
@@ -97,7 +105,7 @@ fun GlassSheet(spec: SheetSpec) {
     }
 
     // 滑入中：焦點效果直接到位（整塊面板是一張離屏圖，裡面有東西在動就得每格重畫）
-    androidx.compose.runtime.CompositionLocalProvider(tw.liuli.launcher.ui.components.LocalFocusSnap provides { slide.value > 0.001f }) {
+    androidx.compose.runtime.CompositionLocalProvider(tw.liuli.launcher.ui.components.LocalFocusSnap provides { slide.value > 0.001f || asLayer }) {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.CenterEnd) {
         Column(
             Modifier
@@ -107,7 +115,7 @@ fun GlassSheet(spec: SheetSpec) {
                 .graphicsLayer {
                     translationX = slide.value * (size.width + 40.dp.toPx())
                     // 滑動中：整塊面板畫成一張離屏圖、只移動位置；停下來恢復一般繪製
-                    compositingStrategy = if (slide.value > 0.001f) CompositingStrategy.Offscreen else CompositingStrategy.Auto
+                    compositingStrategy = if (asLayer || slide.value > 0.001f) CompositingStrategy.Offscreen else CompositingStrategy.Auto
                 }
                 .liquidGlass(
                     RoundedCornerShape(30.dp), tint = 0.09f,
