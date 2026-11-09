@@ -42,6 +42,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
@@ -334,25 +335,44 @@ private fun InputChip(src: TvSource, requester: FocusRequester?, onClick: () -> 
 
 /**
  * 所有 App 抽屜：從下方滑上來的玻璃面板。第一列按上鍵、或按返回鍵收合。
+ *
+ * 預先建好：主畫面穩定後就組合好（28 個 App 格子），[open] 為 false 時只量尺寸、不擺放——不畫、拿不到焦點。
+ * 打開時只剩滑入動畫；以前每次打開才組合，海信上第一格要 110ms，滑出來會頓一下。
  */
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun AppDrawer(
+    open: Boolean,
     apps: List<AppEntry>,
     onClose: () -> Unit,
     onLaunch: (AppEntry) -> Unit,
     onLongClick: (AppEntry, FocusRequester) -> Unit,
 ) {
     val slide = remember { Animatable(1f) }
-    LaunchedEffect(Unit) { slide.animateTo(0f, SheetSpring) }
     val first = remember { FocusRequester() }
-    LaunchedEffect(apps.isNotEmpty()) {
-        delay(16)
-        runCatching { first.requestFocus() }
-    }
+    val gridState = androidx.compose.foundation.lazy.grid.rememberLazyGridState()
     var focused by remember { mutableIntStateOf(0) }
+    LaunchedEffect(open) {
+        if (open) {
+            focused = 0
+            runCatching { gridState.scrollToItem(0) }
+            delay(16)
+            runCatching { first.requestFocus() }
+            slide.animateTo(0f, SheetSpring)
+        } else {
+            slide.snapTo(1f)
+        }
+    }
 
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
+    Box(
+        Modifier
+            .fillMaxSize()
+            .layout { measurable, constraints ->
+                val p = measurable.measure(constraints)
+                layout(p.width, p.height) { if (open) p.place(0, 0) }
+            },
+        contentAlignment = Alignment.BottomCenter,
+    ) {
         Column(
             Modifier
                 .padding(horizontal = 20.dp)
@@ -377,6 +397,7 @@ fun AppDrawer(
             }
             Spacer(Modifier.height(10.dp))
             LazyVerticalGrid(
+                state = gridState,
                 columns = GridCells.Fixed(6),
                 contentPadding = PaddingValues(start = 4.dp, end = 4.dp, top = 12.dp, bottom = 40.dp),
                 horizontalArrangement = Arrangement.spacedBy(22.dp),

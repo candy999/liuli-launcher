@@ -48,7 +48,7 @@ val LocalGlassBackdrop = staticCompositionLocalOf { GlassBackdrop(null, { 0L }, 
 /**
  * Liquid Glass 材質。
  *
- * 成本：不做即時模糊。背景引擎每畫一幀，會順便畫一張 240×135 的小背景；
+ * 成本：不做即時模糊。背景引擎每畫一幀，會順便畫一張 120×68 的小背景；
  * 玻璃取出自己背後那一塊放大（雙線性放大＝自然的模糊），等於貼一張圖。
  * Android 13 以上再用 AGSL 著色器做邊緣的透鏡折射。背景靜止時零成本。
  *

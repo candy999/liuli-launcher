@@ -196,6 +196,10 @@ fun HomeScreen(
             initialTarget = null
         }
     }
+    var drawerReady by remember { mutableStateOf(false) }
+    LaunchedEffect(initialFocusDone) {
+        if (initialFocusDone) { delay(2500); drawerReady = true }
+    }
     // 保險：清單一直沒載好（或沒有任何 App）也不能永遠沒有焦點
     LaunchedEffect(Unit) {
         delay(3000)
@@ -940,8 +944,10 @@ fun HomeScreen(
                 }
             }
 
-            if (drawerOpen) {
+            // 抽屜預先建好（主畫面穩定 2.5 秒後，或第一次打開時），之後打開只剩滑入動畫
+            if (drawerReady || drawerOpen) {
                 AppDrawer(
+                    open = drawerOpen,
                     apps = visibleApps,
                     onClose = ::closeDrawer,
                     onLaunch = ::launchApp,

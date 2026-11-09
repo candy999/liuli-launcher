@@ -195,7 +195,7 @@ class BackgroundEngine {
         active = this
     }
 
-    /** 給玻璃取樣的小張背景（240×135，已模糊＋過曝）。只在主執行緒寫入。 */
+    /** 給玻璃取樣的小張背景（120×68，已模糊＋過曝）。只在主執行緒寫入。 */
     val glass: ImageBitmap = ImageBitmap(GLASS_W, GLASS_H)
     private val glassBitmap = glass.asAndroidBitmap()
 
@@ -615,7 +615,7 @@ class BackgroundEngine {
 
     /**
      * 玻璃更新迴圈（由 LaunchedEffect 在主執行緒啟動）。
-     * 在主執行緒拍快照 → 背景執行緒畫 240×135 小圖＋三次盒狀模糊（≈高斯）＋過曝 → 回主執行緒寫進 [glass]。
+     * 在主執行緒拍快照 → 背景執行緒畫 120×68 小圖＋三次盒狀模糊（≈高斯）＋過曝 → 回主執行緒寫進 [glass]。
      * 電視 CPU 上這一套約 30～40ms，以前放在主執行緒會讓每次背景更新都卡一格；現在 UI 完全不等它。
      */
     suspend fun runGlass() {
@@ -757,8 +757,11 @@ class BackgroundEngine {
     companion object {
         const val LOGICAL_W = 480f
         const val LOGICAL_H = 270f
-        const val GLASS_W = 240
-        const val GLASS_H = 135
+        // 玻璃用的背景小圖：原生 1080p 的 1／16。很模糊，所以可以畫得極小再由 GPU 線性放大（docs/blur-shortcut.md：
+        // 小圖上的模糊 σ ≥ 2 個小圖像素就不會出現格子或鋸齒）。半徑 2 的盒狀模糊三次 ≈ σ 2.45 小圖像素 ≈ 1080p 上 39 像素。
+        // 以前是 240×135、半徑 5（σ ≈ 44 像素），模糊程度幾乎一樣，CPU 每張要算的像素只剩 1／4。
+        const val GLASS_W = 120
+        const val GLASS_H = 68
         /** 冷啟動等第一個焦點最多多久（毫秒），之後從中央開始擴散。 */
         private const val REVEAL_FALLBACK_MS = 4000L
         private const val DWELL = 180L
@@ -768,7 +771,7 @@ class BackgroundEngine {
         private const val TAU_PULSE_IN = 260f
         private const val TAU_PULSE_OUT = 600f
         private const val TAU_RIPPLE = 900f
-        private const val BLUR_R = 5
+        private const val BLUR_R = 2
         /** 背景模糊在小圖上的盒狀模糊半徑（三次 ≈ 高斯 σ 2.45 個小圖像素，≥2 才不會有格子與鋸齒）。 */
         private const val BG_BLUR_R = 2
         /** 背景模糊等級對應的 σ（1080p 像素）。 */
