@@ -204,15 +204,29 @@ fun WeatherGroup(home: HomeContext, requester: FocusRequester, onClick: () -> Un
                     Spacer(Modifier.width(12.dp))
                     GText("${w.temp.roundToInt()}°", size = 52.sp, weight = FontWeight.ExtraLight, shadow = true)
                 }
-                Spacer(Modifier.height(4.dp))
-                GText("${w.kind.label}・${home.city.name}", size = 15.sp, color = Ink.Secondary, shadow = true)
-                w.today?.let { t ->
-                    GText("${t.max.roundToInt()}° / ${t.min.roundToInt()}°　降雨 ${t.rainChance}%", size = 13.sp, color = Ink.Tertiary)
-                }
-                // 明天：只講會改變決定的一件事（帶傘、加衣服…），見 tomorrowHint
+                // 層級：大字溫度 → 主要行（天氣＋今天高低溫）→ 次要行（地點＋降雨）→ 明天
+                // 明天值得注意時用金色小標籤（和左邊「今日初一・拜拜」同一種語言），否則只是最淡的一行
+                Spacer(Modifier.height(2.dp))
+                val t = w.today
+                GText(
+                    if (t != null) "${w.kind.label}　${t.max.roundToInt()}° / ${t.min.roundToInt()}°" else w.kind.label,
+                    size = 17.sp, color = Ink.Secondary, shadow = true,
+                )
+                GText(
+                    home.city.name + (if (t != null) "・降雨 ${t.rainChance}%" else ""),
+                    size = 13.sp, color = Ink.Tertiary,
+                )
                 w.tomorrowHint()?.let { hint ->
-                    Spacer(Modifier.height(2.dp))
-                    GText(hint, size = 13.sp, color = Ink.Secondary)
+                    Spacer(Modifier.height(8.dp))
+                    if (hint.notable) {
+                        GText(
+                            hint.text,
+                            Modifier.background(Ink.GoldSoft, RoundedCornerShape(11.dp)).padding(horizontal = 11.dp, vertical = 2.dp),
+                            size = 13.sp, color = Ink.Gold,
+                        )
+                    } else {
+                        GText(hint.text, size = 13.sp, color = Ink.Faint)
+                    }
                 }
             }
         }

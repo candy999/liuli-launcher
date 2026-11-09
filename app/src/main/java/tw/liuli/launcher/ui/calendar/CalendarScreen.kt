@@ -28,6 +28,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -85,6 +86,17 @@ fun CalendarScreen(now: java.time.LocalDateTime, initial: LocalDate = now.toLoca
     val month = YearMonth.from(sel)
     val root = remember { FocusRequester() }
     LaunchedEffect(Unit) { runCatching { root.requestFocus() } }
+    // 農民曆計算比較慢（宜忌、吉時…）：日期格子先畫，算好的日子放進快取再補上。
+    // 這個月算完接著預先算上個月、下個月，翻月時通常已經好了。
+    val cache = remember { mutableStateMapOf<LocalDate, DayInfo>() }
+    LaunchedEffect(month) {
+        for (m in listOf(month, month.plusMonths(1), month.minusMonths(1))) {
+            val missing = (1..m.lengthOfMonth()).map { m.atDay(it) }.filter { it !in cache }
+            if (missing.isEmpty()) continue
+            val computed = withContext(Dispatchers.Default) { missing.map { dayInfo(it) } }
+            computed.forEach { cache[it.date] = it }
+        }
+    }
 
     Row(
         Modifier
@@ -116,32 +128,28 @@ fun CalendarScreen(now: java.time.LocalDateTime, initial: LocalDate = now.toLoca
                 },
                 label = "month",
             ) { m ->
-                MonthGrid(m, sel, today)
+                MonthGrid(m, sel, today, cache)
             }
         }
         Column(Modifier.weight(1f).fillMaxHeight()) {
-            DayDetail(sel, today, now)
+            DayDetail(sel, today, now, cache)
         }
     }
 }
 
+private fun dayInfo(date: LocalDate): DayInfo {
+    val lunar = LunarCalc.of(date)
+    return DayInfo(date, lunar, Festivals.of(date, lunar))
+}
+
 @Composable
-private fun MonthGrid(month: YearMonth, sel: LocalDate, today: LocalDate) {
-    val days by produceState<List<DayInfo>?>(null, month) {
-        value = withContext(Dispatchers.Default) {
-            (1..month.lengthOfMonth()).map { d ->
-                val date = month.atDay(d)
-                val lunar = LunarCalc.of(date)
-                DayInfo(date, lunar, Festivals.of(date, lunar))
-            }
-        }
-    }
+private fun MonthGrid(month: YearMonth, sel: LocalDate, today: LocalDate, cache: Map<LocalDate, DayInfo>) {
     Column(Modifier.fillMaxSize()) {
         Row(verticalAlignment = Alignment.Bottom) {
             GText("${month.year}年${month.monthValue}月", size = 34.sp, weight = FontWeight.Light, shadow = true)
             Spacer(Modifier.width(14.dp))
-            val first = days?.firstOrNull()?.lunar
-            val last = days?.lastOrNull()?.lunar
+            val first = cache[month.atDay(1)]?.lunar
+            val last = cache[month.atEndOfMonth()]?.lunar
             if (first != null && last != null) {
                 GText(
                     "農曆${first.monthText}${first.dayText} － ${last.monthText}${last.dayText}・${first.ganZhiYear}${first.zodiac}年",
@@ -156,16 +164,16 @@ private fun MonthGrid(month: YearMonth, sel: LocalDate, today: LocalDate) {
             }
         }
         Spacer(Modifier.height(6.dp))
-        val list = days ?: return@Column
+        // 日期格子立刻畫（不等農民曆），農曆小字算好再淡入
         val lead = month.atDay(1).dayOfWeek.value % 7 // 星期日為一週第一天
-        val cells: List<DayInfo?> = List(lead) { null } + list
+        val cells: List<LocalDate?> = List(lead) { null } + (1..month.lengthOfMonth()).map { month.atDay(it) }
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             cells.chunked(7).forEach { week ->
                 Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     for (i in 0 until 7) {
                         Box(Modifier.weight(1f).fillMaxHeight()) {
-                            val info = week.getOrNull(i)
-                            if (info != null) DayCell(info, info.date == sel, info.date == today)
+                            val date = week.getOrNull(i)
+                            if (date != null) DayCell(date, cache[date], date == sel, date == today)
                         }
                     }
                 }
@@ -175,9 +183,10 @@ private fun MonthGrid(month: YearMonth, sel: LocalDate, today: LocalDate) {
 }
 
 @Composable
-private fun DayCell(info: DayInfo, selected: Boolean, isToday: Boolean) {
+private fun DayCell(date: LocalDate, info: DayInfo?, selected: Boolean, isToday: Boolean) {
     val v by animateFloatAsState(if (selected) 1f else 0f, tween(160), label = "cell")
-    val weekend = info.date.dayOfWeek == DayOfWeek.SATURDAY || info.date.dayOfWeek == DayOfWeek.SUNDAY
+    val labelAlpha by animateFloatAsState(if (info != null) 1f else 0f, tween(220), label = "lunar")
+    val weekend = date.dayOfWeek == DayOfWeek.SATURDAY || date.dayOfWeek == DayOfWeek.SUNDAY
     Column(
         Modifier
             .fillMaxSize()
@@ -194,7 +203,7 @@ private fun DayCell(info: DayInfo, selected: Boolean, isToday: Boolean) {
         verticalArrangement = Arrangement.Center,
     ) {
         GText(
-            info.date.dayOfMonth.toString(),
+            date.dayOfMonth.toString(),
             size = 20.sp,
             weight = if (isToday) FontWeight.Medium else FontWeight.Normal,
             color = when {
@@ -203,7 +212,12 @@ private fun DayCell(info: DayInfo, selected: Boolean, isToday: Boolean) {
                 else -> Ink.Primary
             },
         )
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        // 農曆小字：還沒算好時留著同樣的高度（格子不跳動），算好後淡入
+        Row(Modifier.graphicsLayer { alpha = labelAlpha }, verticalAlignment = Alignment.CenterVertically) {
+            if (info == null) {
+                GText(" ", size = 11.sp)
+                return@Row
+            }
             if (info.lunar.isBaiBai) {
                 Box(Modifier.padding(end = 3.dp).size(4.dp).background(if (selected) Ink.OnLight else Ink.Gold, CircleShape))
             }
@@ -221,12 +235,30 @@ private fun DayCell(info: DayInfo, selected: Boolean, isToday: Boolean) {
 }
 
 @Composable
-private fun ColumnScope.DayDetail(date: LocalDate, today: LocalDate, now: java.time.LocalDateTime) {
-    val l = remember(date) { LunarCalc.of(date) }
-    val fest = remember(date, l) { Festivals.of(date, l) }
+private fun ColumnScope.DayDetail(date: LocalDate, today: LocalDate, now: java.time.LocalDateTime, cache: MutableMap<LocalDate, DayInfo>) {
+    // 日期大字立刻換；農民曆不在主執行緒算（以前每移動一天都在主執行緒算，按住方向鍵會頓）。
+    // 還沒算好時先留著上一天的內容（變淡），算好再換上，版面不會忽大忽小。
+    val info = cache[date]
+    LaunchedEffect(date) {
+        if (date !in cache) cache[date] = withContext(Dispatchers.Default) { dayInfo(date) }
+    }
+    var last by remember { mutableStateOf(info) }
+    if (info != null) last = info
     GText(date.dayOfMonth.toString(), size = 60.sp, weight = FontWeight.ExtraLight, shadow = true)
     GText(date.format(DateTimeFormatter.ofPattern("yyyy年M月 EEEE", zh)), size = 15.sp, color = Ink.Secondary)
     Spacer(Modifier.height(14.dp))
+    val shown = last ?: return
+    val stale = info == null
+    Column(Modifier.weight(1f).graphicsLayer { alpha = if (stale) 0.35f else 1f }) {
+        LunarDetail(shown, date, today, now)
+    }
+    GText("↑↓←→ 選日期，越過邊界自動翻月　返回鍵回主畫面", size = 12.sp, color = Ink.Faint)
+}
+
+@Composable
+private fun ColumnScope.LunarDetail(shown: DayInfo, date: LocalDate, today: LocalDate, now: java.time.LocalDateTime) {
+    val l = shown.lunar
+    val fest = shown.festivals
     // monthText 已含「閏」（例如 閏六月），不要再另外加
     GText("農曆${l.monthText}${l.dayText}", size = 22.sp, weight = FontWeight.Medium)
     GText("${l.ganZhiYear}年・生肖${l.zodiac}", size = 14.sp, color = Ink.Tertiary)
@@ -265,7 +297,6 @@ private fun ColumnScope.DayDetail(date: LocalDate, today: LocalDate, now: java.t
         Field("沖煞", "${l.chong}　${l.sha}")
         Field("下個節氣", "${l.nextSolarTerm}　${l.nextSolarTermDate.monthValue}月${l.nextSolarTermDate.dayOfMonth}日")
     }
-    GText("↑↓←→ 選日期，越過邊界自動翻月　返回鍵回主畫面", size = 12.sp, color = Ink.Faint)
 }
 
 /** 宜／忌：一個詞一個單位自動換行，詞本身不會被拆成兩行。 */

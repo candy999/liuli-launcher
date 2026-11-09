@@ -17,6 +17,10 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.core.FastOutLinearInEasing
+import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
@@ -155,6 +159,15 @@ fun LiuliApp(lensing: Boolean, homePresses: Int, externalAction: Pair<Int, Strin
 
     // 子頁面開啟時：桌布模糊、App 隱藏；背景換成該頁的主題色
     val pageBlur = animateFloatAsState(if (screen == Screen.Home) 0f else 1f, tween(420), label = "pageBlur")
+    // 過場有先後，不重疊：
+    // 進入＝主畫面先加速淡出（0.15 秒），子頁面再從下方浮上來淡入；
+    // 離開＝子頁面先往下淡出，完全消失後主畫面才淡入、往上浮回原位。
+    val homeVis = animateFloatAsState(
+        if (screen == Screen.Home) 1f else 0f,
+        if (screen == Screen.Home) tween(PAGE_IN_MS, delayMillis = PAGE_OUT_MS, easing = LinearOutSlowInEasing)
+        else tween(PAGE_OUT_MS, easing = FastOutLinearInEasing),
+        label = "homeVis",
+    )
 
     BoxWithConstraints(
         Modifier
@@ -179,6 +192,8 @@ fun LiuliApp(lensing: Boolean, homePresses: Int, externalAction: Pair<Int, Strin
         val backdrop = remember(wPx, hPx, lensing) { GlassBackdrop(engine.glass, { engine.glassVersion }, Size(wPx, hPx), lensing) }
 
         LaunchedEffect(screen) {
+            // 過場期間背景暫停（換色也延到過場結束），GPU 留給淡入淡出
+            engine.holdForUi((PAGE_OUT_MS + PAGE_IN_MS).toLong())
             when (screen) {
                 Screen.Calendar -> link.focus(BgColors.CALENDAR, wPx * 0.35f, hPx * 0.55f)
                 Screen.Weather -> link.focus(BgColors.WEATHER, wPx * 0.3f, hPx * 0.3f)
@@ -199,10 +214,17 @@ fun LiuliApp(lensing: Boolean, homePresses: Int, externalAction: Pair<Int, Strin
                 homePresses = homePresses,
                 externalAction = externalAction,
                 active = screen == Screen.Home,
+                visibility = { homeVis.value },
                 onOpenCalendar = { calendarStart = null; screen = Screen.Calendar },
                 onOpenWeather = { screen = Screen.Weather },
             )
-            AnimatedVisibility(visible = screen != Screen.Home, enter = fadeIn(tween(240)), exit = fadeOut(tween(160))) {
+            AnimatedVisibility(
+                visible = screen != Screen.Home,
+                enter = fadeIn(tween(PAGE_IN_MS, delayMillis = PAGE_OUT_MS - 30, easing = LinearOutSlowInEasing)) +
+                    slideInVertically(tween(PAGE_IN_MS + 80, delayMillis = PAGE_OUT_MS - 30, easing = LinearOutSlowInEasing)) { it / 28 },
+                exit = fadeOut(tween(PAGE_OUT_MS, easing = FastOutLinearInEasing)) +
+                    slideOutVertically(tween(PAGE_OUT_MS, easing = FastOutLinearInEasing)) { it / 40 },
+            ) {
                 var shown by remember { mutableStateOf(screen) }
                 if (screen != Screen.Home) shown = screen
                 when (shown) {
@@ -220,3 +242,7 @@ object BuildConfigInfo {
         runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }
             .getOrNull() ?: ""
 }
+
+/** 頁面過場：舊的先離開（加速淡出）、新的再進來（減速淡入）。 */
+private const val PAGE_OUT_MS = 150
+private const val PAGE_IN_MS = 260

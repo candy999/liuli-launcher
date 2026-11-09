@@ -224,11 +224,15 @@ object WeatherRepository {
     }
 }
 
+/** 主畫面上「明天」的提醒：[notable]＝會改變決定（帶傘、加衣服…），用醒目的小標籤；否則只是淡淡一行。 */
+data class TomorrowHint(val text: String, val notable: Boolean)
+
 /**
- * 主畫面上「明天」的一句話：看明天天氣的人想決定的是要不要帶傘、要不要加衣服，
- * 所以只講跟今天比會改變決定的事，依重要性只挑一項：會下雨（哪個時段）→ 雨停 → 溫度明顯變化 → 紫外線過量 → 差不多。
+ * 看明天天氣的人想決定的是要不要帶傘、要不要加衣服，所以只講跟今天比會改變決定的一件事，
+ * 依重要性只挑一項：會下雨（哪個時段）→ 雨停 → 溫度明顯變化 → 紫外線過量；都沒有就只給高低溫。
+ * 文字要短（放在小標籤裡），一眼看懂。
  */
-fun Weather.tomorrowHint(): String? {
+fun Weather.tomorrowHint(): TomorrowHint? {
     val t = tomorrow ?: return null
     val today = today
     val hours = hourly.filter { it.time.toLocalDate() == t.date }
@@ -238,25 +242,25 @@ fun Weather.tomorrowHint(): String? {
         val p = hours.filter { it.time.hour in range }.maxOfOrNull { it.rainChance } ?: return@mapNotNull null
         if (p >= 40) name to p else null
     }
-    if (wet.size >= 3) return "明天整天有雨，記得帶傘"
+    if (wet.size >= 3) return TomorrowHint("明天整天有雨・記得帶傘", true)
     if (wet.isNotEmpty()) {
         val top = wet.maxOf { it.second }
         val names = if (wet.size == 2) wet.joinToString("、") { it.first } else wet.maxBy { it.second }.first
-        return "明天${names}可能下雨 $top%"
+        return TomorrowHint("明天${names}有雨 $top%", true)
     }
-    if (t.rainChance >= 40) return "明天可能下雨 ${t.rainChance}%"
-    // 今天下雨、明天不太會下：「雨停了」本身就是有用的消息
-    if (today != null && today.rainChance >= 60 && t.rainChance < 30) return "明天雨停，降雨 ${t.rainChance}%"
-    // 2. 溫度：最高溫差 3° 以上、或早上明顯變冷
+    if (t.rainChance >= 40) return TomorrowHint("明天可能下雨 ${t.rainChance}%", true)
+    // 2. 今天下雨、明天不太會下：「雨停了」本身就是有用的消息
+    if (today != null && today.rainChance >= 60 && t.rainChance < 30) return TomorrowHint("明天雨停", true)
+    // 3. 溫度：最高溫差 3° 以上、或早上明顯變冷
     if (today != null) {
         val dMax = (t.max - today.max).roundToInt()
         val dMin = (t.min - today.min).roundToInt()
-        if (dMax <= -3) return "明天轉涼，最高 ${t.max.roundToInt()}°（低 ${-dMax}°）"
-        if (dMax >= 3) return "明天回暖，最高 ${t.max.roundToInt()}°（高 ${dMax}°）"
-        if (dMin <= -3) return "明早較冷，最低 ${t.min.roundToInt()}°"
+        if (dMax <= -3) return TomorrowHint("明天轉涼・最高 ${t.max.roundToInt()}°", true)
+        if (dMax >= 3) return TomorrowHint("明天回暖・最高 ${t.max.roundToInt()}°", true)
+        if (dMin <= -3) return TomorrowHint("明早較冷・最低 ${t.min.roundToInt()}°", true)
     }
-    // 3. 紫外線
-    if (t.uvMax >= 8) return "明天紫外線${uvLevel(t.uvMax)}，注意防曬"
-    // 4. 沒有特別的變化
-    return "明天和今天差不多，${t.max.roundToInt()}° / ${t.min.roundToInt()}°"
+    // 4. 紫外線
+    if (t.uvMax >= 8) return TomorrowHint("明天紫外線${uvLevel(t.uvMax)}", true)
+    // 5. 沒有特別的變化：只給高低溫
+    return TomorrowHint("明天 ${t.max.roundToInt()}° / ${t.min.roundToInt()}°", false)
 }

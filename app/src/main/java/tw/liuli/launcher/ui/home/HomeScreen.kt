@@ -112,6 +112,8 @@ fun HomeScreen(
     homePresses: Int,
     externalAction: Pair<Int, String?>,
     active: Boolean,
+    /** 主畫面可見度（0～1）：切換到月曆／天氣時先淡出，回來時等子頁面消失後才淡入。 */
+    visibility: () -> Float = { if (active) 1f else 0f },
     onOpenCalendar: () -> Unit,
     onOpenWeather: () -> Unit,
 ) {
@@ -788,7 +790,13 @@ fun HomeScreen(
         Box(
             Modifier
                 .fillMaxSize()
-                .graphicsLayer { alpha = if (active) 1f else 0f }
+                .graphicsLayer {
+                    // 淡入淡出不開全螢幕離屏緩衝（每個繪圖指令各自乘透明度）；回來時往上浮回原位一點點
+                    val v = visibility()
+                    compositingStrategy = CompositingStrategy.ModulateAlpha
+                    alpha = v
+                    translationY = (1f - v) * 14.dp.toPx()
+                }
                 .focusProperties {
                     enter = {
                         when {
