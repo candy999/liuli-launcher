@@ -8,42 +8,90 @@ import org.json.JSONObject
 
 /** 按鍵要做的事。encode() 的字串會存進設定。 */
 sealed class KeyAction(val label: String) {
+    // 琉璃
     data object LiuliHome : KeyAction("回到琉璃主畫面")
-    data object Back : KeyAction("返回")
+    data object Drawer : KeyAction("開啟所有 App")
     data object Inputs : KeyAction("開啟訊號源選單")
-    data object SystemSettings : KeyAction("開啟系統設定")
+    data object Calendar : KeyAction("開啟月曆")
+    data object Weather : KeyAction("開啟天氣")
+    data object ClockToggle : KeyAction("螢幕小時鐘 開／關")
+
+    // 音量（透過系統音量，接音響時也有效）
+    data object VolumeUp : KeyAction("音量加大")
+    data object VolumeDown : KeyAction("音量減小")
+    data object Mute : KeyAction("靜音／取消靜音")
+
+    // 媒體播放（送給正在播放的 App，例如 YouTube、Netflix）
+    data class Media(val code: Int) : KeyAction(MEDIA_NAMES[code] ?: "媒體鍵 $code")
+
+    // 系統
+    data object Back : KeyAction("返回")
     data object Recents : KeyAction("最近使用的 App")
     data object Notifications : KeyAction("通知")
+    data object QuickSettings : KeyAction("快速設定面板")
+    data object Assistant : KeyAction("語音助理")
+    data object SystemSettings : KeyAction("開啟系統設定")
+    data object NetworkSettings : KeyAction("開啟網路設定")
+    data object PowerDialog : KeyAction("電源選單")
+    data object Screenshot : KeyAction("截圖")
     data object Block : KeyAction("停用這顆鍵")
+
+    // 指定目標
     data class OpenApp(val pkg: String, val appLabel: String) : KeyAction("開啟 $appLabel")
+    data class Source(val id: String, val sourceLabel: String) : KeyAction("切換到 $sourceLabel")
 
     fun encode(): String = when (this) {
         LiuliHome -> "home"
-        Back -> "back"
+        Drawer -> "drawer"
         Inputs -> "inputs"
-        SystemSettings -> "settings"
+        Calendar -> "calendar"
+        Weather -> "weather"
+        ClockToggle -> "clock"
+        VolumeUp -> "vol_up"
+        VolumeDown -> "vol_down"
+        Mute -> "mute"
+        is Media -> "media:$code"
+        Back -> "back"
         Recents -> "recents"
         Notifications -> "notifications"
+        QuickSettings -> "quick_settings"
+        Assistant -> "assistant"
+        SystemSettings -> "settings"
+        NetworkSettings -> "network"
+        PowerDialog -> "power"
+        Screenshot -> "screenshot"
         Block -> "block"
         is OpenApp -> "app:$pkg|$appLabel"
+        is Source -> "source:$id|$sourceLabel"
     }
 
     companion object {
-        val fixed = listOf(LiuliHome, Back, Inputs, SystemSettings, Recents, Notifications, Block)
+        private val MEDIA_NAMES = mapOf(
+            KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE to "播放／暫停",
+            KeyEvent.KEYCODE_MEDIA_NEXT to "下一個",
+            KeyEvent.KEYCODE_MEDIA_PREVIOUS to "上一個",
+            KeyEvent.KEYCODE_MEDIA_FAST_FORWARD to "快轉",
+            KeyEvent.KEYCODE_MEDIA_REWIND to "倒轉",
+            KeyEvent.KEYCODE_MEDIA_STOP to "停止播放",
+        )
+
+        /** 設定畫面的分類。 */
+        val LIULI = listOf(LiuliHome, Drawer, Inputs, Calendar, Weather, ClockToggle)
+        val VOLUME = listOf(VolumeUp, VolumeDown, Mute)
+        val MEDIA = MEDIA_NAMES.keys.map { Media(it) }
+        val SYSTEM = listOf(Back, Recents, Notifications, QuickSettings, Assistant, SystemSettings, NetworkSettings, PowerDialog, Screenshot)
 
         fun decode(raw: String): KeyAction? = when {
-            raw == "home" -> LiuliHome
-            raw == "back" -> Back
-            raw == "inputs" -> Inputs
-            raw == "settings" -> SystemSettings
-            raw == "recents" -> Recents
-            raw == "notifications" -> Notifications
-            raw == "block" -> Block
             raw.startsWith("app:") -> {
                 val parts = raw.removePrefix("app:").split("|", limit = 2)
                 OpenApp(parts[0], parts.getOrNull(1) ?: parts[0])
             }
-            else -> null
+            raw.startsWith("source:") -> {
+                val parts = raw.removePrefix("source:").split("|", limit = 2)
+                Source(parts[0], parts.getOrNull(1) ?: parts[0])
+            }
+            raw.startsWith("media:") -> raw.removePrefix("media:").toIntOrNull()?.let { Media(it) }
+            else -> (LIULI + VOLUME + SYSTEM + Block).firstOrNull { it.encode() == raw }
         }
     }
 }
@@ -58,6 +106,7 @@ object KeyMapStore {
     private const val PREFS = "keymap"
     private const val KEY_RULES = "rules"
     private const val KEY_GUARD = "guard_home"
+    private const val KEY_PENDING = "pending_key"
 
     private fun prefs(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
@@ -85,6 +134,13 @@ object KeyMapStore {
         json.remove(ruleKey(keyCode, long))
         prefs(context).edit().putString(KEY_RULES, json.toString()).apply()
     }
+
+    /**
+     * 攔截精靈：已攔截、還沒設定功能的鍵（0＝沒有）。存起來，使用者不小心離開 App 再回來，
+     * 打開設定仍然看得到攔到了哪一顆，可以繼續設定或重新攔截。
+     */
+    fun pending(context: Context): Int = prefs(context).getInt(KEY_PENDING, 0)
+    fun setPending(context: Context, code: Int) = prefs(context).edit().putInt(KEY_PENDING, code).apply()
 
     /** 防止回到原廠主畫面：攔 Home 鍵、偵測原廠 launcher 出現就切回琉璃。預設開啟。 */
     fun guardHome(context: Context) = prefs(context).getBoolean(KEY_GUARD, true)

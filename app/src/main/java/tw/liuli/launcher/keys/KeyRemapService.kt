@@ -2,6 +2,8 @@ package tw.liuli.launcher.keys
 
 import android.accessibilityservice.AccessibilityService
 import android.content.Intent
+import android.media.AudioManager
+import tw.liuli.launcher.data.TvSources
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -123,18 +125,56 @@ class KeyRemapService : AccessibilityService() {
     private fun perform(action: KeyAction) {
         when (action) {
             KeyAction.LiuliHome -> openLiuli(null)
+            KeyAction.Drawer -> openLiuli("drawer")
             KeyAction.Inputs -> openLiuli(MainActivity.ACTION_INPUTS)
+            KeyAction.Calendar -> openLiuli("calendar:")
+            KeyAction.Weather -> openLiuli("weather")
+            KeyAction.ClockToggle -> {
+                val p = getSharedPreferences("settings", MODE_PRIVATE)
+                val on = !p.getBoolean(ClockOverlay.KEY_ON, false)
+                p.edit().putBoolean(ClockOverlay.KEY_ON, on).apply()
+                android.widget.Toast.makeText(this, "螢幕小時鐘：" + if (on) "開" else "關", android.widget.Toast.LENGTH_SHORT).show()
+            }
+            KeyAction.VolumeUp -> volume(AudioManager.ADJUST_RAISE)
+            KeyAction.VolumeDown -> volume(AudioManager.ADJUST_LOWER)
+            KeyAction.Mute -> volume(AudioManager.ADJUST_TOGGLE_MUTE)
+            is KeyAction.Media -> {
+                // 送給正在播放的媒體工作階段（YouTube、Netflix…），不需要額外權限
+                val am = getSystemService(AUDIO_SERVICE) as AudioManager
+                am.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, action.code))
+                am.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_UP, action.code))
+            }
             KeyAction.Back -> performGlobalAction(GLOBAL_ACTION_BACK)
             KeyAction.Recents -> performGlobalAction(GLOBAL_ACTION_RECENTS)
             KeyAction.Notifications -> performGlobalAction(GLOBAL_ACTION_NOTIFICATIONS)
+            KeyAction.QuickSettings -> performGlobalAction(GLOBAL_ACTION_QUICK_SETTINGS)
+            KeyAction.PowerDialog -> performGlobalAction(GLOBAL_ACTION_POWER_DIALOG)
+            KeyAction.Screenshot -> if (android.os.Build.VERSION.SDK_INT >= 28) performGlobalAction(GLOBAL_ACTION_TAKE_SCREENSHOT)
+            KeyAction.Assistant -> {
+                if (!SystemActions.launch(this, Intent(Intent.ACTION_VOICE_COMMAND))) {
+                    SystemActions.launch(this, Intent("android.intent.action.ASSIST"))
+                }
+            }
             KeyAction.SystemSettings -> SystemActions.systemSettings(this)
+            KeyAction.NetworkSettings -> SystemActions.networkSettings(this)
             KeyAction.Block -> Unit
             is KeyAction.OpenApp -> {
                 val pm = packageManager
                 val intent = pm.getLeanbackLaunchIntentForPackage(action.pkg) ?: pm.getLaunchIntentForPackage(action.pkg)
                 if (intent != null) SystemActions.launch(this, intent)
             }
+            is KeyAction.Source -> {
+                val src = TvSources.list(this).firstOrNull { it.id == action.id }
+                if (src != null) TvSources.open(this, src)
+                else android.widget.Toast.makeText(this, "找不到訊號源 ${action.sourceLabel}", android.widget.Toast.LENGTH_SHORT).show()
+            }
         }
+    }
+
+    /** 調整系統音量（顯示系統的音量條）。 */
+    private fun volume(direction: Int) {
+        val am = getSystemService(AUDIO_SERVICE) as AudioManager
+        am.adjustStreamVolume(AudioManager.STREAM_MUSIC, direction, AudioManager.FLAG_SHOW_UI)
     }
 
     private fun fallback(code: Int) {

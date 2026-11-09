@@ -142,7 +142,8 @@ fun LiuliApp(lensing: Boolean, homePresses: Int, externalAction: Pair<Int, Strin
     var calendarStart by remember { mutableStateOf<java.time.LocalDate?>(null) }
     LaunchedEffect(externalAction) {
         val a = externalAction.second
-        if (a == MainActivity.ACTION_INPUTS) screen = Screen.Home
+        if (a == MainActivity.ACTION_INPUTS || a == "drawer") screen = Screen.Home
+        if (a == "weather") screen = Screen.Weather
         if (a != null && a.startsWith("calendar:")) {
             calendarStart = runCatching { java.time.LocalDate.parse(a.removePrefix("calendar:")) }.getOrNull()
             screen = Screen.Calendar

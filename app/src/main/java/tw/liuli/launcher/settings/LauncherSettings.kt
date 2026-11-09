@@ -62,6 +62,11 @@ class LauncherSettings(context: Context) {
     var clockBg by mutableIntStateOf(prefs.getInt("clock_bg", 0))
         private set
 
+    // 按鍵服務可以直接切換小時鐘（遙控器上的鍵），這裡跟著更新畫面上的狀態
+    private val clockListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { p, key ->
+        if (key == "clock_on") clockOn = p.getBoolean("clock_on", false)
+    }.also { prefs.registerOnSharedPreferenceChangeListener(it) }
+
     fun updateClock(
         on: Boolean = clockOn, corner: Int = clockCorner, size: Int = clockSize,
         x: Int = clockX, y: Int = clockY, bg: Int = clockBg,

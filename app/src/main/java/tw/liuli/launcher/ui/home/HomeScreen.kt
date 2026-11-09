@@ -73,8 +73,8 @@ import tw.liuli.launcher.data.AppEntry
 import tw.liuli.launcher.data.AppRepository
 import tw.liuli.launcher.data.DockStore
 import tw.liuli.launcher.data.HiddenAppsStore
-import tw.liuli.launcher.data.TvSources
 import tw.liuli.launcher.keys.KeyAction
+import tw.liuli.launcher.data.TvSources
 import tw.liuli.launcher.keys.KeyBinding
 import tw.liuli.launcher.keys.KeyMapStore
 import tw.liuli.launcher.keys.KeyRemapService
@@ -418,29 +418,42 @@ fun HomeScreen(
     fun chooseKeyAction(code: Int, long: Boolean, after: () -> Unit) {
         val title = bindingTitle(code, long)
         val current = KeyMapStore.load(context).firstOrNull { it.keyCode == code && it.long == long }?.action
-        fun pick(action: KeyAction?) { saveBinding(code, long, action); after() }
+        fun pick(action: KeyAction?) {
+            saveBinding(code, long, action)
+            KeyMapStore.setPending(context, 0)
+            after()
+        }
+        // 分類子選單：右邊顯示目前選的是這一類裡的哪一個
+        fun group(name: String, list: List<KeyAction>, note: String? = null) =
+            SheetItem(name, list.firstOrNull { it == current }?.label ?: note) {
+                open(SheetSpec("$title：$name", null, list.map { act ->
+                    SheetItem(act.label, selected = act == current) { pick(act) }
+                }), gearReq)
+            }
+        val sources = TvSources.list(context)
         val items = buildList {
-            KeyAction.fixed.forEach { act -> add(SheetItem(act.label, selected = current == act) { pick(act) }) }
-            add(SheetItem("開啟指定 App…", (current as? KeyAction.OpenApp)?.label, selected = current is KeyAction.OpenApp) {
+            add(SheetItem("開啟 App…", (current as? KeyAction.OpenApp)?.label ?: "從清單選一個") {
                 open(SheetSpec("$title：開啟哪個 App", null, apps.map { app ->
-                    SheetItem(app.label, if (app.isTvApp) null else "手機版") { pick(KeyAction.OpenApp(app.packageName, app.label)) }
+                    SheetItem(app.label, if (app.isTvApp) null else "手機版",
+                        selected = (current as? KeyAction.OpenApp)?.pkg == app.packageName) { pick(KeyAction.OpenApp(app.packageName, app.label)) }
                 }), gearReq)
             })
+            add(group("訊號源…", listOf(KeyAction.Inputs) + sources.map { KeyAction.Source(it.id, it.label) },
+                if (sources.isEmpty()) "訊號源選單" else "指定 HDMI 等"))
+            add(group("音量…", KeyAction.VOLUME, "加大、減小、靜音"))
+            add(group("媒體播放…", KeyAction.MEDIA, "播放／暫停、快轉…"))
+            add(group("琉璃功能…", KeyAction.LIULI, "主畫面、所有 App、月曆…"))
+            add(group("系統功能…", KeyAction.SYSTEM, "返回、通知、語音助理…"))
+            add(SheetItem(KeyAction.Block.label, "按了沒有反應", selected = current == KeyAction.Block) { pick(KeyAction.Block) })
             if (current != null) add(SheetItem("還原成原本的功能", "刪除這個綁定") { pick(null) })
         }
-        val note = if (long) "只設「按住半秒」時，這顆鍵按一下會失去原本的功能（返回鍵、Home 鍵除外）：琉璃攔下按鍵後，沒辦法再把原本的按鍵送回去。" else "目前：" + (current?.label ?: "原本的功能")
+        val note = if (long) "只設「按住半秒」時，這顆鍵按一下會失去原本的功能（返回鍵、Home 鍵除外）：琉璃攔下按鍵後，沒辦法再把原本的按鍵送回去。"
+        else "目前：" + (current?.label ?: "原本的功能")
         open(SheetSpec("$title 要做什麼？", note, items), gearReq)
     }
 
-    // 收到按鍵後：要改哪一種按法（右邊顯示目前的設定）
-    fun choosePress(code: Int, after: () -> Unit) {
-        val rules = KeyMapStore.load(context).filter { it.keyCode == code }
-        fun cur(long: Boolean) = rules.firstOrNull { it.long == long }?.action?.label ?: "原本的功能"
-        open(SheetSpec(KeyMapStore.keyName(code), "收到了！要改這顆鍵的哪一種按法？右邊是目前的設定。", listOf(
-            SheetItem("按一下", cur(false)) { chooseKeyAction(code, false, after) },
-            SheetItem("按住半秒", cur(true)) { chooseKeyAction(code, true, after) },
-        )), gearReq)
-    }
+    // 攔截精靈的第 2 步在 learnKey 之後宣告（兩者互相呼叫），先用變數接上
+    var showCapture: (() -> Unit) -> Unit = {}
 
     // 按鍵測試：按任何鍵，顯示琉璃收到了什麼（收不到＝電視系統直接處理，無法改綁）
     fun keyTestSheet() {
@@ -462,7 +475,10 @@ fun HomeScreen(
             "15 秒內，按一下遙控器上要改的那顆鍵（例如 Netflix、YouTube、彩色鍵、節目表鍵）。方向、確定、返回、音量、電源是基本鍵，受保護不能改，按了不會被當成要改的鍵。",
             listOf(SheetItem("取消") { close() }),
         ), gearReq)
-        val learner: (Int) -> Unit = { code -> choosePress(code, after) }
+        val learner: (Int) -> Unit = { code ->
+            KeyMapStore.setPending(context, code) // 存起來：不小心離開 App 再回來也還在
+            showCapture(after)
+        }
         KeyRemapService.learner = learner
         scope.launch {
             delay(15_000)
@@ -481,6 +497,25 @@ fun HomeScreen(
             }
         }
     }
+
+    // 攔截狀態：已攔到哪一顆鍵 → 下一步設定「按一下」或「按住半秒」的功能，或重新攔截
+    fun captureSheet(after: () -> Unit) {
+        val code = KeyMapStore.pending(context)
+        if (code == 0) { learnKey(after); return }
+        val rules = KeyMapStore.load(context).filter { it.keyCode == code }
+        fun cur(long: Boolean) = rules.firstOrNull { it.long == long }?.action?.label ?: "原本的功能"
+        open(SheetSpec(
+            "已攔截：${KeyMapStore.keyName(code)}",
+            "琉璃已經攔截到這顆鍵。下一步選擇要設定「按一下」還是「按住半秒」的功能（右邊是目前的設定），或重新攔截另一顆鍵。離開 App 再回來，這裡仍會記得攔到的鍵。",
+            listOf(
+                SheetItem("下一步：設定「按一下」", cur(false)) { chooseKeyAction(code, false, after) },
+                SheetItem("下一步：設定「按住半秒」", cur(true)) { chooseKeyAction(code, true, after) },
+                SheetItem("重新攔截新的按鍵") { KeyMapStore.setPending(context, 0); learnKey(after) },
+                SheetItem("清除，不設定了") { KeyMapStore.setPending(context, 0); close() },
+            ),
+        ), gearReq)
+    }
+    showCapture = { a -> captureSheet(a) }
 
     // 已綁定的按鍵：每一條都能修改或刪除
     fun bindingsSheet() {
@@ -602,8 +637,13 @@ fun HomeScreen(
         val n = KeyMapStore.load(context).size
         val items = buildList {
             if (!enabled) add(SheetItem("啟用按鍵服務", "第一步：自我授權，不需電腦") { selfGrant() })
-            add(SheetItem("新增綁定", if (enabled) "按一下要改的鍵 → 選按法 → 選動作" else "需先啟用按鍵服務") {
-                if (enabled) learnKey { bindingsSheet() } else toast("請先啟用按鍵服務")
+            val pendingCode = KeyMapStore.pending(context)
+            add(SheetItem("新增綁定", when {
+                !enabled -> "需先啟用按鍵服務"
+                pendingCode != 0 -> "已攔截：${KeyMapStore.keyName(pendingCode)}，繼續設定"
+                else -> "攔截一顆鍵 → 選按法 → 選功能"
+            }) {
+                if (enabled) captureSheet { bindingsSheet() } else toast("請先啟用按鍵服務")
             })
             add(SheetItem("已綁定的按鍵", if (n == 0) "還沒有" else "$n 個") { bindingsSheet() })
             add(SheetItem("按鍵測試", "看看哪些鍵琉璃收得到") {
@@ -670,6 +710,7 @@ fun HomeScreen(
                     "perf" -> perfSheet()
                     "clock" -> clockSheet()
                 }
+                "drawer" -> { sheet = null; drawerOpen = true }
                 "clock" -> settings.updateClock(on = arg == "1" || arg == "on")
             }
         }
