@@ -88,9 +88,8 @@ internal object YushanRidge {
             val bb = L.getJSONArray("bbox")
             val x0 = bb.getDouble(0).toFloat(); val y0 = bb.getDouble(1).toFloat()
             val x1 = bb.getDouble(2).toFloat(); val y1 = bb.getDouble(3).toFloat()
-            // 4 位元的通道就夠（平塗只有十種顏色），記憶體減半
-            @Suppress("DEPRECATION")
-            val bmp = Bitmap.createBitmap(ceil((x1 - x0) * SCALE).toInt(), ceil((y1 - y0) * SCALE).toInt(), Bitmap.Config.ARGB_4444)
+            // 8 位元：4 位元的話反鋸齒的半透明邊緣精度不夠，視差移動時會看到細細的深色邊
+            val bmp = Bitmap.createBitmap(ceil((x1 - x0) * SCALE).toInt(), ceil((y1 - y0) * SCALE).toInt(), Bitmap.Config.ARGB_8888)
             val cv = Canvas(bmp)
             cv.scale(SCALE, SCALE); cv.translate(-x0, -y0)
             val base = L.getJSONObject("base")

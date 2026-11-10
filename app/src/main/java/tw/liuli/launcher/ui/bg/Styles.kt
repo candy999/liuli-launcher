@@ -59,10 +59,9 @@ private class Scratch {
     val ridgePaint = android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG or android.graphics.Paint.ANTI_ALIAS_FLAG)
     val ridgeTint = RidgeTint()
     val ridgeRect = android.graphics.RectF()
-    /** 雲頭的位置、半徑、高度（每格重算，不配置新陣列）。 */
-    val billowX = FloatArray(64)
-    val billowR = FloatArray(64)
-    val billowY = FloatArray(64)
+    /** 雲帶的形狀與上緣的受光邊（每格重算，不配置新物件）。 */
+    val mistPath = Path()
+    val mistRim = Path()
     val mesh = buildMesh()
     val sampleA = FloatArray(2)
     val sampleB = FloatArray(2)
@@ -744,70 +743,44 @@ private fun cloudDens(xw: Float, seed: Float, t: Float, amount: Float = .5f): Fl
 }
 
 /**
- * 平塗雲海：一排隨風由左往右推移的雲頭（圓），三階平塗——雲頭向著太陽的那一邊最亮、中間階、下半部陰影。
- * [base]＝雲海平面的高度、[r0]＝雲頭的大小、[spd]＝風速（邏輯像素／秒）、[dk]＝這一層的視差、[fill]＝雲海一路填到畫面底
- * （夾在山層之間，被前面的稜線擋住＝雲穿過山脈）。
+ * 雲海：一層層平塗的雲帶（不是一顆顆的圓）。上緣是平順、緩緩起伏的曲線，沿著上緣一條細細的受光邊，
+ * 由上往下從亮漸漸融進山嵐色、帶一點透明。雲帶的厚薄由隨風移動的雲量場決定：濃的地方雲帶變厚、抬高，
+ * 稀的地方收窄到沒有——所以雲一邊往右流、一邊拉長、斷開，不是固定的形狀。
+ * [base]＝雲帶中線、[up]／[down]＝最厚時往上／往下的厚度、[spd]＝風速（邏輯像素／秒）、[dk]＝這一層的視差。
  */
-private fun DrawScope.billowDeck(
-    base: Float, r0: Float, spd: Float, dk: Float, seed: Int, fill: Boolean, small: Boolean,
-    t: Float, par: Float, sunDir: Float, lit: Color, mid: Color, shade: Color, bx: FloatArray, br: FloatArray, by: FloatArray,
+private fun DrawScope.mistDeck(
+    base: Float, up: Float, down: Float, spd: Float, dk: Float, seed: Int,
+    t: Float, par: Float, top: Color, midC: Color, bottom: Color, rim: Color, path: Path, rimPath: Path,
 ) {
-    val span = W + 4 * r0; val sp = r0 * 1.05f
-    val n = minOf(bx.size, kotlin.math.ceil(span / sp).toInt())
     val px = par * W * dk
-    var m = 0
+    val step = 4f
+    val n = ((W + 20f) / step).toInt() + 1
+    path.reset(); rimPath.reset()
+    var any = false
+    var rimOn = false
+    // 上緣（左→右）
     for (i in 0 until n) {
-        val ph = i * sp + t * spd + seed * 37.1f
-        val wrap = kotlin.math.floor(ph / span).toInt()
-        val x = ph - wrap * span - 2 * r0 + px
-        val id = i + wrap * n
-        val d = cloudDens(x - px - t * spd, seed.toFloat(), t)
-        if (d < .06f) continue
-        val r = r0 * (.6f + .4f * hash01(id, seed)) * (.35f + .65f * d)
-        // 依 x 排好（繞回來的那幾顆會亂序）：插入排序，數量很少
-        var j = m
-        while (j > 0 && bx[j - 1] > x) { bx[j] = bx[j - 1]; br[j] = br[j - 1]; by[j] = by[j - 1]; j-- }
-        bx[j] = x; br[j] = r; by[j] = base - r * (.12f + .2f * hash01(id, seed + 7)) - 3f * d
-        m++
+        val x = -10f + i * step
+        val xw = x - px - t * spd
+        val d = cloudDens(xw, seed.toFloat(), t)
+        val ty = base - up * d * (.72f + .28f * sin(xw * .045f + seed)) - 1.4f * d * sin(xw * .13f + seed * 2f)
+        if (i == 0) path.moveTo(x, ty) else path.lineTo(x, ty)
+        if (d > .12f) {
+            if (!rimOn) { rimPath.moveTo(x, ty + .3f); rimOn = true } else rimPath.lineTo(x, ty + .3f)
+            any = true
+        } else rimOn = false
     }
-    if (m == 0) return
-    // 雲海的厚度：夾在山層之間的雲帶較厚，下半截被前面的稜線擋住；地平線上的積雲很薄
-    val thick = if (fill) r0 * 1.5f else r0 * .55f
-    val flat = .62f   // 雲頭壓扁：雲海是平頂、緩緩起伏的，不是一顆顆圓球
-    // 1. 連在一起的雲頭合成一條雲帶（平底），不再每顆雲頭下面各一根柱子
-    var s = 0
-    while (s < m) {
-        var e = s
-        while (e + 1 < m && bx[e + 1] - br[e + 1] < bx[e] + br[e] * 1.1f) e++
-        val x0 = bx[s] - br[s] * .55f; val x1 = bx[e] + br[e] * .55f
-        val hh = thick + r0 * .2f; val wid = x1 - x0
-        // 太窄的一段只留雲頭（不然像一根柱子）；雲帶兩端是圓的，不是直直切掉
-        if (wid > hh * 1.8f) {
-            val cr = androidx.compose.ui.geometry.CornerRadius(hh * .5f)
-            drawRoundRect(mid, Offset(x0, base - r0 * .2f), Size(wid, hh), cr)
-            if (fill) drawRoundRect(shade, Offset(x0 + hh * .3f, base + thick * .45f), Size(wid - hh * .6f, thick * .55f), androidx.compose.ui.geometry.CornerRadius(thick * .27f))
-        }
-        s = e + 1
+    if (!any) return
+    // 下緣（右→左）
+    for (i in n - 1 downTo 0) {
+        val x = -10f + i * step
+        val xw = x - px - t * spd
+        val d = cloudDens(xw, seed.toFloat(), t)
+        path.lineTo(x, base + down * d * (.8f + .2f * sin(xw * .03f + seed * 3f)))
     }
-    // 2. 雲頭（中間階，壓扁的橢圓）
-    for (k in 0 until m) {
-        val rx = br[k]; val ry = br[k] * flat
-        drawOval(mid, Offset(bx[k] - rx, by[k] - ry), Size(rx * 2, ry * 2))
-        if (small) {
-            val sr = br[k] * .45f
-            drawOval(mid, Offset(bx[k] - br[k] * .7f - sr, by[k] + ry * .3f - sr * flat), Size(sr * 2, sr * 2 * flat))
-        }
-    }
-    // 3. 向陽的受光面：比雲頭小一點、往太陽和上方偏，背光那一側留下一彎中間階
-    for (k in 0 until m) {
-        val rx = br[k] * .82f; val ry = br[k] * flat * .78f
-        val cx = bx[k] + sunDir * br[k] * .16f; val cy = by[k] - br[k] * flat * .18f
-        drawOval(lit, Offset(cx - rx, cy - ry), Size(rx * 2, ry * 2))
-        if (small) {
-            val sr = br[k] * .36f
-            drawOval(lit, Offset(bx[k] - br[k] * .7f + sunDir * sr * .2f - sr, by[k] + br[k] * flat * .2f - sr * flat), Size(sr * 2, sr * 2 * flat))
-        }
-    }
+    path.close()
+    drawPath(path, Brush.verticalGradient(0f to top, .45f to midC, 1f to bottom, startY = base - up, endY = base + down))
+    drawPath(rimPath, rim, style = Stroke(.7f))
 }
 
 private fun DrawScope.ridge(st: BgState) {
@@ -881,11 +854,15 @@ private fun DrawScope.ridge(st: BgState) {
     val layers = YushanRidge.layers
     if (layers == null) { YushanRidge.request(); vignette(.2f); return }
     fun topOf(name: String) = layers.firstOrNull { it.name == name }?.topY ?: H * .6f
-    val lit = fc(cLit); val mid = fc(mixF(cLit, cShade, .35f)); val shade = fc(mixF(cLit, cShade, .8f))
-    val farLit = fc(mixF(cLit, haze, .3f)); val farMid = fc(mixF(mixF(cLit, cShade, .35f), haze, .35f)); val farShade = fc(mixF(mixF(cLit, cShade, .8f), haze, .4f))
-    val bx = sc.billowX; val br = sc.billowR; val by = sc.billowY
-    // 地平線上、遠山背後的積雲
-    billowDeck(topOf("遠山") - 4f, 7f, .5f, .004f, 3, false, true, t, par, sunDir, farLit, farMid, farShade, bx, br, by)
+    // 雲的顏色：上緣接近雲的受光色、往下融進山嵐色；遠的雲更淡、更接近山嵐
+    fun cloudCols(farK: Float): Array<Color> {
+        val top = mixF(cLit, haze, .25f + .4f * farK); val mid = mixF(mixF(cLit, cShade, .35f), haze, .45f + .3f * farK)
+        return arrayOf(fc(top, .9f - .25f * farK), fc(mid, .8f - .25f * farK), fc(haze, 0f), fc(cLit, .85f - .35f * farK))
+    }
+    val far = cloudCols(1f); val nearC = cloudCols(0f); val midC = cloudCols(.5f)
+    val mp = sc.mistPath; val rp = sc.mistRim
+    // 地平線上、遠山背後的一層薄雲
+    mistDeck(topOf("遠山") - 2f, 5f, 3f, .5f, .004f, 3, t, par, far[0], far[1], far[2], far[3], mp, rp)
     val tp = sc.ridgePaint
     tp.colorFilter = sc.ridgeTint.get(body, haze, light)
     val ox = par * W; val oy = parY * H * .35f
@@ -893,13 +870,13 @@ private fun DrawScope.ridge(st: BgState) {
         // 整層一起平移（視差），不變形
         p.dst.set(p.x0 + ox * p.k, p.y0 + oy * p.k, p.x0 + ox * p.k + p.w, p.y0 + oy * p.k + p.h)
         canvas.drawBitmap(p.image, null, p.dst, tp)
-        // 雲海夾在山層之間：風由左往右吹，越近的雲流得越快、雲頭越大
+        // 雲帶夾在山層之間：風由左往右吹，越近的雲流得越快、越厚；被前面的稜線擋住＝雲穿過山脈
         when (p.name) {
-            "遠山" -> billowDeck(p.topY + 6f, 9f, 1f, .006f, 4, true, true, t, par, sunDir, farLit, farMid, farShade, bx, br, by)
-            "主峰山體" -> billowDeck(topOf("右側稜") - 14f, 15f, 1.7f, .03f, 5, true, true, t, par, sunDir, lit, mid, shade, bx, br, by)
-            "右側稜" -> billowDeck(topOf("近稜（北峰→風口）") - 8f, 14f, 2.2f, .045f, 6, true, true, t, par, sunDir, lit, mid, shade, bx, br, by)
-            "近稜（北峰→風口）" -> billowDeck(topOf("近稜下方的稜") - 8f, 13f, 2.8f, .06f, 7, true, false, t, par, sunDir, lit, mid, shade, bx, br, by)
-            "近稜下方的稜" -> billowDeck(topOf("最前面的稜") - 8f, 12f, 3.3f, .08f, 9, false, false, t, par, sunDir, lit, mid, shade, bx, br, by)
+            "遠山" -> mistDeck(p.topY + 8f, 6f, 9f, 1f, .006f, 4, t, par, far[0], far[1], far[2], far[3], mp, rp)
+            "主峰山體" -> mistDeck(topOf("右側稜") - 6f, 13f, 16f, 1.7f, .03f, 5, t, par, midC[0], midC[1], midC[2], midC[3], mp, rp)
+            "右側稜" -> mistDeck(topOf("近稜（北峰→風口）") - 2f, 12f, 14f, 2.2f, .045f, 6, t, par, nearC[0], nearC[1], nearC[2], nearC[3], mp, rp)
+            "近稜（北峰→風口）" -> mistDeck(topOf("近稜下方的稜") - 2f, 10f, 12f, 2.8f, .06f, 7, t, par, nearC[0], nearC[1], nearC[2], nearC[3], mp, rp)
+            "近稜下方的稜" -> mistDeck(topOf("最前面的稜") - 2f, 8f, 8f, 3.3f, .08f, 9, t, par, nearC[0], nearC[1], nearC[2], nearC[3], mp, rp)
         }
         tp.colorFilter = sc.ridgeTint.get(body, haze, light)
     }
