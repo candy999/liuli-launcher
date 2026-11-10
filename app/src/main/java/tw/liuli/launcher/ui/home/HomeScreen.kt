@@ -489,10 +489,9 @@ fun HomeScreen(
         open(SheetSpec(
             "背景樣式", "上下移動即時預覽；確定套用，返回取消。",
             listOf(
-                // 隨機：每次冷啟動（背景從黑畫面載入）換一個樣式；選它時馬上抽一個新的
-                SheetItem("隨機", subtitle = "每次重新啟動時換一個樣式（不含純色、純黑）", selected = random, onFocus = { engine.applyStyle(before) }) {
-                    settings.updateBgStyle(BgStyle.RANDOM_ID); engine.applyStyle(settings.resolveBgStyle()); close()
-                },
+                // 隨機：每次冷啟動（背景從黑畫面載入）從勾選的樣式裡換一個；進去可以勾選範圍
+                SheetItem("隨機", subtitle = "每次重新啟動時，從勾選的 ${settings.randomPool.size} 個樣式裡換一個", selected = random,
+                    onFocus = { engine.applyStyle(before) }) { randomSheet(0) },
             ) + BgStyle.entries.map { st ->
                 SheetItem(st.label, subtitle = st.note, selected = !random && st == before, onFocus = { engine.applyStyle(st) }) {
                     settings.updateBgStyle(st.id); engine.applyStyle(st); close()
@@ -500,6 +499,27 @@ fun HomeScreen(
             },
             focusIndex = if (random) 0 else before.ordinal + 1,
             onCancel = { engine.applyStyle(before) },
+        ), gearReq)
+    }
+
+    // 隨機的範圍：第一列套用隨機，下面每個樣式按確定勾選／取消（至少留一個）
+    fun randomSheet(focusIndex: Int) {
+        val pool = settings.randomPool
+        open(SheetSpec(
+            "隨機",
+            "勾選要加入隨機的樣式，按確定切換。每次重新啟動時，從勾選的樣式裡換一個（不會連續兩次一樣）。",
+            listOf(
+                SheetItem("使用隨機", "從 ${pool.size} 個樣式裡抽", selected = settings.bgStyle == BgStyle.RANDOM_ID) {
+                    settings.updateBgStyle(BgStyle.RANDOM_ID); engine.applyStyle(settings.resolveBgStyle()); closeAll()
+                },
+            ) + BgStyle.entries.mapIndexed { i, st ->
+                SheetItem(st.label, if (st.id in pool) "加入隨機" else "", selected = st.id in pool) {
+                    if (!settings.toggleRandom(st.id)) toast("至少要留一個樣式")
+                    randomSheet(i + 1)
+                }
+            },
+            focusIndex = focusIndex,
+            key = "random", reopen = { randomSheet(0) },
         ), gearReq)
     }
 
@@ -895,7 +915,7 @@ fun HomeScreen(
         )
         open(SheetSpec(
             "時光",
-            "會隨時間變化的背景（例如山稜的光影與天色）用哪個時刻。實時：跟著現在的時間與太陽高度；固定：停在你選的模擬時刻。",
+            "會隨時間變化的背景（例如玉山星軌的光影與天色）用哪個時刻。實時：跟著現在的時間與太陽高度；固定：停在你選的模擬時刻。",
             listOf(
                 SheetItem("時間", liveDetail = { if (settings.timeFixed < 0) "實時" else "固定" },
                     onAdjust = { settings.updateTime(settings.timeFixed < 0) }) { settings.updateTime(settings.timeFixed < 0) },

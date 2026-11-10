@@ -39,7 +39,7 @@ enum class BgStyle(val id: String, val label: String, val note: String, val ambi
     CONTOUR("contour", "等高線", "焦點是山峰，等高線跟著流動"),
     WAVES("waves", "流線浪潮", "波峰朝焦點聚集"),
     DEEPSEA("deepsea", "深海", "寬而模糊、錯落重疊的耶穌光灑進深海，光影晃動、微粒緩緩飄落", ambient = true),
-    RIDGE("ridge", "山稜", "向量平塗的玉山，顏色跟著一天的時間走；山嵐在山谷間隨風流動，星軌整天慢慢轉", ambient = true),
+    RIDGE("ridge", "玉山星軌", "向量平塗的玉山，顏色跟著一天的時間走；山嵐在山谷間隨風流動，星軌整天慢慢轉", ambient = true),
     GALAXY("galaxy", "星空銀河", "斜跨的銀河與三層星星，漂移的星點時連時斷地織成星座網", ambient = true),
     BEAMS("beams", "光束", "粗細不一的垂直光束呼吸、流動，往焦點聚攏", ambient = true),
     TRAILS("trails", "光軌", "長曝光光軌，兩端交錯開合"),
@@ -53,9 +53,14 @@ enum class BgStyle(val id: String, val label: String, val note: String, val ambi
         /** 設定值「隨機」：每次冷啟動（背景從黑畫面重新載入）時抽一個樣式。 */
         const val RANDOM_ID = "random"
 
-        /** 隨機抽一個樣式：不抽純色／純黑，也不和 [except]（上一次抽到的）重複。 */
-        fun random(except: BgStyle? = null): BgStyle =
-            entries.filter { it != SOLID && it != BLACK && it != except }.random()
+        /** 隨機的預設範圍：純色、純黑以外全部。 */
+        val DEFAULT_POOL: Set<String> get() = entries.filter { it != SOLID && it != BLACK }.map { it.id }.toSet()
+
+        /** 從 [pool]（使用者勾選的樣式 id）隨機抽一個，不和 [except]（上一次抽到的）重複；只勾一個就是那一個。 */
+        fun random(except: BgStyle? = null, pool: Set<String> = DEFAULT_POOL): BgStyle {
+            val all = entries.filter { it.id in pool }.ifEmpty { entries.filter { it.id in DEFAULT_POOL } }
+            return all.filter { it != except }.ifEmpty { all }.random()
+        }
 
         fun byId(id: String?) = entries.firstOrNull { it.id == id } ?: when (id) {
             // 舊版樣式改名：翻牌方陣／雨窗 → 星空銀河、絲綢 → 深海、極光 → 光束、紙雕層疊 → 山稜

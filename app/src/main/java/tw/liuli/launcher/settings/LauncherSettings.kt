@@ -162,7 +162,20 @@ class LauncherSettings(context: Context) {
     fun resolveBgStyle(): BgStyle {
         if (bgStyle != BgStyle.RANDOM_ID) return BgStyle.byId(bgStyle)
         val last = prefs.getString("bg_random_last", null)?.let { BgStyle.byId(it) }
-        return BgStyle.random(last).also { prefs.edit().putString("bg_random_last", it.id).apply() }
+        return BgStyle.random(last, randomPool).also { prefs.edit().putString("bg_random_last", it.id).apply() }
+    }
+
+    /** 隨機的範圍：使用者勾選要加入隨機的樣式 id（預設純色、純黑以外全部）。 */
+    var randomPool by mutableStateOf(prefs.getStringSet("bg_random_pool", null)?.toSet() ?: BgStyle.DEFAULT_POOL)
+        private set
+
+    /** 勾選／取消一個樣式；至少要留一個，最後一個不能取消（回傳 false）。 */
+    fun toggleRandom(id: String): Boolean {
+        val next = if (id in randomPool) randomPool - id else randomPool + id
+        if (next.isEmpty()) return false
+        randomPool = next
+        prefs.edit().putStringSet("bg_random_pool", next).apply()
+        return true
     }
 
     fun updateBgFollow(on: Boolean) {
