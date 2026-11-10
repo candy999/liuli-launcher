@@ -164,8 +164,9 @@ fun HomeScreen(
     val geekSampler = remember { tw.liuli.launcher.geek.StatsSampler(context) }
     var geekStats by remember { mutableStateOf(tw.liuli.launcher.geek.Stats()) }
     var rocketResult by remember { mutableStateOf<tw.liuli.launcher.geek.RocketResult?>(null) }
-    LaunchedEffect(settings.geekMode, active) {
-        if (!settings.geekMode || !active) return@LaunchedEffect
+    LaunchedEffect(settings.geekMode, active, tw.liuli.launcher.AppForeground.resumed) {
+        // 琉璃在背景（看 YouTube、HDMI）時不取樣：不量網路延遲、不讀 CPU
+        if (!settings.geekMode || !active || !tw.liuli.launcher.AppForeground.resumed) return@LaunchedEffect
         while (true) {
             runCatching { geekSampler.sample() }.onSuccess { geekStats = it }
             delay(1000)
@@ -281,10 +282,14 @@ fun HomeScreen(
         if (minimal) delay(500) // 等介面收起一半再暗下來
         activity.window.attributes = activity.window.attributes.apply { screenBrightness = target }
     }
-    // 閒置自動進入簡潔模式
-    LaunchedEffect(settings.minimalIdle, active) {
+    // 閒置自動進入簡潔模式：只在琉璃在前景、停在主畫面時計時。
+    // 看 YouTube、切到 HDMI 時琉璃在背景，不能在背景算時間；回到前景（例如按 Home）從頭開始計時
+    val foreground = tw.liuli.launcher.AppForeground.resumed
+    LaunchedEffect(tw.liuli.launcher.AppForeground.resumeCount) { lastKeyAt[0] = android.os.SystemClock.uptimeMillis() }
+    LaunchedEffect(settings.minimalIdle, active, foreground) {
         val idle = settings.minimalIdle
-        if (idle <= 0 || !active) return@LaunchedEffect
+        if (idle <= 0 || !active || !foreground) return@LaunchedEffect
+        lastKeyAt[0] = android.os.SystemClock.uptimeMillis()
         while (true) {
             delay(1000)
             val quiet = android.os.SystemClock.uptimeMillis() - lastKeyAt[0]

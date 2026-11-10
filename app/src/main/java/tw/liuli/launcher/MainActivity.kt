@@ -112,11 +112,14 @@ class MainActivity : ComponentActivity() {
     // 螢幕小時鐘：琉璃在前景時隱藏（主畫面本來就有大時鐘），離開就出現
     override fun onResume() {
         super.onResume()
+        AppForeground.resumed = true
+        AppForeground.resumeCount++
         tw.liuli.launcher.keys.ClockOverlay.liuliResumed = true
         tw.liuli.launcher.keys.ClockOverlay.refresh()
     }
 
     override fun onPause() {
+        AppForeground.resumed = false
         tw.liuli.launcher.keys.ClockOverlay.liuliResumed = false
         tw.liuli.launcher.keys.ClockOverlay.refresh()
         super.onPause()
