@@ -1022,7 +1022,9 @@ internal fun DrawScope.ridgeFog(st: BgState, dimK: Float) {
             }
         }
     }
-    fogBand(H - 6f, 40f, 5.2f, .1f, 1, t, par, fogNear, .32f)
+    // 最前面的稜自己前面：貼著它的山頂一道（不然它上半部前面沒有任何霧，會空出一條），再一道貼著畫面底部、流得最快
+    topOf("最前面的稜").let { y -> fogBand(y + 22f, 48f, 4.4f, .09f, 2, t, par, fogNear, .42f) }
+    fogBand(H - 8f, 56f, 5.2f, .1f, 1, t, par, fogNear, .36f)
 }
 
 // ───────────── 10. 光束（粗細不一的垂直光束，呼吸、流動，往焦點聚攏） ─────────────
