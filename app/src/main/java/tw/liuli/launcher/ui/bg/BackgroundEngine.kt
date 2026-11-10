@@ -50,6 +50,13 @@ enum class BgStyle(val id: String, val label: String, val note: String, val ambi
     BLACK("black", "純黑（OLED）", "幾乎全黑，焦點下方一抹主色");
 
     companion object {
+        /** 設定值「隨機」：每次冷啟動（背景從黑畫面重新載入）時抽一個樣式。 */
+        const val RANDOM_ID = "random"
+
+        /** 隨機抽一個樣式：不抽純色／純黑，也不和 [except]（上一次抽到的）重複。 */
+        fun random(except: BgStyle? = null): BgStyle =
+            entries.filter { it != SOLID && it != BLACK && it != except }.random()
+
         fun byId(id: String?) = entries.firstOrNull { it.id == id } ?: when (id) {
             // 舊版樣式改名：翻牌方陣／雨窗 → 星空銀河、絲綢 → 深海、極光 → 光束、紙雕層疊 → 山稜
             "flip", "rain" -> GALAXY

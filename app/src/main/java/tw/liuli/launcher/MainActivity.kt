@@ -155,7 +155,7 @@ fun LiuliApp(lensing: Boolean, homePresses: Int, externalAction: Pair<Int, Strin
     val home by rememberHomeContext(Cities.byId(settings.cityId))
     val engine = remember {
         BackgroundEngine().apply {
-            applyStyle(BgStyle.byId(settings.bgStyle))
+            applyStyle(settings.resolveBgStyle())
             applyFollow(settings.bgFollow, settings.bgHue, settings.bgSat)
             applyBlur(settings.bgBlur)
         }

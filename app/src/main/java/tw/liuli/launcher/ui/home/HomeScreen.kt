@@ -442,6 +442,10 @@ fun HomeScreen(
         // adb shell am start -n tw.liuli.launcher/.MainActivity --es tw.liuli.launcher.ACTION style:contour
         val styleId = externalAction.second?.removePrefix("style:")
         if (externalAction.first > 0 && externalAction.second?.startsWith("style:") == true && styleId != null) {
+            if (styleId == BgStyle.RANDOM_ID) {
+                settings.updateBgStyle(BgStyle.RANDOM_ID); engine.applyStyle(settings.resolveBgStyle())
+                return@LaunchedEffect
+            }
             val st = BgStyle.byId(styleId)
             settings.updateBgStyle(st.id); engine.applyStyle(st)
             return@LaunchedEffect
@@ -456,14 +460,20 @@ fun HomeScreen(
     // ───────────── 設定 ─────────────
     fun styleSheet() {
         val before = engine.style
+        val random = settings.bgStyle == BgStyle.RANDOM_ID
         open(SheetSpec(
             "背景樣式", "上下移動即時預覽；確定套用，返回取消。",
-            BgStyle.entries.map { st ->
-                SheetItem(st.label, subtitle = st.note, selected = st == before, onFocus = { engine.applyStyle(st) }) {
+            listOf(
+                // 隨機：每次冷啟動（背景從黑畫面載入）換一個樣式；選它時馬上抽一個新的
+                SheetItem("隨機", subtitle = "每次重新啟動時換一個樣式（不含純色、純黑）", selected = random, onFocus = { engine.applyStyle(before) }) {
+                    settings.updateBgStyle(BgStyle.RANDOM_ID); engine.applyStyle(settings.resolveBgStyle()); close()
+                },
+            ) + BgStyle.entries.map { st ->
+                SheetItem(st.label, subtitle = st.note, selected = !random && st == before, onFocus = { engine.applyStyle(st) }) {
                     settings.updateBgStyle(st.id); engine.applyStyle(st); close()
                 }
             },
-            focusIndex = before.ordinal,
+            focusIndex = if (random) 0 else before.ordinal + 1,
             onCancel = { engine.applyStyle(before) },
         ), gearReq)
     }
@@ -852,7 +862,7 @@ fun HomeScreen(
         open(SheetSpec(
             "外觀", "背景、顏色、質感、邊框與簡潔模式。",
             listOf(
-                SheetItem("背景樣式", liveDetail = { engine.style.label }) { styleSheet() },
+                SheetItem("背景樣式", liveDetail = { if (settings.bgStyle == BgStyle.RANDOM_ID) "隨機・" + engine.style.label else engine.style.label }) { styleSheet() },
                 SheetItem("背景色系", liveDetail = { if (settings.bgFollow) "自動（跟著焦點）" else "固定・色相 ${settings.bgHue.roundToInt()}°" }) { colorSheet() },
                 SheetItem("背景質感", liveDetail = {
                     listOfNotNull(

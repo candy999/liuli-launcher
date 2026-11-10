@@ -1,6 +1,7 @@
 package tw.liuli.launcher.settings
 
 import android.content.Context
+import tw.liuli.launcher.ui.bg.BgStyle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -11,7 +12,8 @@ class LauncherSettings(context: Context) {
     private val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
 
     /** 背景樣式 id（見 BgStyle）。 */
-    var bgStyle by mutableStateOf(prefs.getString("bg_style", "waves") ?: "waves")
+    /** 背景樣式的 id，或 [BgStyle.RANDOM_ID]（預設：每次冷啟動隨機換一個）。 */
+    var bgStyle by mutableStateOf(prefs.getString("bg_style", BgStyle.RANDOM_ID) ?: BgStyle.RANDOM_ID)
         private set
 
     /** 背景色系是否跟著焦點項目變化。 */
@@ -119,6 +121,13 @@ class LauncherSettings(context: Context) {
     fun updateBgStyle(id: String) {
         bgStyle = id
         prefs.edit().putString("bg_style", id).apply()
+    }
+
+    /** 這次要畫的樣式：設定是「隨機」就抽一個（不和上次抽到的重複，並記住這次的）。 */
+    fun resolveBgStyle(): BgStyle {
+        if (bgStyle != BgStyle.RANDOM_ID) return BgStyle.byId(bgStyle)
+        val last = prefs.getString("bg_random_last", null)?.let { BgStyle.byId(it) }
+        return BgStyle.random(last).also { prefs.edit().putString("bg_random_last", it.id).apply() }
     }
 
     fun updateBgFollow(on: Boolean) {
