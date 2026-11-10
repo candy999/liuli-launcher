@@ -31,6 +31,10 @@ import kotlin.math.floor
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.ColorMatrix
+import androidx.compose.ui.graphics.layer.drawLayer
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawscope.DrawScope
@@ -246,26 +250,24 @@ internal fun BgStyle.prepareAssets(): Boolean = when (this) {
 private const val REVEAL_MS = 1400
 
 /**
- * 山稜的山（動態解析度＋快取）：
- * - 焦點移動（視差）、色系或時段變化時：跟著引擎目前的解析度除數重畫（至少 ÷3），移動中一樣順
- * - 停下來 0.35 秒：以原生解析度重畫一次，之後內容不變，GPU 每格只把這張快取圖層貼上去
+ * 玉山星軌的山（動態解析度＋快取）：
+ * - 快取裡只有通道圖（受光／遠近／覆蓋），顏色（時段、App 色系、壓暗）在合成時用顏色矩陣套上——顏色怎麼變都不用重畫
+ * - 只有山的視差位置變了才重畫：焦點移動中用引擎目前的解析度（至少 ÷3），停下來 0.35 秒以原生解析度重畫一次，之後每格只貼快取
+ * - 簡潔模式的彈跳中山的視差固定（RidgePar），快取不動、一直是原生解析度
  */
 @Composable
 private fun RidgeMountains(engine: BackgroundEngine, fullW: Int, fullH: Int, alpha: () -> Float) {
     var key by remember { mutableIntStateOf(0) }
     var div by remember { mutableIntStateOf(2) }
     LaunchedEffect(engine) {
-        val last = FloatArray(6) { Float.NaN }
-        val eps = floatArrayOf(.0004f, .0004f, .4f, .004f, .01f, .5f)
+        var lx = Float.NaN; var ly = Float.NaN
         var stillSince = 0L
         while (true) {
             withFrameNanos { now ->
-                val st = engine.st
-                val cur = floatArrayOf(st.fx, st.fy, st.h, st.s, engine.dim, kotlin.math.floor(TimeOfDay.minutes() / 2f))
-                var moved = false
-                for (i in cur.indices) if (!(kotlin.math.abs(cur[i] - last[i]) <= eps[i])) { moved = true; break }
+                RidgePar.update(engine.st, engine.bouncing)
+                val moved = !(kotlin.math.abs(RidgePar.fx - lx) <= .0004f) || !(kotlin.math.abs(RidgePar.fy - ly) <= .0004f)
                 if (moved) {
-                    System.arraycopy(cur, 0, last, 0, cur.size)
+                    lx = RidgePar.fx; ly = RidgePar.fy
                     stillSince = now
                     div = maxOf(3, engine.renderDiv)   // 移動中看不出細節，至少 ÷3，GPU 留給焦點動畫
                     key++
@@ -285,20 +287,30 @@ private fun RidgeMountains(engine: BackgroundEngine, fullW: Int, fullH: Int, alp
                 layout(w, h) { p.place(0, 0) }
             }
             .graphicsLayer {
-                compositingStrategy = CompositingStrategy.Offscreen
                 transformOrigin = TransformOrigin(0f, 0f)
                 scaleX = d.toFloat()
                 scaleY = d.toFloat()
                 this.alpha = alpha()
+            }
+            .drawWithCache {
+                // 快取的圖層：只在 key（視差、解析度）變了才重新記錄
+                @Suppress("UNUSED_VARIABLE") val k = key
+                val layer = obtainGraphicsLayer()
+                // 離屏：內容畫成一張貼圖留著，之後只換顏色濾鏡、不重畫裡面的山
+                layer.compositingStrategy = androidx.compose.ui.graphics.layer.CompositingStrategy.Offscreen
+                layer.record {
+                    val sx = fullW / d.toFloat() / BackgroundEngine.LOGICAL_W
+                    val sy = fullH / d.toFloat() / BackgroundEngine.LOGICAL_H
+                    scale(sx, sy, pivot = Offset.Zero) { ridgeMountains() }
+                }
+                onDrawBehind {
+                    // 每格只換顏色矩陣、貼一次快取（時段、App 色系、壓暗都在這裡）
+                    @Suppress("UNUSED_VARIABLE") val f = engine.frame
+                    layer.colorFilter = ColorFilter.colorMatrix(ColorMatrix(ridgeTintMatrix(engine.st, engine.dim)))
+                    drawLayer(layer)
+                }
             },
-    ) {
-        Canvas(Modifier.fillMaxSize()) {
-            @Suppress("UNUSED_VARIABLE") val k = key // 只有視差、色系、時段、解析度變了才重畫
-            val sx = fullW / d.toFloat() / BackgroundEngine.LOGICAL_W
-            val sy = fullH / d.toFloat() / BackgroundEngine.LOGICAL_H
-            scale(sx, sy, pivot = Offset.Zero) { ridgeMountains(engine.st, engine.dim) }
-        }
-    }
+    )
 }
 
 /**

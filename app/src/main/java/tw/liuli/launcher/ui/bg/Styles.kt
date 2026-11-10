@@ -766,6 +766,17 @@ private fun DrawScope.fogBand(
     paint.shader = null; paint.colorFilter = null
 }
 
+/**
+ * 山（與擋霧的剪影）用的視差位置：平常就是焦點位置；簡潔模式彈跳中固定在進入時的位置——
+ * 背景焦點一直慢慢漂移時山不跟著動，山的快取就不用重畫、一直是原生解析度（霧與星軌照常流動）。
+ * 只在畫面執行緒讀寫。
+ */
+internal object RidgePar {
+    var fx = .5f
+    var fy = .5f
+    fun update(st: BgState, frozen: Boolean) { if (!frozen) { fx = st.fx; fy = st.fy } }
+}
+
 /** 山稜每一幀共用的顏色（時段色票＋暗面帶一點 App 色系）。[dimK]＝設定面板開著時的壓暗。 */
 private class RidgeCols(st: BgState, dimK: Float = 0f) {
     val sun: TimeOfDay.Sun
@@ -939,16 +950,15 @@ internal fun DrawScope.ridgeTrails(st: BgState, dimK: Float) {
  * 原生解析度的山：七層硬體點陣圖，每層切直條、只畫到一定被前面蓋住的地方。
  * 呼叫端把結果快取成一張圖層：焦點不動時不重畫（每格只貼一次），焦點移動時跟著動態解析度降低。
  */
-internal fun DrawScope.ridgeMountains(st: BgState, dimK: Float) {
+internal fun DrawScope.ridgeMountains() {
     val layers = YushanRidge.layers ?: return
     val sc = scratch.get()!!
-    val cols = RidgeCols(st, dimK)
-    val par = -(st.fx - .5f)
-    val parY = -(st.fy - .5f)
+    val par = -(RidgePar.fx - .5f)
+    val parY = -(RidgePar.fy - .5f)
     val canvas = drawContext.canvas.nativeCanvas
     val tp = sc.ridgePaint
     tp.alpha = 255
-    tp.colorFilter = sc.ridgeTint.get(cols.body, cols.haze, cols.light)
+    tp.colorFilter = null   // 只畫通道圖（R＝受光、G＝遠近、A＝覆蓋）；顏色由呼叫端在合成時套用（ridgeTintMatrix）
     val ox = par * W; val oy = parY * H * .35f
     val src = sc.tileSrc; val dst = sc.ridgeRect
     val n = YushanRidge.NATIVE
@@ -968,6 +978,21 @@ internal fun DrawScope.ridgeMountains(st: BgState, dimK: Float) {
 }
 
 /**
+ * 山的上色矩陣（4×5，給合成時的顏色濾鏡用）：時段色票、暗面的 App 色系、設定面板的壓暗。
+ * 放在合成這一步，顏色怎麼變都不用重畫山的快取。
+ */
+internal fun ridgeTintMatrix(st: BgState, dimK: Float): FloatArray {
+    val c = RidgeCols(st, dimK)
+    val b = c.body; val h = c.haze; val l = c.light
+    return floatArrayOf(
+        l[0], h[0] - b[0], 0f, 0f, 255f * b[0],
+        l[1], h[1] - b[1], 0f, 0f, 255f * b[1],
+        l[2], h[2] - b[2], 0f, 0f, 255f * b[2],
+        0f, 0f, 0f, 1f, 0f,
+    )
+}
+
+/**
  * 山與山之間的霧（低解析度圖層，畫在原生解析度的山之上）：照前後順序一層一層來——
  * 先畫這道山谷的霧，畫到前面一層山時，用那一層的剪影把它後面的霧擦掉（DST_OUT）。
  * 每一層用自己的視差位移，遮擋關係跟真的把霧夾在山與山之間畫一模一樣；霧本來就柔，低解析度剛好。
@@ -981,7 +1006,8 @@ internal fun DrawScope.ridgeFog(st: BgState, dimK: Float) {
     val parY = -(st.fy - .5f)
     fun topOf(name: String) = layers.firstOrNull { it.name == name }?.topY ?: H * .6f
     val fogNear = fc(mixF(cols.haze, cols.cLit, .5f)); val fogFar = fc(mixF(cols.haze, cols.cLit, .3f))
-    val ox = par * W; val oy = parY * H * .35f
+    // 擋霧的剪影要跟山完全對齊：用山的視差位置
+    val ox = -(RidgePar.fx - .5f) * W; val oy = -(RidgePar.fy - .5f) * H * .35f
     val canvas = drawContext.canvas.nativeCanvas
     val erase = sc.erasePaint
     val src = sc.tileSrc; val dst = sc.ridgeRect

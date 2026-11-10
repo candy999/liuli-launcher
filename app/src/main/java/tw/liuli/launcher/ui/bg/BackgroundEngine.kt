@@ -331,6 +331,9 @@ class BackgroundEngine {
 
     fun stopBounce() { bounce = false }
 
+    /** 簡潔模式的彈跳中（背景焦點一直慢慢漂移）。 */
+    val bouncing: Boolean get() = bounce
+
     /** 每格推進彈跳點（在背景迴圈裡呼叫）。 */
     private fun stepBounce(t: Long) {
         if (!bounce) { lastBounceT = 0L; return }
