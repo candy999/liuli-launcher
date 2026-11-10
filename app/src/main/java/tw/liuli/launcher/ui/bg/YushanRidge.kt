@@ -244,7 +244,7 @@ internal object YushanRidge {
             val dd = d * d * (3 - 2 * d)
             // 霧帶的中線與厚度也慢慢起伏
             val c = .5f + .1f * kotlin.math.sin(2 * u + ph[4]) + .05f * kotlin.math.sin(4 * u + ph[5])
-            val sig = .12f + .16f * dd
+            val sig = .16f + .18f * dd   // 霧帶厚一點，相鄰兩道之間不會空出一條
             for (j in 0 until FOG_H) {
                 val y = (j + .5f) / FOG_H
                 val g = kotlin.math.exp(-((y - c) * (y - c)) / (2 * sig * sig))

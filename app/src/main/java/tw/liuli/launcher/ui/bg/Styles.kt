@@ -1015,7 +1015,11 @@ internal fun DrawScope.ridgeFog(st: BgState, dimK: Float) {
                 band(y + 14f, 30f, 2.9f, .048f, 0, fogNear, 0.48f)
             }
             "近稜（北峰→風口）" -> band(topOf("近稜下方的稜") + 8f, 50f, 3f, .06f, 2, fogNear, 0.66f)
-            "近稜下方的稜" -> band(topOf("最前面的稜") + 10f, 52f, 3.6f, .078f, 0, fogNear, 0.58f)
+            "近稜下方的稜" -> {
+                // 貼著這一層自己的山頂一道（左邊沒有最前面的稜，靠這道補滿），再一道在最前面的稜後面
+                band(p.topY + 26f, 44f, 3.2f, .07f, 1, fogNear, 0.5f)
+                band(topOf("最前面的稜") + 10f, 52f, 3.6f, .078f, 0, fogNear, 0.58f)
+            }
         }
     }
     fogBand(H - 6f, 40f, 5.2f, .1f, 1, t, par, fogNear, .32f)
