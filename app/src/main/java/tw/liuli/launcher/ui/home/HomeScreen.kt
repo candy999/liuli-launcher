@@ -863,6 +863,29 @@ fun HomeScreen(
         ), gearReq)
     }
 
+    // 時光：會隨時間變化的背景（山稜的光影色調…）用實時，或固定在一個模擬時刻
+    fun hm(m: Int) = "%02d:%02d".format(m / 60, m % 60)
+    fun timeSummary() = if (settings.timeFixed < 0) "實時" else "固定・" + hm(settings.timeFixed)
+    fun timeSheet() {
+        val presets = listOf(
+            "深夜・星軌" to 60, "黎明藍調" to 5 * 60 + 40, "日出" to 6 * 60 + 20, "早晨" to 8 * 60,
+            "正午" to 12 * 60, "午後" to 15 * 60, "夕陽" to 17 * 60, "暮色" to 17 * 60 + 40,
+        )
+        open(SheetSpec(
+            "時光",
+            "會隨時間變化的背景（例如山稜的光影與天色）用哪個時刻。實時：跟著現在的時間與太陽高度；固定：停在你選的模擬時刻。",
+            listOf(
+                SheetItem("時間", liveDetail = { if (settings.timeFixed < 0) "實時" else "固定" },
+                    onAdjust = { settings.updateTime(settings.timeFixed < 0) }) { settings.updateTime(settings.timeFixed < 0) },
+                SheetItem("模擬時刻", subtitle = "左右鍵每次 10 分鐘（按住連續調整）", liveDetail = { hm(settings.timeSim) + if (settings.timeFixed < 0) "（未使用）" else "" },
+                    onAdjust = { d -> settings.updateTime(true, settings.timeSim + d * 10) }) { settings.updateTime(true) },
+            ) + presets.map { (name, m) ->
+                SheetItem(name, hm(m), selected = settings.timeFixed == m) { settings.updateTime(true, m); close() }
+            },
+            key = "time", reopen = { timeSheet() },
+        ), gearReq)
+    }
+
     // 外觀：和畫面呈現有關的設定都收在這裡
     fun appearanceSheet() {
         open(SheetSpec(
@@ -880,6 +903,7 @@ fun HomeScreen(
                     if (settings.frameThickness == 0 && settings.frameFeather == 0 && settings.frameRadius == 0) "關"
                     else "粗 ${settings.frameThickness}・圓 ${settings.frameRadius}・漸 ${settings.frameFeather}"
                 }) { frameSheet() },
+                SheetItem("時光", liveDetail = { timeSummary() }) { timeSheet() },
                 SheetItem("簡潔模式", liveDetail = { minimalSummary() }) { minimalSheet() },
             ),
             key = "appearance", reopen = { appearanceSheet() },

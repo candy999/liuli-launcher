@@ -25,6 +25,23 @@ class LauncherSettings(context: Context) {
     var bgSat by mutableStateOf(prefs.getFloat("bg_sat", 0.5f))
         private set
 
+    /** 時光（全域）：-1＝實時；0～1439＝固定在這個模擬時刻（分鐘）。會隨時間變化的背景都用它。 */
+    var timeFixed by mutableStateOf(prefs.getInt("time_fixed", -1))
+        private set
+    /** 上次選的模擬時刻：切回「固定」時沿用。 */
+    var timeSim by mutableStateOf(prefs.getInt("time_sim", 17 * 60))
+        private set
+
+    fun updateTime(fixed: Boolean, minutes: Int = timeSim) {
+        val m = ((minutes % 1440) + 1440) % 1440
+        timeSim = m
+        timeFixed = if (fixed) m else -1
+        prefs.edit().putInt("time_fixed", timeFixed).putInt("time_sim", m).apply()
+        tw.liuli.launcher.ui.bg.TimeOfDay.fixedMinutes = timeFixed.toFloat()
+    }
+
+    init { tw.liuli.launcher.ui.bg.TimeOfDay.fixedMinutes = timeFixed.toFloat() }
+
     /** 閒置幾秒後自動進入簡潔模式（0＝不自動）。預設 1 分鐘。 */
     var minimalIdle by mutableStateOf(prefs.getInt("minimal_idle", 60))
         private set

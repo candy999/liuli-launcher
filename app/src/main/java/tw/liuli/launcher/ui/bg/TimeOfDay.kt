@@ -82,15 +82,31 @@ internal object TimeOfDay {
     private var cachedAt = 0L
     private var cachedSun: Sun? = null
     private var cachedPal: Pal? = null
-    /** 測試用：設成 0～1439 時固定用這個時刻（分鐘），負數＝現在。 */
+    /** 測試用（adb tod:HH:MM）：設成 0～1439 時固定用這個時刻（分鐘），負數＝不覆寫。優先於 [fixedMinutes]。 */
     @Volatile var overrideMinutes = -1f
+    /**
+     * 全域的「時光」參數（設定 → 外觀 → 時光）：負數＝實時（跟著現在的時間）；0～1439＝固定在這個時刻（分鐘）。
+     * 所有會隨時間變化的背景都從 [minutes]／[now] 取時間，不要自己讀時鐘。
+     */
+    @Volatile var fixedMinutes = -1f
+    private var cachedM = -1f
+
+    /** 背景要用的「現在幾點」（分鐘，0～1440）：實時或使用者固定的模擬時刻。 */
+    fun minutes(): Float {
+        if (overrideMinutes >= 0) return overrideMinutes
+        if (fixedMinutes >= 0) return fixedMinutes
+        val cal = Calendar.getInstance()
+        return cal.get(Calendar.HOUR_OF_DAY) * 60f + cal.get(Calendar.MINUTE) + cal.get(Calendar.SECOND) / 60f
+    }
+
+    val isLive: Boolean get() = overrideMinutes < 0 && fixedMinutes < 0
 
     fun now(nowMs: Long): Pair<Sun, Pal> {
-        if (cachedPal == null || nowMs - cachedAt > 10_000 || overrideMinutes >= 0) {
-            val cal = Calendar.getInstance()
-            val m = if (overrideMinutes >= 0) overrideMinutes else cal.get(Calendar.HOUR_OF_DAY) * 60f + cal.get(Calendar.MINUTE) + cal.get(Calendar.SECOND) / 60f
-            val sun = sunAt(cal.get(Calendar.DAY_OF_YEAR), m)
-            cachedSun = sun; cachedPal = palAt(sun.elev, sun.pm); cachedAt = nowMs
+        val pinned = !isLive
+        if (cachedPal == null || (!pinned && nowMs - cachedAt > 10_000) || (pinned && minutes() != cachedM)) {
+            val m = minutes()
+            val sun = sunAt(Calendar.getInstance().get(Calendar.DAY_OF_YEAR), m)
+            cachedSun = sun; cachedPal = palAt(sun.elev, sun.pm); cachedAt = nowMs; cachedM = m
         }
         return cachedSun!! to cachedPal!!
     }

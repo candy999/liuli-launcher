@@ -825,7 +825,16 @@ private fun DrawScope.ridge(st: BgState) {
     val (sun, pal) = TimeOfDay.now(System.currentTimeMillis())
     val D = .92f
     fun dim(a: FloatArray) = FloatArray(3) { a[it] * D }
-    val body = dim(pal.body); val haze = dim(pal.haze)
+    val body0 = dim(pal.body); val haze = dim(pal.haze)
+    // 山的暗面帶一點目前焦點 App 的色系（換焦點時跟著主色慢慢轉）：同亮度的主色混進來，亮面、天空不動
+    val body = run {
+        val ac = hsl(st.h, (st.s * 1.15f).coerceAtMost(.7f), .45f)
+        val la = .3f * ac.red + .59f * ac.green + .11f * ac.blue
+        val lb = .3f * body0[0] + .59f * body0[1] + .11f * body0[2]
+        val k = (.2f + .08f * ((pal.stars - .5f) / .5f).coerceIn(0f, 1f)) * (st.s / .5f).coerceIn(.4f, 1.2f)
+        val ar = floatArrayOf(ac.red, ac.green, ac.blue)
+        FloatArray(3) { body0[it] + ((ar[it] * lb / la.coerceAtLeast(.01f)).coerceIn(0f, 1f) - body0[it]) * k }
+    }
     val midTone = mixF(body, haze, .55f)
     val litC = dim(pal.lit)
     val light = FloatArray(3) { (litC[it] - midTone[it]) * pal.litK }
