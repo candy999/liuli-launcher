@@ -216,7 +216,7 @@ internal object YushanRidge {
 
     // ── 山嵐（高斯霧）的貼圖：很小的 ALPHA_8 圖，畫的時候用畫筆顏色上色、雙線性放大＝高斯模糊般的柔邊 ──
     private const val FOG_W = 160
-    private const val FOG_H = 36
+    private const val FOG_H = 48
     private val fogTex = arrayOfNulls<Bitmap>(3)
 
     /**
@@ -242,16 +242,15 @@ internal object YushanRidge {
             val d = (.5f + .26f * kotlin.math.sin(u + ph[0]) + .18f * kotlin.math.sin(2 * u + ph[1]) + .12f * kotlin.math.sin(3 * u + ph[2]) + .07f * kotlin.math.sin(5 * u + ph[3]))
                 .coerceIn(0f, 1f)
             val dd = d * d * (3 - 2 * d)
-            // 霧帶的中線與厚度也慢慢起伏
-            // 中線上下起伏大一點（不是一條條水平的直帶），厚度也跟著濃淡變
-            val c = .5f + .16f * kotlin.math.sin(2 * u + ph[4]) + .07f * kotlin.math.sin(5 * u + ph[5])
-            val sig = .24f + .18f * dd   // 寬一點：每道霧把自己的高度填滿，疊在一起不會出現一條條暗縫
+            // 中線與厚度慢慢起伏（幅度收小，霧不會貼到貼圖的上下緣）
+            val c = .5f + .09f * kotlin.math.sin(2 * u + ph[4]) + .04f * kotlin.math.sin(5 * u + ph[5])
+            val sig = .2f + .1f * dd
             for (j in 0 until FOG_H) {
                 val y = (j + .5f) / FOG_H
                 val g = kotlin.math.exp(-((y - c) * (y - c)) / (2 * sig * sig))
-                // 上下兩端一定要淡到 0（放大後不會切出一條邊）
-                val edge = (kotlin.math.min(y, 1f - y) / .12f).coerceIn(0f, 1f)
-                px[j * FOG_W + i] = (255f * dd * g * edge).toInt().coerceIn(0, 255).toByte()
+                // 平滑的窗（sin 的 1.5 次方）：從中間柔和地淡到上下兩端的 0，不會被硬切出一條直線
+                val win = kotlin.math.sin(Math.PI.toFloat() * y).let { it * kotlin.math.sqrt(it) }
+                px[j * FOG_W + i] = (255f * dd * g * win).toInt().coerceIn(0, 255).toByte()
             }
         }
         val argb = IntArray(FOG_W * FOG_H) { ((px[it].toInt() and 0xFF) shl 24) or 0xFFFFFF }
