@@ -160,6 +160,18 @@ fun HomeScreen(
     val todayReq = remember { FocusRequester() }
     val weatherReq = remember { FocusRequester() }
     val gearReq = remember { FocusRequester() }
+    // ── 技術宅模式：每秒取樣系統狀態（只在技術宅模式、主畫面看得到時） ──
+    val geekSampler = remember { tw.liuli.launcher.geek.StatsSampler(context) }
+    var geekStats by remember { mutableStateOf(tw.liuli.launcher.geek.Stats()) }
+    var rocketFreed by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(settings.geekMode, active) {
+        if (!settings.geekMode || !active) return@LaunchedEffect
+        while (true) {
+            runCatching { geekSampler.sample() }.onSuccess { geekStats = it }
+            delay(1000)
+        }
+    }
+    DisposableEffect(Unit) { onDispose { geekSampler.close() } }
     val tileCenters = remember { HashMap<String, Float>() }
     // 常用列每個 App 的 FocusRequester：關抽屜、關面板時焦點回到上次停留的那一個
     val dockRequesters = remember { HashMap<String, FocusRequester>() }
@@ -964,6 +976,9 @@ fun HomeScreen(
             "設定", "琉璃 Launcher ${BuildConfigInfo.versionName(context)}",
             listOf(
                 SheetItem("外觀", liveDetail = { engine.style.label + if (settings.bgFollow) "・自動色彩" else "・固定色" }) { appearanceSheet() },
+                SheetItem("主畫面模式", subtitle = "技術宅模式：齒輪下方多一顆火箭（清理背景程式），常用列下方顯示 CPU、GPU、記憶體、網路與系統狀態",
+                    liveDetail = { if (settings.geekMode) "技術宅模式" else "正常人模式" },
+                    onAdjust = { settings.updateGeekMode(!settings.geekMode) }) { settings.updateGeekMode(!settings.geekMode) },
                 SheetItem("地點", liveDetail = { Cities.byId(settings.cityId).name + "・天氣" }) { citySheet() },
                 SheetItem("顯示／隱藏 App", liveDetail = { if (hidden.isEmpty()) "" else "已隱藏 ${hidden.size} 個" }) { visibilitySheet(0) },
                 SheetItem("螢幕小時鐘", liveDetail = { if (settings.clockOn) "${tw.liuli.launcher.keys.ClockOverlay.CORNERS[settings.clockCorner.coerceIn(0, 3)]}・${settings.clockSize} sp" else "關" }) { clockSheet() },
@@ -1251,13 +1266,22 @@ fun HomeScreen(
                 ) {
                     NetworkButton(home.network, null, { SystemActions.networkSettings(context) })
                     GearButton(gearReq, ::openSettings)
+                    if (settings.geekMode) RocketButton(null, onLaunch = {
+                        val bytes = tw.liuli.launcher.geek.Rocket.launch(context)
+                        rocketFreed = "已清理・釋放 ${bytes / 1048576} MB"
+                        delay(5000)
+                        rocketFreed = null
+                    })
                 }
+
+                // 技術宅模式：常用列下方的系統儀表列（不拿焦點，只是看的）
+                if (settings.geekMode) GeekDashboard(geekStats, rocketFreed, Modifier.padding(start = 48.dp, end = 48.dp, top = 436.dp))
 
                 // 抽屜提示
                 Column(
                     Modifier
                         .align(Alignment.BottomCenter)
-                        .padding(bottom = 16.dp)
+                        .padding(bottom = if (settings.geekMode) 2.dp else 16.dp)
                         .graphicsLayer { alpha = if (dockHasFocus && !drawerOpen) 1f else 0f },
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {

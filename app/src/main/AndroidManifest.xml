@@ -12,6 +12,9 @@
     <!-- 天氣（Open-Meteo）、線上網頁桌布、下載桌布 zip -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- 技術宅模式：Wi-Fi 訊號與連線速率、火箭（結束背景程序） -->
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.KILL_BACKGROUND_PROCESSES" />
     <!-- 長按選單的「解除安裝」 -->
     <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
     <!-- 設定 → 關於琉璃 → 手動安裝新的正式版（只在使用者按下時；系統會再確認一次） -->

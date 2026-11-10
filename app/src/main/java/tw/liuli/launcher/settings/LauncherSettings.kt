@@ -25,6 +25,15 @@ class LauncherSettings(context: Context) {
     var bgSat by mutableStateOf(prefs.getFloat("bg_sat", 0.5f))
         private set
 
+    /** 主畫面模式：false＝正常人模式；true＝技術宅模式（火箭＋系統儀表列）。 */
+    var geekMode by mutableStateOf(prefs.getBoolean("geek_mode", false))
+        private set
+
+    fun updateGeekMode(on: Boolean) {
+        geekMode = on
+        prefs.edit().putBoolean("geek_mode", on).apply()
+    }
+
     /** 時光（全域）：-1＝實時；0～1439＝固定在這個模擬時刻（分鐘）。會隨時間變化的背景都用它。 */
     var timeFixed by mutableStateOf(prefs.getInt("time_fixed", -1))
         private set

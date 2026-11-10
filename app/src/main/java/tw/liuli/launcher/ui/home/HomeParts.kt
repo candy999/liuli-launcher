@@ -250,6 +250,7 @@ fun RoundIconButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     tint: Color = Color.White.copy(alpha = 0.85f),
+    iconModifier: Modifier = Modifier,
 ) {
     val focus = rememberFocusAnim()
     Box(
@@ -264,7 +265,7 @@ fun RoundIconButton(
             },
         contentAlignment = Alignment.Center,
     ) {
-        LIcon(icon, 22.dp, if (focus.focused) Ink.OnLight else tint)
+        LIcon(icon, 22.dp, if (focus.focused) Ink.OnLight else tint, iconModifier)
     }
 }
 
