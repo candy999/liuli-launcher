@@ -46,6 +46,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import tw.liuli.launcher.ui.glass.liquidGlass
+import tw.liuli.launcher.ui.theme.SLIDE_THRESHOLD
 import tw.liuli.launcher.ui.theme.GText
 import tw.liuli.launcher.ui.theme.Ink
 import tw.liuli.launcher.ui.theme.SheetExit
@@ -105,7 +106,8 @@ fun GlassSheet(
     onFocusIndex: (Int) -> Unit = {},
 ) {
     val first = remember { FocusRequester() }
-    val slide = remember { Animatable(1f) }
+    // 收尾門檻要很小（0.05%，不到半個像素）：預設 1% 對 440dp 的抽屜是 9 個像素，彈簧最後會「喀」地跳到終點
+    val slide = remember { Animatable(1f, visibilityThreshold = SLIDE_THRESHOLD) }
     // 打開後 0.5 秒內整塊面板維持一張離屏圖（滑入、主畫面淡出、背景暫停都結束才回到一般繪製）；收起時整段都是。
     // 收起沿用同一個元件（不重新組合整個清單——弱電視上要 100ms 以上，收起動畫會被吃掉）
     var asLayer by remember { androidx.compose.runtime.mutableStateOf(true) }

@@ -87,3 +87,6 @@ fun GText(
         overflow = TextOverflow.Ellipsis,
     )
 }
+
+/** 面板／抽屜滑動的收尾門檻（滑動比例）：剩不到 0.05% 才結束，大面積的東西最後不會跳一下。 */
+const val SLIDE_THRESHOLD = 0.0005f

@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.aspectRatio
+import tw.liuli.launcher.ui.theme.SLIDE_THRESHOLD
 import tw.liuli.launcher.ui.theme.Dimens
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -373,7 +374,8 @@ fun AppDrawer(
     onLaunch: (AppEntry) -> Unit,
     onLongClick: (AppEntry, FocusRequester) -> Unit,
 ) {
-    val slide = remember { Animatable(1f) }
+    // 收尾門檻要很小（0.05%，不到半個像素）：預設 1% 對 440dp 的抽屜是 9 個像素，彈簧最後會「喀」地跳到終點
+    val slide = remember { Animatable(1f, visibilityThreshold = SLIDE_THRESHOLD) }
     val density = androidx.compose.ui.platform.LocalDensity.current
     val drawerHeightPx = with(density) { 440.dp.toPx() }
     // 往下多延伸一段（平常在螢幕外）：滑入的彈簧會衝過頭一點，底邊抬起時露出的仍是抽屜，不是一條縫

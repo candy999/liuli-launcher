@@ -37,6 +37,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import tw.liuli.launcher.ui.glass.liquidGlass
+import tw.liuli.launcher.ui.theme.SLIDE_THRESHOLD
 import tw.liuli.launcher.ui.theme.GText
 import tw.liuli.launcher.ui.theme.Ink
 import tw.liuli.launcher.ui.theme.SheetSpring
@@ -60,7 +61,8 @@ fun ColorPickerPanel(
     onCancel: () -> Unit,
 ) {
     val focus = remember { FocusRequester() }
-    val slide = remember { Animatable(1f) }
+    // 收尾門檻要很小（0.05%，不到半個像素）：預設 1% 對 440dp 的抽屜是 9 個像素，彈簧最後會「喀」地跳到終點
+    val slide = remember { Animatable(1f, visibilityThreshold = SLIDE_THRESHOLD) }
     LaunchedEffect(Unit) {
         runCatching { focus.requestFocus() }
         slide.animateTo(0f, SheetSpring)
