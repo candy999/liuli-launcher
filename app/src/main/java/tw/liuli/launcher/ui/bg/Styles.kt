@@ -1002,29 +1002,30 @@ internal fun DrawScope.ridgeFog(st: BgState, dimK: Float) {
             }
         }
         fun band(cy: Float, h: Float, spd: Float, dk: Float, v: Int, c: Color, a: Float) { fogBand(cy, h, spd, dk, v, t, par, c, a); anyFog = true }
+        // 每道山谷一道寬霧＋一道窄一點的，彼此上下重疊（不留縫，不會出現一條條明暗相間的橫紋）
         when (p.name) {
-            "遠山" -> band(p.topY + 18f, 30f, 1.1f, .007f, 1, fogFar, 0.9f)
+            "遠山" -> band(p.topY + 18f, 38f, 1.1f, .007f, 1, fogFar, 0.8f)
             "主峰山體" -> {
                 val y = topOf("右側稜")
-                band(y + 2f, 40f, 1.6f, .028f, 0, fogNear, 0.71f)
-                band(y + 10f, 26f, 2.3f, .032f, 2, fogNear, 0.51f)
+                band(y + 4f, 58f, 1.6f, .028f, 0, fogNear, 0.6f)
+                band(y + 16f, 40f, 2.3f, .032f, 2, fogNear, 0.42f)
             }
             "右側稜" -> {
                 val y = topOf("近稜（北峰→風口）")
-                band(y + 4f, 44f, 2.1f, .042f, 1, fogNear, 0.68f)
-                band(y + 14f, 30f, 2.9f, .048f, 0, fogNear, 0.48f)
+                band(y + 6f, 62f, 2.1f, .042f, 1, fogNear, 0.58f)
+                band(y + 20f, 42f, 2.9f, .048f, 0, fogNear, 0.4f)
             }
-            "近稜（北峰→風口）" -> band(topOf("近稜下方的稜") + 8f, 50f, 3f, .06f, 2, fogNear, 0.66f)
+            "近稜（北峰→風口）" -> band(topOf("近稜下方的稜") + 10f, 66f, 3f, .06f, 2, fogNear, 0.56f)
             "近稜下方的稜" -> {
                 // 貼著這一層自己的山頂一道（左邊沒有最前面的稜，靠這道補滿），再一道在最前面的稜後面
-                band(p.topY + 26f, 44f, 3.2f, .07f, 1, fogNear, 0.5f)
-                band(topOf("最前面的稜") + 10f, 52f, 3.6f, .078f, 0, fogNear, 0.58f)
+                band(p.topY + 22f, 64f, 3.2f, .07f, 1, fogNear, 0.46f)
+                band(topOf("最前面的稜") + 12f, 62f, 3.6f, .078f, 0, fogNear, 0.48f)
             }
         }
     }
-    // 最前面的稜自己前面：貼著它的山頂一道（不然它上半部前面沒有任何霧，會空出一條），再一道貼著畫面底部、流得最快
-    topOf("最前面的稜").let { y -> fogBand(y + 22f, 48f, 4.4f, .09f, 2, t, par, fogNear, .42f) }
-    fogBand(H - 8f, 56f, 5.2f, .1f, 1, t, par, fogNear, .36f)
+    // 最前面的稜自己前面：貼著它的山頂一道，再一道貼著畫面底部、流得最快
+    topOf("最前面的稜").let { y -> fogBand(y + 24f, 62f, 4.4f, .09f, 2, t, par, fogNear, .38f) }
+    fogBand(H - 10f, 70f, 5.2f, .1f, 1, t, par, fogNear, .34f)
 }
 
 // ───────────── 10. 光束（粗細不一的垂直光束，呼吸、流動，往焦點聚攏） ─────────────
