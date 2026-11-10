@@ -752,7 +752,7 @@ private fun DrawScope.billowDeck(
     base: Float, r0: Float, spd: Float, dk: Float, seed: Int, fill: Boolean, small: Boolean,
     t: Float, par: Float, sunDir: Float, lit: Color, mid: Color, shade: Color, bx: FloatArray, br: FloatArray, by: FloatArray,
 ) {
-    val span = W + 4 * r0; val sp = r0 * 1.15f
+    val span = W + 4 * r0; val sp = r0 * 1.05f
     val n = minOf(bx.size, kotlin.math.ceil(span / sp).toInt())
     val px = par * W * dk
     var m = 0
@@ -762,32 +762,45 @@ private fun DrawScope.billowDeck(
         val x = ph - wrap * span - 2 * r0 + px
         val id = i + wrap * n
         val d = cloudDens(x - px - t * spd, seed.toFloat(), t)
-        if (d < .04f) continue
-        val r = r0 * (.55f + .45f * hash01(id, seed)) * (.3f + .7f * d)
-        bx[m] = x; br[m] = r; by[m] = base - r * (.2f + .35f * hash01(id, seed + 7)) - 5f * d
+        if (d < .06f) continue
+        val r = r0 * (.6f + .4f * hash01(id, seed)) * (.35f + .65f * d)
+        // 依 x 排好（繞回來的那幾顆會亂序）：插入排序，數量很少
+        var j = m
+        while (j > 0 && bx[j - 1] > x) { bx[j] = bx[j - 1]; br[j] = br[j - 1]; by[j] = by[j - 1]; j-- }
+        bx[j] = x; br[j] = r; by[j] = base - r * (.12f + .2f * hash01(id, seed + 7)) - 3f * d
         m++
     }
-    val bottom = if (fill) H + 2f else base + r0 * .55f
-    // 1. 雲海本體（雲頭下方）與下半部的陰影
-    for (j in 0 until m) drawRect(mid, Offset(bx[j] - br[j] * 1.05f, by[j]), Size(br[j] * 2.1f, bottom - by[j]))
-    if (fill) for (j in 0 until m) {
-        val sy = base + r0 * .6f
-        if (sy < bottom) drawRect(shade, Offset(bx[j] - br[j] * 1.05f, sy), Size(br[j] * 2.1f, bottom - sy))
+    if (m == 0) return
+    // 雲海的厚度：夾在山層之間的雲帶較厚，下半截被前面的稜線擋住；地平線上的積雲很薄
+    val thick = if (fill) r0 * 2.2f else r0 * .55f
+    val flat = .62f   // 雲頭壓扁：雲海是平頂、緩緩起伏的，不是一顆顆圓球
+    // 1. 連在一起的雲頭合成一條雲帶（平底），不再每顆雲頭下面各一根柱子
+    var s = 0
+    while (s < m) {
+        var e = s
+        while (e + 1 < m && bx[e + 1] - br[e + 1] < bx[e] + br[e] * 1.1f) e++
+        val x0 = bx[s] - br[s] * .9f; val x1 = bx[e] + br[e] * .9f
+        drawRect(mid, Offset(x0, base - r0 * .2f), Size(x1 - x0, thick + r0 * .2f))
+        if (fill) drawRect(shade, Offset(x0, base + thick * .5f), Size(x1 - x0, thick * .5f))
+        s = e + 1
     }
-    // 2. 雲頭（中間階）
-    for (j in 0 until m) {
-        drawCircle(mid, br[j], Offset(bx[j], by[j]))
+    // 2. 雲頭（中間階，壓扁的橢圓）
+    for (k in 0 until m) {
+        val rx = br[k]; val ry = br[k] * flat
+        drawOval(mid, Offset(bx[k] - rx, by[k] - ry), Size(rx * 2, ry * 2))
         if (small) {
-            drawCircle(mid, br[j] * .45f, Offset(bx[j] - br[j] * .65f, by[j] + br[j] * .2f))
-            drawCircle(mid, br[j] * .42f, Offset(bx[j] + br[j] * .62f, by[j] + br[j] * .22f))
+            val sr = br[k] * .45f
+            drawOval(mid, Offset(bx[k] - br[k] * .7f - sr, by[k] + ry * .3f - sr * flat), Size(sr * 2, sr * 2 * flat))
         }
     }
-    // 3. 向陽的受光面：比雲頭小一點、往太陽和上方偏，留下背光那一側一彎中間階
-    for (j in 0 until m) {
-        drawCircle(lit, br[j] * .8f, Offset(bx[j] + sunDir * br[j] * .18f, by[j] - br[j] * .16f))
+    // 3. 向陽的受光面：比雲頭小一點、往太陽和上方偏，背光那一側留下一彎中間階
+    for (k in 0 until m) {
+        val rx = br[k] * .82f; val ry = br[k] * flat * .78f
+        val cx = bx[k] + sunDir * br[k] * .16f; val cy = by[k] - br[k] * flat * .18f
+        drawOval(lit, Offset(cx - rx, cy - ry), Size(rx * 2, ry * 2))
         if (small) {
-            drawCircle(lit, br[j] * .34f, Offset(bx[j] - br[j] * .65f + sunDir * br[j] * .08f, by[j] + br[j] * .12f))
-            drawCircle(lit, br[j] * .32f, Offset(bx[j] + br[j] * .62f + sunDir * br[j] * .08f, by[j] + br[j] * .14f))
+            val sr = br[k] * .36f
+            drawOval(lit, Offset(bx[k] - br[k] * .7f + sunDir * sr * .2f - sr, by[k] + br[k] * flat * .2f - sr * flat), Size(sr * 2, sr * 2 * flat))
         }
     }
 }
