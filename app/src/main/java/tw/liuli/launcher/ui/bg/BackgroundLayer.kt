@@ -6,6 +6,10 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.remember
 import androidx.compose.animation.core.Animatable
@@ -137,9 +141,17 @@ fun BackgroundLayer(engine: BackgroundEngine, blurred: () -> Float, modifier: Mo
         if (ridgeNative) {
             val sx = fullW / BackgroundEngine.LOGICAL_W
             val sy = fullH / BackgroundEngine.LOGICAL_H
+            // 星軌：原生解析度，每格旋轉（一張貼圖）
             Canvas(Modifier.fillMaxSize().graphicsLayer { alpha = reveal.value }) {
-                @Suppress("UNUSED_VARIABLE") val f = engine.frame // 訂閱：引擎每推進一幀就重畫（只是記錄十幾個貼圖指令）
-                scale(sx, sy, pivot = Offset.Zero) { ridgeFront(engine.st, engine.dim) }
+                @Suppress("UNUSED_VARIABLE") val f = engine.frame
+                scale(sx, sy, pivot = Offset.Zero) { ridgeTrails(engine.st, engine.dim) }
+            }
+            // 山：動態解析度＋快取（焦點移動時降解析度、停下來畫一次原生解析度，之後每格只貼這張圖）
+            RidgeMountains(engine, fullW, fullH) { reveal.value }
+            // 霧：原生解析度，每格流動（每道霧一個矩形，用前景剪影挖掉被山擋住的部分）
+            Canvas(Modifier.fillMaxSize().graphicsLayer { alpha = reveal.value }) {
+                @Suppress("UNUSED_VARIABLE") val f = engine.frame
+                scale(sx, sy, pivot = Offset.Zero) { ridgeFog(engine.st, engine.dim) }
             }
         }
         // 星空銀河的星點：以原生解析度另外畫在背景之上。不會動的星點畫成快取圖層、每格只移動位置（視差）；
@@ -174,6 +186,62 @@ fun BackgroundLayer(engine: BackgroundEngine, blurred: () -> Float, modifier: Mo
 }
 
 private const val REVEAL_MS = 1400
+
+/**
+ * 山稜的山（動態解析度＋快取）：
+ * - 焦點移動（視差）、色系或時段變化時：跟著引擎目前的解析度除數重畫（至少 ÷2），移動中一樣順
+ * - 停下來 0.35 秒：以原生解析度重畫一次，之後內容不變，GPU 每格只把這張快取圖層貼上去
+ */
+@Composable
+private fun RidgeMountains(engine: BackgroundEngine, fullW: Int, fullH: Int, alpha: () -> Float) {
+    var key by remember { mutableIntStateOf(0) }
+    var div by remember { mutableIntStateOf(2) }
+    LaunchedEffect(engine) {
+        val last = FloatArray(6) { Float.NaN }
+        val eps = floatArrayOf(.0004f, .0004f, .4f, .004f, .01f, .5f)
+        var stillSince = 0L
+        while (true) {
+            withFrameNanos { now ->
+                val st = engine.st
+                val cur = floatArrayOf(st.fx, st.fy, st.h, st.s, engine.dim, kotlin.math.floor(TimeOfDay.minutes() / 2f))
+                var moved = false
+                for (i in cur.indices) if (!(kotlin.math.abs(cur[i] - last[i]) <= eps[i])) { moved = true; break }
+                if (moved) {
+                    System.arraycopy(cur, 0, last, 0, cur.size)
+                    stillSince = now
+                    div = maxOf(2, engine.renderDiv)
+                    key++
+                } else if (div != 1 && now - stillSince > 350_000_000L) {
+                    div = 1; key++
+                }
+            }
+        }
+    }
+    val d = div
+    val w = (fullW + d - 1) / d
+    val h = (fullH + d - 1) / d
+    Box(
+        Modifier
+            .layout { measurable, _ ->
+                val p = measurable.measure(Constraints.fixed(w, h))
+                layout(w, h) { p.place(0, 0) }
+            }
+            .graphicsLayer {
+                compositingStrategy = CompositingStrategy.Offscreen
+                transformOrigin = TransformOrigin(0f, 0f)
+                scaleX = d.toFloat()
+                scaleY = d.toFloat()
+                this.alpha = alpha()
+            },
+    ) {
+        Canvas(Modifier.fillMaxSize()) {
+            @Suppress("UNUSED_VARIABLE") val k = key // 只有視差、色系、時段、解析度變了才重畫
+            val sx = fullW / d.toFloat() / BackgroundEngine.LOGICAL_W
+            val sy = fullH / d.toFloat() / BackgroundEngine.LOGICAL_H
+            scale(sx, sy, pivot = Offset.Zero) { ridgeMountains(engine.st, engine.dim) }
+        }
+    }
+}
 
 /**
  * 不透明面板（App 抽屜）蓋住的那一塊背景不畫：分成上方、左邊、右邊三個矩形各畫一次背景（矩形裁切由 GPU 直接限制範圍，

@@ -739,16 +739,27 @@ private class RidgeTint {
  * 山嵐（高斯霧）：一條低解析的霧帶貼圖（ALPHA_8，畫的時候用畫筆顏色上色），雙線性放大＝自然的高斯模糊，
  * 水平方向可以無縫接續；每一條由左往右慢慢流，畫兩三張接起來。[cy]＝霧帶中線、[h]＝霧帶高度、[spd]＝風速、[dk]＝視差。
  */
-private fun DrawScope.fogBand(cy: Float, h: Float, spd: Float, dk: Float, variant: Int, t: Float, par: Float, color: Color, alpha: Float) {
+private fun DrawScope.fogBand(
+    cy: Float, h: Float, spd: Float, dk: Float, variant: Int, t: Float, par: Float, color: Color, alpha: Float,
+    /** 原生解析度畫的時候：這道霧後面那一層的前景剪影，挖掉被前面的山擋住的部分；[mdx]、[mdy]＝剪影目前的視差位移。 */
+    mask: android.graphics.Bitmap? = null, mdx: Float = 0f, mdy: Float = 0f,
+) {
     if (alpha <= .005f) return
     // 一個矩形＋水平重複的貼圖著色器：貼圖本身首尾相接，取樣時自然接起來，沒有拼接的接縫
     val tw = W * (1.5f + .25f * variant)
     val off = ((t * spd + par * W * dk + variant * 97f) % tw + tw) % tw
     val paint = scratch.get()!!.fogPaint
-    paint.shader = YushanRidge.fogShader(variant, off, cy - h / 2f, tw, h)
-    paint.color = color.copy(alpha = alpha.coerceIn(0f, 1f)).toArgb()
+    var sh = YushanRidge.fogShader(variant, off, cy - h / 2f, tw, h)
+    if (mask != null) {
+        val ms = android.graphics.BitmapShader(mask, android.graphics.Shader.TileMode.CLAMP, android.graphics.Shader.TileMode.CLAMP)
+        ms.setLocalMatrix(android.graphics.Matrix().apply { setTranslate(mdx, mdy) })
+        sh = android.graphics.ComposeShader(sh, ms, android.graphics.PorterDuff.Mode.DST_OUT)
+    }
+    paint.shader = sh
+    paint.colorFilter = android.graphics.PorterDuffColorFilter(color.copy(alpha = 1f).toArgb(), android.graphics.PorterDuff.Mode.SRC_IN)
+    paint.alpha = (alpha.coerceIn(0f, 1f) * color.alpha * 255f).toInt()
     drawContext.canvas.nativeCanvas.drawRect(0f, cy - h / 2f, W, cy + h / 2f, paint)
-    paint.shader = null
+    paint.shader = null; paint.colorFilter = null
 }
 
 /** 山稜每一幀共用的顏色（時段色票＋暗面帶一點 App 色系）。[dimK]＝設定面板開著時的壓暗。 */
@@ -794,7 +805,7 @@ private fun DrawScope.ridge(st: BgState, skipFront: Boolean = false) {
     drawRect(Brush.verticalGradient(0f to fc(dim(pal.skyHor)), .15f to fc(haze), 1f to fc(haze), startY = H * .3f, endY = H), Offset(0f, H * .3f), Size(W, H * .7f))
     val canvas = drawContext.canvas.nativeCanvas
     // 深夜：同心圓星軌，繞著山後面的南天極慢慢轉（先畫好的一張圖，每格只旋轉）
-    run {
+    if (!(skipFront && YushanRidge.nativeReady)) run {
         val tr = YushanRidge.trails
         if (tr == null) YushanRidge.requestTrails()
         else {
@@ -839,7 +850,7 @@ private fun DrawScope.ridge(st: BgState, skipFront: Boolean = false) {
     val fogNear = fc(mixF(haze, cLit, .5f)); val fogFar = fc(mixF(haze, cLit, .3f))
     // 地平線、遠山背後一層很淡的霧
     fogBand(topOf("遠山") + 4f, 22f, .6f, .004f, 0, t, par, fogFar, 0.77f)
-    // 主畫面：山與霧另外以原生解析度畫（ridgeFront），這張小圖只負責天空
+    // 主畫面：山與霧另外畫（星軌、山、霧），這張小圖只負責天空
     if (skipFront && YushanRidge.nativeReady) return
     val tp = sc.ridgePaint
     tp.colorFilter = sc.ridgeTint.get(body, haze, light)
@@ -882,28 +893,47 @@ private fun DrawScope.ridge(st: BgState, skipFront: Boolean = false) {
     vignette(.16f + .1f * nightK)
 }
 
+/** 原生解析度的星軌（畫在低解析度天空之上、山之下）：高解析度的貼圖每格繞南天極旋轉，只畫天空範圍。 */
+internal fun DrawScope.ridgeTrails(st: BgState, dimK: Float) {
+    val tr = YushanRidge.trailsHi
+    if (tr == null) { YushanRidge.requestTrails(); return }
+    val sc = scratch.get()!!
+    val nightK = RidgeCols(st).nightK
+    val a = (.07f + .88f * nightK) * (1f - dimK)   // 星軌全天都在轉，白天只剩淡淡的痕跡
+    if (a < .01f) return
+    val par = -(st.fx - .5f)
+    val canvas = drawContext.canvas.nativeCanvas
+    val tp = sc.ridgePaint
+    tp.colorFilter = null; tp.alpha = (a * 255).toInt()
+    canvas.save()
+    canvas.clipRect(0f, 0f, W, YushanRidge.skyBottom)
+    canvas.translate(par * W * .004f, 0f)
+    canvas.rotate(st.at * YushanRidge.TRAIL_DEG_PER_SEC, YushanRidge.POLE_X, YushanRidge.POLE_Y)
+    YushanRidge.trailRect(sc.ridgeRect)
+    canvas.drawBitmap(tr, null, sc.ridgeRect, tp)
+    canvas.restore()
+    tp.alpha = 255
+}
+
 /**
- * 山稜的前景：七層山（原生解析度的硬體點陣圖，每層切直條、只畫到一定被前面蓋住的地方）＋夾在山與山之間的霧。
- * 由背景層另外用一張原生解析度的畫布呼叫（邏輯座標 480×270，呼叫端負責縮放）；天空、星軌還是畫在低解析度的小圖裡。
+ * 原生解析度的山：七層硬體點陣圖，每層切直條、只畫到一定被前面蓋住的地方。
+ * 呼叫端把結果快取成一張圖層：焦點不動時不重畫（每格只貼一次），焦點移動時跟著動態解析度降低。
  */
-internal fun DrawScope.ridgeFront(st: BgState, dimK: Float) {
+internal fun DrawScope.ridgeMountains(st: BgState, dimK: Float) {
     val layers = YushanRidge.layers ?: return
     val sc = scratch.get()!!
     val cols = RidgeCols(st, dimK)
-    val t = st.at
     val par = -(st.fx - .5f)
     val parY = -(st.fy - .5f)
-    fun topOf(name: String) = layers.firstOrNull { it.name == name }?.topY ?: H * .6f
-    val fogNear = fc(mixF(cols.haze, cols.cLit, .5f)); val fogFar = fc(mixF(cols.haze, cols.cLit, .3f))
     val canvas = drawContext.canvas.nativeCanvas
     val tp = sc.ridgePaint
     tp.alpha = 255
+    tp.colorFilter = sc.ridgeTint.get(cols.body, cols.haze, cols.light)
     val ox = par * W; val oy = parY * H * .35f
     val src = sc.tileSrc; val dst = sc.ridgeRect
     val n = YushanRidge.NATIVE
     for (p in layers) {
         val img = p.native ?: return
-        tp.colorFilter = sc.ridgeTint.get(cols.body, cols.haze, cols.light)
         val lx = p.x0 + ox * p.k; val ly = p.y0 + oy * p.k
         val tiles = p.tileBottom
         for (ti in tiles.indices) {
@@ -914,30 +944,51 @@ internal fun DrawScope.ridgeFront(st: BgState, dimK: Float) {
             dst.set(lx + src.left / n, ly, lx + src.right / n, ly + src.bottom / n)
             canvas.drawBitmap(img, src, dst, tp)
         }
+    }
+}
+
+/**
+ * 原生解析度的霧（畫在山的快取圖層之上）：每道霧用「它後面那一層的前景剪影」挖掉被前面的山擋住的部分，
+ * 看起來就像夾在山與山之間、從山谷裡漫出來。
+ */
+internal fun DrawScope.ridgeFog(st: BgState, dimK: Float) {
+    val layers = YushanRidge.layers ?: return
+    val cols = RidgeCols(st, dimK)
+    val t = st.at
+    val par = -(st.fx - .5f)
+    val parY = -(st.fy - .5f)
+    fun topOf(name: String) = layers.firstOrNull { it.name == name }?.topY ?: H * .6f
+    val fogNear = fc(mixF(cols.haze, cols.cLit, .5f)); val fogFar = fc(mixF(cols.haze, cols.cLit, .3f))
+    val ox = par * W; val oy = parY * H * .35f
+    for ((i, p) in layers.withIndex()) {
+        val front = layers.getOrNull(i + 1) ?: break
+        val m = p.frontMask
+        val mdx = ox * front.k; val mdy = oy * front.k
+        fun band(cy: Float, h: Float, spd: Float, dk: Float, v: Int, c: Color, a: Float) = fogBand(cy, h, spd, dk, v, t, par, c, a, m, mdx, mdy)
         when (p.name) {
             "遠山" -> {
-                fogBand(p.topY + 16f, 26f, .9f, .006f, 1, t, par, fogFar, 0.85f)
-                fogBand(p.topY + 24f, 18f, 1.4f, .008f, 2, t, par, fogFar, 0.59f)
+                band(p.topY + 16f, 26f, .9f, .006f, 1, fogFar, 0.85f)
+                band(p.topY + 24f, 18f, 1.4f, .008f, 2, fogFar, 0.59f)
             }
             "主峰山體" -> {
                 val y = topOf("右側稜")
-                fogBand(y + 2f, 40f, 1.6f, .028f, 0, t, par, fogNear, 0.71f)
-                fogBand(y + 10f, 26f, 2.3f, .032f, 2, t, par, fogNear, 0.51f)
+                band(y + 2f, 40f, 1.6f, .028f, 0, fogNear, 0.71f)
+                band(y + 10f, 26f, 2.3f, .032f, 2, fogNear, 0.51f)
             }
             "右側稜" -> {
                 val y = topOf("近稜（北峰→風口）")
-                fogBand(y + 4f, 44f, 2.1f, .042f, 1, t, par, fogNear, 0.68f)
-                fogBand(y + 14f, 30f, 2.9f, .048f, 0, t, par, fogNear, 0.48f)
+                band(y + 4f, 44f, 2.1f, .042f, 1, fogNear, 0.68f)
+                band(y + 14f, 30f, 2.9f, .048f, 0, fogNear, 0.48f)
             }
             "近稜（北峰→風口）" -> {
                 val y = topOf("近稜下方的稜")
-                fogBand(y + 6f, 48f, 2.7f, .058f, 2, t, par, fogNear, 0.61f)
-                fogBand(y + 16f, 30f, 3.6f, .064f, 1, t, par, fogNear, 0.44f)
+                band(y + 6f, 48f, 2.7f, .058f, 2, fogNear, 0.61f)
+                band(y + 16f, 30f, 3.6f, .064f, 1, fogNear, 0.44f)
             }
             "近稜下方的稜" -> {
                 val y = topOf("最前面的稜")
-                fogBand(y + 8f, 52f, 3.3f, .075f, 0, t, par, fogNear, 0.54f)
-                fogBand(y + 20f, 34f, 4.3f, .082f, 2, t, par, fogNear, 0.37f)
+                band(y + 8f, 52f, 3.3f, .075f, 0, fogNear, 0.54f)
+                band(y + 20f, 34f, 4.3f, .082f, 2, fogNear, 0.37f)
             }
         }
     }

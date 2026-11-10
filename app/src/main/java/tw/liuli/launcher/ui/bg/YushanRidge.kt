@@ -47,6 +47,8 @@ internal object YushanRidge {
         var tileBottom = FloatArray(0)
         /** 原生解析度的山（硬體點陣圖，GPU 直接取樣；只畫到 [tileBottom] 的最低點為止，下面一定被蓋住）。 */
         @Volatile var native: Bitmap? = null
+        /** 這一層「前面所有山」的剪影（ALPHA_8，邏輯解析度 480×270）：夾在這一層後面的霧用它挖掉被前景擋住的部分。 */
+        var frontMask: Bitmap? = null
     }
 
     /** 原生解析度的山準備好了沒（Compose 狀態：好了之後背景層改成「小圖畫天空＋原生解析度畫山」）。 */
@@ -74,7 +76,9 @@ internal object YushanRidge {
     fun release() {
         nativeReady = false
         layers?.forEach { it.native?.recycle(); it.native = null }
-        layers = null; trails = null
+        layers?.forEach { it.frontMask = null }
+        trailsHi?.recycle()
+        layers = null; trails = null; trailsHi = null
         started.set(false); trailsStarted.set(false)
     }
 
@@ -195,6 +199,10 @@ internal object YushanRidge {
                     (m + vm - L.y0).coerceIn(0f, L.h)
                 }
             }
+            if (li < n - 1) {
+                val a8 = ByteArray(W * H) { if (union[it]) -1 else 0 }
+                L.frontMask = Bitmap.createBitmap(W, H, Bitmap.Config.ALPHA_8).apply { copyPixelsFromBuffer(java.nio.ByteBuffer.wrap(a8)) }
+            }
             val o = opaque[li]
             for (i in union.indices) if (o[i]) union[i] = true
         }
@@ -243,9 +251,8 @@ internal object YushanRidge {
                 px[j * FOG_W + i] = (255f * dd * g * edge).toInt().coerceIn(0, 255).toByte()
             }
         }
-        return Bitmap.createBitmap(FOG_W, FOG_H, Bitmap.Config.ALPHA_8).apply {
-            copyPixelsFromBuffer(java.nio.ByteBuffer.wrap(px))
-        }
+        val argb = IntArray(FOG_W * FOG_H) { ((px[it].toInt() and 0xFF) shl 24) or 0xFFFFFF }
+        return Bitmap.createBitmap(argb, FOG_W, FOG_H, Bitmap.Config.ARGB_8888)
     }
 
     // ── 星軌：面向南方，星星繞著地平線下的南天極轉。先畫成一張同心圓弧的圖，每格只繞著天極慢慢旋轉 ──
@@ -256,11 +263,18 @@ internal object YushanRidge {
     private const val TRAIL_SCALE = 1.2f
     @Volatile var trails: Bitmap? = null
         private set
+    /** 高解析度的星軌（硬體點陣圖，每個邏輯單位 [TRAIL_HI] 像素）：主畫面以原生解析度旋轉著畫，線條清楚。 */
+    @Volatile var trailsHi: Bitmap? = null
+        private set
+    const val TRAIL_HI = 3f
     private val trailsStarted = AtomicBoolean(false)
 
     fun requestTrails() {
         if (!trailsStarted.compareAndSet(false, true)) return
-        Thread({ trails = runCatching { buildTrails() }.getOrNull() }, "liuli-trails").apply { priority = Thread.MIN_PRIORITY; start() }
+        Thread({
+            trails = runCatching { buildTrails(TRAIL_SCALE) }.getOrNull()
+            trailsHi = runCatching { buildTrails(TRAIL_HI).let { b -> b.copy(Bitmap.Config.HARDWARE, false)?.also { b.recycle() } ?: b } }.getOrNull()
+        }, "liuli-trails").apply { priority = Thread.MIN_PRIORITY; start() }
     }
 
     private fun h(n: Int, s: Int): Float {
@@ -269,11 +283,11 @@ internal object YushanRidge {
         return ((x xor (x ushr 16)) and 0xFFFFFF) / 16777216f
     }
 
-    private fun buildTrails(): Bitmap {
-        val size = ceil(TRAIL_R * 2 * TRAIL_SCALE).toInt()
+    private fun buildTrails(scale: Float): Bitmap {
+        val size = ceil(TRAIL_R * 2 * scale).toInt()
         val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
         val cv = Canvas(bmp)
-        cv.scale(TRAIL_SCALE, TRAIL_SCALE); cv.translate(TRAIL_R, TRAIL_R)
+        cv.scale(scale, scale); cv.translate(TRAIL_R, TRAIL_R)
         val p = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.BUTT }
         val oval = RectF()
         var r = 90f; var ring = 0
