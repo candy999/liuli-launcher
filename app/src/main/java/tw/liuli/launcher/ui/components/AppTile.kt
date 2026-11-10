@@ -25,6 +25,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
@@ -52,6 +53,8 @@ fun AppTile(
     onLongClick: (FocusRequester) -> Unit,
     /** 插在焦點處理之前的修飾（例如 bgTarget）。 */
     extra: Modifier = Modifier,
+    /** 出場淡入的透明度（0～1，在繪製階段讀取）。 */
+    reveal: () -> Float = { 1f },
 ) {
     val own = remember { FocusRequester() }
     val req = requester ?: own
@@ -64,6 +67,13 @@ fun AppTile(
                 .fillMaxWidth()
                 .aspectRatio(16f / 9f)
                 .focusScale(focus, 1.10f)
+                // 出場淡入：放在「已經放大過」的這一層裡、整塊先畫好再整體淡入——
+                // 不會透出底下的深色底（每個繪圖各自半透明會像破圖），放大的部分也不會被裁成直角
+                .graphicsLayer {
+                    val a = reveal()
+                    alpha = a
+                    compositingStrategy = if (a < .999f) CompositingStrategy.Offscreen else CompositingStrategy.Auto
+                }
                 .graphicsLayer {
                     shadowElevation = 8.dp.toPx() * focus.value()
                     shape = tileShape
@@ -112,7 +122,7 @@ fun AppTile(
             Spacer(Modifier.height(10.dp))
             GText(
                 app.label,
-                Modifier.fillMaxWidth(),
+                Modifier.fillMaxWidth().graphicsLayer { alpha = reveal() },
                 size = 14.sp,
                 weight = if (focus.focused) FontWeight.Medium else FontWeight.Normal,
                 color = if (focus.focused) Ink.Primary else Ink.Tertiary,

@@ -1138,11 +1138,11 @@ fun HomeScreen(
                         Box(
                             Modifier.graphicsLayer {
                                 val mp = movingPkg
-                                // 逐個出場：不開暫存層（ModulateAlpha），焦點放大的圖示才不會被這一層的邊界裁成直角
+                                // 逐個出場：這一層只負責浮上來；淡入交給 App 磚裡已放大的那一層（不破圖、不裁角）
                                 compositingStrategy = CompositingStrategy.ModulateAlpha
                                 val a = tw.liuli.launcher.ui.components.rowReveal(dockReveal.value, i, stagger = 55f, fade = 280f)
                                 translationY = (if (mp == app.packageName) -14.dp.toPx() else 0f) + (1f - a) * 18.dp.toPx()
-                                alpha = (if (mp != null && mp != app.packageName) 0.55f else 1f) * a
+                                alpha = if (mp != null && mp != app.packageName) 0.55f else 1f
                             },
                         ) {
                         AppTile(
@@ -1166,6 +1166,7 @@ fun HomeScreen(
                                     if (app.packageName == lastDockPkg) labelX = cx
                                 }
                                 .bgTarget(app.themeColor, isApp = true),
+                            reveal = { tw.liuli.launcher.ui.components.rowReveal(dockReveal.value, i, stagger = 55f, fade = 280f) },
                         )
                         }
                     }
