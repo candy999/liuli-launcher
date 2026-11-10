@@ -67,7 +67,8 @@ internal object YushanRidge {
     }
 
     private fun load(): List<Layer> {
-        val text = YushanRidge::class.java.getResourceAsStream("yushan_svg.json")!!.bufferedReader(Charsets.UTF_8).use { it.readText() }
+        // 用絕對路徑：正式版會把類別改名搬家，相對於類別的路徑會找不到檔案
+        val text = YushanRidge::class.java.getResourceAsStream("/tw/liuli/launcher/ui/bg/yushan_svg.json")!!.bufferedReader(Charsets.UTF_8).use { it.readText() }
         val root = JSONObject(text)
         val colors = root.getJSONObject("colors")
         val svg = root.getJSONObject("svg")
