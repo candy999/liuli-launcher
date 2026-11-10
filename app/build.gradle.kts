@@ -77,4 +77,6 @@ dependencies {
     implementation("androidx.palette:palette-ktx:1.0.0")
     // 農民曆（MIT，離線演算）
     implementation("cn.6tail:lunar:1.7.4")
+    // 「關於琉璃」的專案網址 QR code
+    implementation("com.google.zxing:core:3.5.3")
 }

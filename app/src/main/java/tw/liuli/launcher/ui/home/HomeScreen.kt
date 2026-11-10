@@ -211,7 +211,9 @@ fun HomeScreen(
         }
     }
     var drawerReady by remember { mutableStateOf(false) }
-    LaunchedEffect(initialFocusDone) {
+    // 離開琉璃時放掉預先組合的抽屜（MemoryTrim），回來 2.5 秒後再重建
+    LaunchedEffect(initialFocusDone, tw.liuli.launcher.MemoryTrim.hidden) {
+        if (tw.liuli.launcher.MemoryTrim.hidden) { drawerReady = false; return@LaunchedEffect }
         if (initialFocusDone) { delay(2500); drawerReady = true }
     }
     // 保險：清單一直沒載好（或沒有任何 App）也不能永遠沒有焦點
@@ -829,12 +831,61 @@ fun HomeScreen(
         ), gearReq)
     }
 
+    // 進階：不常用、偏技術的項目
+    fun advancedSheet() {
+        open(SheetSpec(
+            "進階", null,
+            listOf(
+                SheetItem("效能最佳化", "預先編譯成機器碼，操作更順") { perfSheet() },
+                SheetItem("預設主畫面", "開啟系統的主畫面應用程式設定") { closeAll(); SystemActions.homeSettings(context) },
+                SheetItem("重新整理 App 清單", "安裝或移除 App 後清單沒更新時用") { reloadKey++; toast("已重新整理 App 清單") },
+            ),
+            key = "advanced", reopen = { advancedSheet() },
+        ), gearReq)
+    }
+
+    // 關於琉璃：版本、手動檢查更新（只看正式版、只在按下時才做）、專案網址 QR code
+    fun aboutSheet() {
+        val version = BuildConfigInfo.versionName(context)
+        open(SheetSpec(
+            "關於琉璃", "琉璃 Launcher：給 Google TV／Android TV 的主畫面。",
+            listOf(
+                SheetItem("目前版本", version) { },
+                SheetItem(
+                    "檢查更新", subtitle = "只看正式發布的版本；不會自動檢查或安裝",
+                    liveDetail = { tw.liuli.launcher.update.Updater.statusText(version) },
+                ) {
+                    // 只檢查（下載比對版本），安裝要另外按「安裝新版本」
+                    when (tw.liuli.launcher.update.Updater.state) {
+                        tw.liuli.launcher.update.Updater.State.Checking, tw.liuli.launcher.update.Updater.State.Installing -> Unit
+                        else -> scope.launch { tw.liuli.launcher.update.Updater.check(context) }
+                    }
+                },
+                SheetItem("安裝新版本", liveDetail = {
+                    when (val st = tw.liuli.launcher.update.Updater.state) {
+                        is tw.liuli.launcher.update.Updater.State.Available -> "安裝 ${st.versionName}"
+                        else -> "先檢查更新"
+                    }
+                }) {
+                    if (tw.liuli.launcher.update.Updater.state is tw.liuli.launcher.update.Updater.State.Available) {
+                        tw.liuli.launcher.update.Updater.install(context)
+                    } else toast("請先按「檢查更新」，有新的正式版時才能安裝")
+                },
+                SheetItem("專案網址", "github.com/candy999/liuli-launcher") { },
+                SheetItem("授權", "MIT・開源") { },
+            ),
+            key = "about", reopen = { aboutSheet() },
+            header = { AboutHeader(tw.liuli.launcher.update.Updater.PROJECT_URL) },
+        ), gearReq)
+    }
+
+    // 設定首頁：最常調整的放上面（外觀、地點、App），系統捷徑居中，進階與關於放最後
     fun openSettings() {
         open(SheetSpec(
             "設定", "琉璃 Launcher ${BuildConfigInfo.versionName(context)}",
             listOf(
-                SheetItem("地點", liveDetail = { Cities.byId(settings.cityId).name }) { citySheet() },
                 SheetItem("外觀", liveDetail = { engine.style.label + if (settings.bgFollow) "・自動色彩" else "・固定色" }) { appearanceSheet() },
+                SheetItem("地點", liveDetail = { Cities.byId(settings.cityId).name + "・天氣" }) { citySheet() },
                 SheetItem("顯示／隱藏 App", liveDetail = { if (hidden.isEmpty()) "" else "已隱藏 ${hidden.size} 個" }) { visibilitySheet(0) },
                 SheetItem("螢幕小時鐘", liveDetail = { if (settings.clockOn) "${tw.liuli.launcher.keys.ClockOverlay.CORNERS[settings.clockCorner.coerceIn(0, 3)]}・${settings.clockSize} sp" else "關" }) { clockSheet() },
                 SheetItem("遙控器按鍵", when {
@@ -842,11 +893,10 @@ fun HomeScreen(
                     KeyMapStore.load(context).isEmpty() -> "改綁、防誤入原廠主畫面"
                     else -> "已綁定 ${KeyMapStore.load(context).size} 個"
                 }) { keysSheet() },
-                SheetItem("效能最佳化", "預先編譯，操作更順") { perfSheet() },
-                SheetItem("系統設定") { closeAll(); SystemActions.systemSettings(context) },
                 SheetItem("網路") { closeAll(); SystemActions.networkSettings(context) },
-                SheetItem("預設主畫面") { closeAll(); SystemActions.homeSettings(context) },
-                SheetItem("重新整理 App 清單") { close(); reloadKey++ },
+                SheetItem("系統設定") { closeAll(); SystemActions.systemSettings(context) },
+                SheetItem("進階", "效能最佳化、預設主畫面") { advancedSheet() },
+                SheetItem("關於琉璃", liveDetail = { BuildConfigInfo.versionName(context) }) { aboutSheet() },
             ),
             key = "settings", reopen = { openSettings() },
         ), gearReq)
@@ -869,6 +919,8 @@ fun HomeScreen(
                     "clock" -> clockSheet()
                     "color" -> colorSheet()
                     "appearance" -> appearanceSheet()
+                    "about" -> aboutSheet()
+                    "advanced" -> advancedSheet()
                 }
                 "picker" -> {
                     settings.updateBgFollow(false); engine.applyFollow(false, settings.bgHue, settings.bgSat)

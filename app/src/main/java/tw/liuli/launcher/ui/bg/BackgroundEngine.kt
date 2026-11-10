@@ -766,6 +766,12 @@ class BackgroundEngine {
         var gapAvg = 0f
         while (true) {
             blurReq.receive()
+            if (trimPending) {
+                // 離開琉璃：輪替圖、工作圖都放掉；回來後下一次要求時重建
+                trimPending = false
+                ring.fill(null); work = null; canvas = null; bpx = IntArray(0); btmp = IntArray(0)
+                if (tw.liuli.launcher.MemoryTrim.hidden) continue
+            }
             val lvl = blurLevel
             if (lvl <= 0) { blurImage = null; blurPrev = null; continue }
             val f = blurFactor(lvl)
@@ -832,6 +838,22 @@ class BackgroundEngine {
     }
 
     /** 背景模糊等級：0＝關。 */
+    @Volatile private var trimPending = false
+
+    /** 離開琉璃：模糊用的輪替圖與工作圖交給系統回收（下一次要畫時再建）。 */
+    fun trimMemory() {
+        trimPending = true
+        blurImage = null
+        blurPrev = null
+        blurReq.trySend(Unit)
+    }
+
+    /** 回到琉璃：如果開著背景模糊，馬上重算一張。 */
+    fun untrimMemory() {
+        blurReq.trySend(Unit)
+        frame++
+    }
+
     fun applyBlur(level: Int) {
         blurLevel = level.coerceIn(0, BLUR_SIGMAS.lastIndex)
         blurReq.trySend(Unit)

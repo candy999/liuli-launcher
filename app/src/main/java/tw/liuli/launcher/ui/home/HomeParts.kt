@@ -387,7 +387,8 @@ fun AppDrawer(
             height = drawerHeightPx,
             inset = with(density) { 20.dp.toPx() },
             corner = with(density) { 34.dp.toPx() },
-            slide = { if (openNow.value) slide.value else 1f },
+            // 只有抽屜完全停好時才跳過被蓋住的背景：彈出中抽屜會縮放（比原位窄），兩側若不畫背景會露出黑邊
+            slide = { if (openNow.value && kotlin.math.abs(slide.value) < .002f) 0f else 1f },
         )
         onDispose { bgEngine?.cover = null }
     }
@@ -398,16 +399,20 @@ fun AppDrawer(
     var asLayer by remember { mutableStateOf(false) }
     // 是否擺放（看得到）：打開時立刻擺放；收起時等滑出動畫結束才拿掉
     var shown by remember { mutableStateOf(false) }
+    // 先出底框、再逐排出現：滑上來的只有玻璃底框與標題列，停好後 App 一排一排淡入浮上
+    val reveal = remember { Animatable(0f) }
     LaunchedEffect(open) {
         if (open) {
             shown = true
             asLayer = true
+            reveal.snapTo(0f)
             focused = 0
             runCatching { gridState.scrollToItem(0) }
             delay(16)
             runCatching { first.requestFocus() }
-            launch { delay(PANEL_LAYER_MS); asLayer = false }
             slide.animateTo(0f, SheetSpring)
+            asLayer = false
+            reveal.animateTo(DRAWER_REVEAL_MS, androidx.compose.animation.core.tween(DRAWER_REVEAL_MS.toInt(), easing = androidx.compose.animation.core.LinearEasing))
         } else if (shown) {
             // 收起：背景與主畫面已經先畫好（背景不再裁掉被蓋住的部分），抽屜整塊當一張圖加速滑出
             asLayer = true
@@ -477,6 +482,15 @@ fun AppDrawer(
                 verticalArrangement = Arrangement.spacedBy(20.dp),
             ) {
                 itemsIndexed(if (tw.liuli.launcher.ui.bg.PerfProbe.noTiles) emptyList() else apps, key = { _, a -> a.packageName }) { i, app ->
+                    Box(
+                        Modifier.graphicsLayer {
+                            // 以畫面上的第幾排決定出場順序（一排 6 個），同一排左到右再錯開一點點
+                            val pos = (i - gridState.firstVisibleItemIndex).coerceAtLeast(0)
+                            val a = tw.liuli.launcher.ui.components.rowReveal(reveal.value, pos / 6 * 3 + pos % 6 / 2, stagger = 30f, fade = 200f)
+                            alpha = a
+                            translationY = (1f - a) * 14.dp.toPx()
+                        },
+                    ) {
                     AppTile(
                         app = app,
                         width = 124.dp,
@@ -487,6 +501,7 @@ fun AppDrawer(
                         onLongClick = { fr -> onLongClick(app, fr) },
                         extra = Modifier.bgTarget(app.themeColor, isApp = true),
                     )
+                    }
                 }
             }
         }
@@ -499,6 +514,9 @@ private fun drawerSlideOffset(slide: Float, heightPx: Float) = androidx.compose.
 
 /** 面板／抽屜打開後維持離屏圖的時間：滑入彈簧約 0.33 秒、主畫面淡出 0.38 秒、背景暫停 0.45 秒，全部結束才回到一般繪製。 */
 internal const val PANEL_LAYER_MS = 700L
+
+/** 抽屜裡的 App 逐排出現的總時間（毫秒）。 */
+private const val DRAWER_REVEAL_MS = 30f * 14 + 200f
 
 /** 抽屜往螢幕下方多延伸的高度：容納滑入彈簧衝過頭的那一段（約 4～5%，20dp 左右）。 */
 private val DRAWER_OVERSHOOT = 48.dp

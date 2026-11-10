@@ -92,6 +92,23 @@ class MainActivity : ComponentActivity() {
         window.decorView.post { window.setBackgroundDrawable(null) }
     }
 
+    // 記憶體：離開琉璃時放掉預先準備的東西（見 MemoryTrim），回來再慢慢重建
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN) {
+            MemoryTrim.hidden = true
+            BackgroundEngine.active?.trimMemory()
+        }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        if (MemoryTrim.hidden) {
+            MemoryTrim.hidden = false
+            BackgroundEngine.active?.untrimMemory()
+        }
+    }
+
     // 螢幕小時鐘：琉璃在前景時隱藏（主畫面本來就有大時鐘），離開就出現
     override fun onResume() {
         super.onResume()
@@ -179,7 +196,9 @@ fun LiuliApp(lensing: Boolean, homePresses: Int, externalAction: Pair<Int, Strin
     // 預熱：組合好之後，用肉眼看不到的透明度（約 0.4%）把兩頁真的畫一次，
     // 讓中文字形快取、圖示貼圖先建好（只組合不畫的話，第一次打開仍要卡 0.3 秒左右）
     var warmPages by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) {
+    // 離開琉璃時放掉（MemoryTrim），回來 4 秒後再重建
+    LaunchedEffect(MemoryTrim.hidden) {
+        if (MemoryTrim.hidden) { pagesReady = false; return@LaunchedEffect }
         kotlinx.coroutines.delay(4000); pagesReady = true
         kotlinx.coroutines.delay(600); warmPages = true
         kotlinx.coroutines.delay(400); warmPages = false

@@ -21,6 +21,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import kotlinx.coroutines.delay
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.launch
@@ -81,6 +83,8 @@ data class SheetSpec(
     val key: String? = null,
     /** 暫時的畫面（例如「按一下要改的鍵」的等待畫面）：不列入返回路徑。 */
     val transient: Boolean = false,
+    /** 標題與清單之間的自訂內容（例如「關於琉璃」的 QR code）。 */
+    val header: (@Composable () -> Unit)? = null,
 ) {
     val id: String get() = key ?: title
 }
@@ -104,14 +108,19 @@ fun GlassSheet(
     // 打開後 0.5 秒內整塊面板維持一張離屏圖（滑入、主畫面淡出、背景暫停都結束才回到一般繪製）；收起時整段都是。
     // 收起沿用同一個元件（不重新組合整個清單——弱電視上要 100ms 以上，收起動畫會被吃掉）
     var asLayer by remember { androidx.compose.runtime.mutableStateOf(true) }
+    // 先出底框、再逐列出現：滑進來的只有玻璃底框與標題（第一格要畫的東西少，不會頓），
+    // 停好之後清單一列一列淡入、微微浮上來——內容出現本身成了效果，而不是「卡了一下才出來」。
+    // reveal＝停好後經過的毫秒數。
+    val reveal = remember { Animatable(0f) }
     LaunchedEffect(exiting) {
         if (exiting) {
             asLayer = true
             slide.animateTo(1f, SheetExit)
             onExited()
         } else {
-            launch { delay(700); asLayer = false }
             slide.animateTo(0f, SheetSpring)
+            asLayer = false
+            reveal.animateTo(REVEAL_TOTAL_MS, tween(REVEAL_TOTAL_MS.toInt(), easing = LinearEasing))
         }
     }
     val sheetWidthPx = with(androidx.compose.ui.platform.LocalDensity.current) { 340.dp.toPx() }
@@ -167,10 +176,24 @@ fun GlassSheet(
                 Spacer(Modifier.height(4.dp))
                 GText(spec.subtitle, Modifier.padding(horizontal = 12.dp), size = 13.sp, color = Ink.Tertiary, maxLines = 7)
             }
+            if (spec.header != null) {
+                Spacer(Modifier.height(14.dp))
+                spec.header.invoke()
+            }
             Spacer(Modifier.height(16.dp))
             LazyColumn(Modifier.weight(1f), state = listState, verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 itemsIndexed(spec.items) { index, item ->
-                    SheetRow(item, if (index == focusAt) first else null) { onFocusIndex(index) }
+                    Box(
+                        Modifier.graphicsLayer {
+                            // 第幾個「看得到的」列決定出場順序（捲動過的清單從畫面上第一列開始算）
+                            val order = (index - listState.firstVisibleItemIndex).coerceAtLeast(0)
+                            val a = rowReveal(reveal.value, order)
+                            alpha = a
+                            translationY = (1f - a) * 10.dp.toPx()
+                        },
+                    ) {
+                        SheetRow(item, if (index == focusAt) first else null) { onFocusIndex(index) }
+                    }
                 }
             }
         }
@@ -251,4 +274,15 @@ private fun SheetRow(item: SheetItem, requester: FocusRequester?, onFocused: () 
             )
         }
     }
+}
+
+/** 逐列出現：每列間隔、每列淡入的時間（毫秒）。 */
+private const val REVEAL_STAGGER_MS = 28f
+private const val REVEAL_FADE_MS = 170f
+private const val REVEAL_TOTAL_MS = REVEAL_STAGGER_MS * 14 + REVEAL_FADE_MS
+
+/** 第 [order] 個出場的東西在 [ms]（底框停好後經過的毫秒）時的透明度（0～1，先慢後快再停）。 */
+internal fun rowReveal(ms: Float, order: Int, stagger: Float = REVEAL_STAGGER_MS, fade: Float = REVEAL_FADE_MS): Float {
+    val x = ((ms - order * stagger) / fade).coerceIn(0f, 1f)
+    return x * x * (3f - 2f * x)
 }
