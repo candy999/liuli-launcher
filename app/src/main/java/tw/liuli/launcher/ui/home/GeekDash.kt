@@ -64,7 +64,7 @@ import kotlin.math.roundToInt
 
 /*
  * 技術宅模式的儀表列（常用列下方）。設計語彙跟主畫面一致（docs/ux-design.md）：
- * - 只有白色的透明度層次＋一個暖金：正常時沒有燈號，出狀況的那張卡數字變暖金、多一個暖金小標
+ * - 只有白色的透明度層次＋一個暖金：正常時沒有燈號，出狀況的那張卡數字變暖金（不另外寫字）
  * - 卡片是同一種玻璃（不描邊、不發光），圓角與常用列一致
  * - 大數字用細字（跟時鐘同一個字族），等寬數字，跳動時不左右晃
  * 卡片不拿焦點：只是看的，不打斷遙控器的上下移動。
@@ -108,7 +108,7 @@ private fun Header(title: String, sub: String, badge: String?, icon: androidx.co
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         if (icon != null) LIcon(icon, 11.dp, Ink.Secondary)
         T(title, 11.sp, Ink.Secondary, FontWeight.Medium)
-        if (badge != null) Badge(badge)
+        // 出狀況只靠數字變暖金表示，不另外寫「偏高」之類的字
         Spacer(Modifier.weight(1f))
         T(sub, 9.sp, Ink.Tertiary)
     }
