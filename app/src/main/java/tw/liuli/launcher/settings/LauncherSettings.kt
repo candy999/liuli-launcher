@@ -27,6 +27,23 @@ class LauncherSettings(context: Context) {
     var minimalIdle by mutableStateOf(prefs.getInt("minimal_idle", 0))
         private set
 
+    /** 簡潔模式的微光（0＝關、1 輕、2 中、3 深）：壓暗整個畫面，省電、保護面板。 */
+    var minimalDim by mutableStateOf(prefs.getInt("minimal_dim", 0))
+        private set
+    /** 簡潔模式的微飄移：時間與天氣緩慢飄動，避免烙印。 */
+    var minimalDrift by mutableStateOf(prefs.getBoolean("minimal_drift", true))
+        private set
+
+    fun updateMinimalDim(level: Int) {
+        minimalDim = level
+        prefs.edit().putInt("minimal_dim", level).apply()
+    }
+
+    fun updateMinimalDrift(on: Boolean) {
+        minimalDrift = on
+        prefs.edit().putBoolean("minimal_drift", on).apply()
+    }
+
     fun updateMinimalIdle(sec: Int) {
         minimalIdle = sec
         prefs.edit().putInt("minimal_idle", sec).apply()

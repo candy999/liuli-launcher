@@ -47,6 +47,7 @@ import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.KeyEventType
@@ -244,6 +245,13 @@ fun HomeScreen(
             engine.stopBounce()
             engine.restoreTarget(saved)
         }
+    }
+    // 微光：同時請系統調低螢幕亮度（只在琉璃這個視窗有效；電視不支援就忽略，只靠畫面壓暗）
+    LaunchedEffect(minimal, settings.minimalDim) {
+        val activity = context as? android.app.Activity ?: return@LaunchedEffect
+        val target = if (minimal) MINIMAL_DIM_BRIGHTNESS[settings.minimalDim.coerceIn(0, 3)] else -1f
+        if (minimal) delay(500) // 等介面收起一半再暗下來
+        activity.window.attributes = activity.window.attributes.apply { screenBrightness = target }
     }
     // 閒置自動進入簡潔模式
     LaunchedEffect(settings.minimalIdle, active) {
@@ -803,6 +811,33 @@ fun HomeScreen(
         open(SheetSpec("遙控器按鍵", status, items, key = "keys", reopen = { keysSheet() }), gearReq)
     }
 
+    fun minimalSummary(): String = listOfNotNull(
+        minimalIdleText(settings.minimalIdle).let { if (settings.minimalIdle <= 0) "手動" else it },
+        if (settings.minimalDim > 0) "微光" + MINIMAL_DIM_LABELS[settings.minimalDim] else null,
+        if (settings.minimalDrift) "微飄移" else null,
+    ).joinToString("・")
+
+    // 簡潔模式：只留時間與天氣的畫面；進入方式與省電、防烙印的選項都在這裡
+    fun minimalSheet() {
+        open(SheetSpec(
+            "簡潔模式",
+            "其他介面全部收起，只留左下角的時間、右下角的天氣，背景慢慢流動。主畫面最上方再按上鍵進入，按任何方向鍵回來。",
+            listOf(
+                SheetItem("閒置自動進入", liveDetail = { minimalIdleText(settings.minimalIdle) },
+                    onAdjust = { d ->
+                        val i = MINIMAL_IDLE_OPTIONS.indexOf(settings.minimalIdle).coerceAtLeast(0)
+                        settings.updateMinimalIdle(MINIMAL_IDLE_OPTIONS[(i + d + MINIMAL_IDLE_OPTIONS.size) % MINIMAL_IDLE_OPTIONS.size])
+                    }) { },
+                SheetItem("微光", subtitle = "壓暗整個畫面：省電、保護面板", liveDetail = { MINIMAL_DIM_LABELS[settings.minimalDim.coerceIn(0, 3)] },
+                    onAdjust = { d -> settings.updateMinimalDim((settings.minimalDim + d + 4) % 4) }) { },
+                SheetItem("微飄移", subtitle = "時間與天氣緩慢飄動，避免烙印", liveDetail = { if (settings.minimalDrift) "開" else "關" },
+                    onAdjust = { settings.updateMinimalDrift(!settings.minimalDrift) }) { },
+                SheetItem("現在進入簡潔模式") { closeAll(); minimal = true },
+            ),
+            key = "minimal", reopen = { minimalSheet() },
+        ), gearReq)
+    }
+
     // 外觀：和畫面呈現有關的設定都收在這裡
     fun appearanceSheet() {
         open(SheetSpec(
@@ -820,12 +855,7 @@ fun HomeScreen(
                     if (settings.frameThickness == 0 && settings.frameFeather == 0 && settings.frameRadius == 0) "關"
                     else "粗 ${settings.frameThickness}・圓 ${settings.frameRadius}・漸 ${settings.frameFeather}"
                 }) { frameSheet() },
-                SheetItem("閒置自動簡潔模式", subtitle = "主畫面最上方再按上鍵也能進入；按下鍵回來",
-                    liveDetail = { minimalIdleText(settings.minimalIdle) },
-                    onAdjust = { d ->
-                        val i = MINIMAL_IDLE_OPTIONS.indexOf(settings.minimalIdle).coerceAtLeast(0)
-                        settings.updateMinimalIdle(MINIMAL_IDLE_OPTIONS[(i + d + MINIMAL_IDLE_OPTIONS.size) % MINIMAL_IDLE_OPTIONS.size])
-                    }) { },
+                SheetItem("簡潔模式", liveDetail = { minimalSummary() }) { minimalSheet() },
             ),
             key = "appearance", reopen = { appearanceSheet() },
         ), gearReq)
@@ -871,7 +901,7 @@ fun HomeScreen(
                         tw.liuli.launcher.update.Updater.install(context)
                     } else toast("請先按「檢查更新」，有新的正式版時才能安裝")
                 },
-                SheetItem("專案網址", "github.com/candy999/liuli-launcher") { },
+                SheetItem("專案網址", subtitle = "github.com/candy999/liuli-launcher") { },
                 SheetItem("授權", "MIT・開源") { },
             ),
             key = "about", reopen = { aboutSheet() },
@@ -920,6 +950,7 @@ fun HomeScreen(
                     "color" -> colorSheet()
                     "appearance" -> appearanceSheet()
                     "about" -> aboutSheet()
+                    "minimal" -> minimalSheet()
                     "advanced" -> advancedSheet()
                 }
                 "picker" -> {
@@ -1195,7 +1226,13 @@ fun HomeScreen(
 
             // 簡潔模式：左下角時間、右下角天氣（主畫面收起一半後才浮上來）
             if (minimalT.value > 0.001f) {
-                MinimalOverlay(home) { ((minimalT.value - .35f) / .65f).coerceIn(0f, 1f) }
+                MinimalOverlay(home, drift = settings.minimalDrift) { ((minimalT.value - .35f) / .65f).coerceIn(0f, 1f) }
+                // 微光：整個畫面（背景、時間、天氣）一起壓暗
+                if (settings.minimalDim > 0) {
+                    Box(Modifier.fillMaxSize().drawBehind {
+                        drawRect(Color.Black, alpha = MINIMAL_DIM_SCRIM[settings.minimalDim.coerceIn(0, 3)] * minimalT.value)
+                    })
+                }
             }
             if (picking) {
                 ColorPickerPanel(
@@ -1242,6 +1279,13 @@ private suspend fun keepDockItemVisible(state: androidx.compose.foundation.lazy.
 
 /** 面板／抽屜滑動動畫的長度（背景在這段時間暫停）：彈簧動畫約 0.4 秒、主畫面淡出 0.38 秒。 */
 private const val UI_SLIDE_HOLD_MS = 700L
+
+/** 微光等級的名稱。 */
+private val MINIMAL_DIM_LABELS = listOf("關", "輕", "中", "深")
+
+/** 微光：疊在整個畫面上的黑色透明度，與請系統調整的螢幕亮度（電視不支援就只有畫面變暗）。 */
+private val MINIMAL_DIM_SCRIM = floatArrayOf(0f, .25f, .45f, .65f)
+private val MINIMAL_DIM_BRIGHTNESS = floatArrayOf(-1f, .7f, .45f, .25f)
 
 /** 閒置自動簡潔模式的選項（秒；0＝不自動）。 */
 private val MINIMAL_IDLE_OPTIONS = listOf(0, 15, 30, 60, 120, 300)

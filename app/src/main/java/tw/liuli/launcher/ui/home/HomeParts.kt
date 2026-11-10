@@ -526,7 +526,7 @@ private val DRAWER_OVERSHOOT = 48.dp
  * [t]（0～1）：浮上來的進度（在主畫面收起一半之後才開始），只改圖層的透明度與位置。
  */
 @Composable
-fun MinimalOverlay(home: HomeContext, t: () -> Float) {
+fun MinimalOverlay(home: HomeContext, drift: Boolean = true, t: () -> Float) {
     val context = LocalContext.current
     val now = rememberMinuteClock()
     val is24h = android.text.format.DateFormat.is24HourFormat(context)
@@ -534,6 +534,21 @@ fun MinimalOverlay(home: HomeContext, t: () -> Float) {
     val ampm = if (is24h) null else if (now.hour < 12) "上午" else "下午"
     val l = home.lunar
     val w = home.weather
+    // 微飄移（防烙印）：時間、天氣各自用很長的週期（一兩分鐘）緩慢飄動，同一個位置不會長時間亮著。
+    // 時鐘只在繪製階段讀取（只改圖層位置，不重新組合、不重新排版）
+    val clock = remember { androidx.compose.runtime.mutableLongStateOf(0L) }
+    if (drift) {
+        androidx.compose.runtime.LaunchedEffect(Unit) {
+            // 每 0.1 秒更新一次就夠了：飄得很慢（每秒約 1.5 dp），每次只移動零點幾個像素，看起來是連續的
+            while (true) { clock.longValue = android.os.SystemClock.uptimeMillis(); kotlinx.coroutines.delay(100) }
+        }
+    }
+    fun DrawFloat(phase: Float, ax: Float, ay: Float): Pair<Float, Float> {
+        if (!drift) return 0f to 0f
+        val s = clock.longValue / 1000f
+        return ax * kotlin.math.sin(s * 2f * kotlin.math.PI.toFloat() / 97f + phase) to
+            ay * kotlin.math.sin(s * 2f * kotlin.math.PI.toFloat() / 71f + phase * 1.7f)
+    }
     Box(
         Modifier
             .fillMaxSize()
@@ -544,7 +559,12 @@ fun MinimalOverlay(home: HomeContext, t: () -> Float) {
                 translationY = (1f - v) * 24.dp.toPx()
             },
     ) {
-        Column(Modifier.align(Alignment.BottomStart)) {
+        Column(
+            Modifier.align(Alignment.BottomStart).graphicsLayer {
+                val (dx, dy) = DrawFloat(0f, 24.dp.toPx(), 14.dp.toPx())
+                translationX = dx + 24.dp.toPx(); translationY = dy - 14.dp.toPx()
+            },
+        ) {
             Row(verticalAlignment = Alignment.Bottom) {
                 GText(time, size = 84.sp, weight = FontWeight.ExtraLight, shadow = true, letterSpacing = (-2).sp)
                 if (ampm != null) GText(ampm, Modifier.padding(start = 8.dp, bottom = 14.dp), size = 19.sp, weight = FontWeight.Light, shadow = true)
@@ -555,7 +575,13 @@ fun MinimalOverlay(home: HomeContext, t: () -> Float) {
             )
         }
         if (w != null) {
-            Column(Modifier.align(Alignment.BottomEnd), horizontalAlignment = Alignment.End) {
+            Column(
+                Modifier.align(Alignment.BottomEnd).graphicsLayer {
+                    val (dx, dy) = DrawFloat(2.1f, 24.dp.toPx(), 14.dp.toPx())
+                    translationX = dx - 24.dp.toPx(); translationY = dy - 14.dp.toPx()
+                },
+                horizontalAlignment = Alignment.End,
+            ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     LIcon(LIcons.weather(w.kind, w.isDay), 32.dp)
                     Spacer(Modifier.width(12.dp))

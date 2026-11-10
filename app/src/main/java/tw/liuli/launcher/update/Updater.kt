@@ -46,7 +46,7 @@ object Updater {
     fun statusText(currentVersion: String): String = when (val s = state) {
         State.Idle -> "目前 $currentVersion"
         State.Checking -> "檢查中…"
-        is State.UpToDate -> if (s.newerInstalled) "已是最新（目前比正式版 ${s.tag} 新）" else "已是最新（${s.tag}）"
+        is State.UpToDate -> if (s.newerInstalled) "已是最新" else "已是最新 ${s.tag}"
         is State.Available -> "有新版 ${s.versionName}"
         State.Installing -> "交給系統安裝中…"
         is State.Error -> s.message
