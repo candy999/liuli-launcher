@@ -98,7 +98,7 @@ private fun DrawScope.drawStyleRaw(style: BgStyle, st: BgState) {
         BgStyle.DEEPSEA -> deepsea(st)
         BgStyle.TRAILS -> trails(st)
         BgStyle.CONTOUR -> contour(st)
-        BgStyle.PAPER -> paper(st)
+        BgStyle.RIDGE -> ridge(st)
         BgStyle.BEAMS -> beams(st)
         BgStyle.SOLID -> solid(st)
         BgStyle.BLACK -> black(st)
@@ -693,31 +693,123 @@ private fun DrawScope.contour(st: BgState) {
     vignette(.4f)
 }
 
-// ───────────── 9. 紙雕層疊 ─────────────
+// ───────────── 9. 山稜（層層山稜沒入山嵐：越遠越淡、越接近天色；谷底積霧、山嵐緩緩流過） ─────────────
 
-private val hills = Random(5).let { r -> List(5) { floatArrayOf(r.nextFloat() * 6, r.nextFloat() * 6, r.nextFloat() * 6, .5f + r.nextFloat()) } }
+private const val RIDGE_LAYERS = 6
+private const val RIDGE_N = 129
+/** 稜線取樣的範圍：比畫面左右各寬 15%（視差移動時邊緣不露空）。 */
+private const val RIDGE_X0 = -W * .15f
+private const val RIDGE_SPAN = W * 1.3f
 
-private fun DrawScope.paper(st: BgState) {
+/** 一維值雜訊（平滑插值），稜線用。 */
+private fun noise1(x: Float, seed: Int): Float {
+    val i = kotlin.math.floor(x).toInt(); val f = x - i
+    val u = f * f * (3 - 2 * f)
+    val a = hash01(i, seed); val b = hash01(i + 1, seed)
+    return a + (b - a) * u
+}
+
+/**
+ * 預先算好的山形（只算一次）：每一層一條稜線的高度。
+ * 真實的山脊不是正弦波：大尺度用平滑的碎形雜訊決定山勢起伏，再疊「脊形雜訊」（1－|2n－1|，峰頂尖、谷底圓）刻出稜角；
+ * 遠的山細節少、起伏緩（被空氣模糊掉），近的山稜角多、起伏大。
+ */
+private object Ridges {
+    val h: Array<FloatArray> = Array(RIDGE_LAYERS) { li ->
+        val near = li / (RIDGE_LAYERS - 1f)
+        val octaves = 3 + (near * 3).toInt()
+        FloatArray(RIDGE_N) { k ->
+            val x = k / (RIDGE_N - 1f) * (2.6f + 1.2f * near) + li * 7.3f
+            var smooth = 0f; var ridged = 0f; var amp = .5f; var f = 1f; var norm = 0f
+            for (o in 0 until octaves) {
+                val n = noise1(x * f, 300 + li * 31 + o)
+                smooth += amp * n
+                val r = 1f - abs(2f * noise1(x * f * 1.7f, 500 + li * 31 + o) - 1f)
+                ridged += amp * r * r
+                norm += amp; amp *= .5f; f *= 2.1f
+            }
+            (.55f * smooth + .45f * ridged) / norm
+        }
+    }
+    /** 天上幾顆很淡的星（只在山的上方）。 */
+    val stars = FloatArray(60 * 2).also { a ->
+        for (i in 0 until 60) { a[i * 2] = hash01(i, 611) * W; a[i * 2 + 1] = hash01(i, 612).pow(1.6f) * H * .42f }
+    }
+}
+
+private fun DrawScope.ridge(st: BgState) {
     val sc = scratch.get()!!
     val pathL = sc.path
-    base(st); focusGlow(st, W * .5f, .25f)
-    for (i in 0 until 5) {
-        val hh = hills[i]
-        val yb = H * (.42f + i * .12f)
-        val off = (st.fx - .5f) * W * .05f * (i + 1)
-        pathL.reset(); pathL.moveTo(0f, H)
-        var x = -10f
-        while (x <= W + 10) {
-            val xx = x + off
-            val y = yb - H * .05f * hh[3] * (sin(xx / W * 5 + hh[0]) + .6f * sin(xx / W * 11 + hh[1]) + .3f * sin(xx / W * 23 + hh[2]))
-            pathL.lineTo(x, y); x += 8f
+    val t = st.at
+    val par = -(st.fx - .5f)
+    val parY = -(st.fy - .5f)
+    // 天色與山嵐的顏色：越接近地平線越亮（空氣透視：遠處的山都融進這個顏色）
+    val haze = st.c(-8f, .38f, .34f)
+    val skyTop = st.c(12f, .6f, .03f)
+    val skyLow = st.c(-4f, .45f, .2f)
+    drawRect(Brush.verticalGradient(0f to skyTop, .5f to st.c(4f, .5f, .1f), 1f to skyLow, startY = 0f, endY = H * .62f), size = FULL)
+    drawRect(skyLow, Offset(0f, H * .62f), Size(W, H * .38f))
+    // 很淡的星：只有一個像素，幾乎看不出來，讓天空有深度
+    val paint = sc.starPaint
+    paint.strokeWidth = .55f
+    paint.color = Color.hsl(220f, .1f, .9f, .22f).toArgb()
+    translate(par * W * .006f, 0f) { points(Ridges.stars, paint) }
+    // 天光：月亮／落日躲在山後的柔光（跟著焦點左右移，按下時亮一點），只有暈、沒有圓盤
+    val lx = W * (.2f + .6f * st.fx) + par * W * .01f
+    val ly = H * .38f
+    val glowA = .2f + .08f * st.pulse
+    drawRect(gaussBrush(st.c(-20f, .5f, .7f, glowA), Offset(lx, ly), W * .55f), Offset(lx - W * .55f, ly - W * .55f), Size(W * 1.1f, W * 1.1f), blendMode = BlendMode.Plus)
+    drawRect(gaussBrush(st.c(-26f, .35f, .85f, glowA * .9f), Offset(lx, ly), W * .09f), Offset(lx - W * .09f, ly - W * .09f), Size(W * .18f, W * .18f), blendMode = BlendMode.Plus)
+
+    val step = RIDGE_SPAN / (RIDGE_N - 1)
+    for (li in 0 until RIDGE_LAYERS) {
+        val near = li / (RIDGE_LAYERS - 1f)
+        // 景深視差：越近移得越多
+        val dx = par * W * (.008f + .07f * near * near)
+        val dy = parY * H * (.004f + .02f * near)
+        val yb = H * (.47f + .078f * li) + dy
+        val amp = H * (.09f + .07f * near)
+        val hs = Ridges.h[li]
+        pathL.reset()
+        pathL.moveTo(RIDGE_X0 + dx, H + 2f)
+        var top = H
+        for (k in 0 until RIDGE_N) {
+            val y = yb - amp * (hs[k] * 1.6f - .3f)
+            if (y < top) top = y
+            pathL.lineTo(RIDGE_X0 + dx + k * step, y)
         }
-        pathL.lineTo(W, H); pathL.close()
-        // 紙張的陰影落在上一層：往上錯開
-        translate(0f, -3f) { drawPath(pathL, Color.Black.copy(alpha = .26f)) }
-        drawPath(pathL, st.c(i * 6 - 10f, .7f, .1f + i * .045f))
+        pathL.lineTo(RIDGE_X0 + dx + RIDGE_SPAN, H + 2f)
+        pathL.close()
+        // 空氣透視：遠山的顏色幾乎就是山嵐，近山深而暗；每一層的山腳積著霧（往下變亮、融進山嵐）
+        val body = lerp(haze, st.c(6f, .55f, .025f), .22f + .78f * near.pow(.8f))
+        val foot = lerp(body, haze, .55f * (1f - near * .6f))
+        drawPath(pathL, Brush.verticalGradient(0f to body, .55f to body, 1f to foot, startY = top, endY = yb + amp * .9f))
+        // 稜線的逆光：只有靠近天光的那一段亮起一條細邊（遠山明顯、近山淡）
+        val rimA = .35f * (1f - near * .7f) * (.8f + .2f * st.pulse)
+        drawPath(
+            pathL,
+            Brush.horizontalGradient(
+                0f to Color.Transparent, .5f to st.c(-22f, .4f, .8f, rimA), 1f to Color.Transparent,
+                startX = lx - W * .38f, endX = lx + W * .38f,
+            ),
+            style = Stroke(.7f), blendMode = BlendMode.Plus,
+        )
+        // 山嵐：在這一層與下一層之間緩緩流過的幾縷霧（高斯暈開、扁長）
+        if (li < RIDGE_LAYERS - 1) {
+            for (m in 0 until 3) {
+                val seed = li * 3 + m
+                val speed = (.0035f + .004f * hash01(seed, 701)) * (1f + near)
+                val cx = frac(hash01(seed, 702) + t * speed) * W * 1.8f - W * .4f + dx
+                val cy = yb + amp * (.15f + .35f * hash01(seed, 703)) + 3f * sin(t * .07f + seed)
+                val r = W * (.22f + .16f * hash01(seed, 704))
+                val a = (.16f + .12f * hash01(seed, 705)) * (.7f + .3f * sin(t * (.05f + .05f * hash01(seed, 706)) + seed * 2f))
+                withTransform({ scale(1f, .13f + .06f * hash01(seed, 707), pivot = Offset(cx, cy)) }) {
+                    drawRect(gaussBrush(haze.copy(alpha = a), Offset(cx, cy), r), Offset(cx - r, cy - r), Size(r * 2, r * 2))
+                }
+            }
+        }
     }
-    vignette(.3f)
+    vignette(.32f)
 }
 
 // ───────────── 10. 光束（粗細不一的垂直光束，呼吸、流動，往焦點聚攏） ─────────────

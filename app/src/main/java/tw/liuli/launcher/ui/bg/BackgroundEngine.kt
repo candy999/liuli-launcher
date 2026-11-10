@@ -32,29 +32,30 @@ import kotlin.math.max
 import kotlin.math.min
 
 /**
- * 背景樣式。[ambient]＝一直在動（星星閃爍與星座網、水下光影、光束流動）：轉場結束也不停，
+ * 背景樣式（順序依意象相近排列）。[ambient]＝一直在動（水下光影、山嵐流動、星星閃爍與星座網、光束流動）：轉場結束也不停，
  * 用 [BgState.at] 這個「只在背景真的有畫的時候才前進」的時鐘，暫停（面板滑動、離開琉璃）後接著動、不會跳。
  */
 enum class BgStyle(val id: String, val label: String, val note: String, val ambient: Boolean = false) {
-    WAVES("waves", "流線浪潮", "波峰朝焦點聚集"),
-    BOKEH("bokeh", "光斑", "前後景深視差，焦點時光斑脈動"),
-    TRIANGLES("triangles", "幾何三角", "曲面隆起並跟著焦點移動，三角面拉伸變形"),
-    DOTS("dots", "波點圓圈", "遠近兩層波點，焦點處聚光"),
-    GALAXY("galaxy", "星空銀河", "斜跨的銀河與三層星星，漂移的星點時連時斷地織成星座網", ambient = true),
-    DEEPSEA("deepsea", "深海", "寬而模糊、錯落重疊的耶穌光灑進深海，光影晃動、微粒緩緩飄落", ambient = true),
-    TRAILS("trails", "光軌", "長曝光光軌，兩端交錯開合"),
     CONTOUR("contour", "等高線", "焦點是山峰，等高線跟著流動"),
-    PAPER("paper", "紙雕層疊", "多層山巒剪影，前景移動較多"),
+    WAVES("waves", "流線浪潮", "波峰朝焦點聚集"),
+    DEEPSEA("deepsea", "深海", "寬而模糊、錯落重疊的耶穌光灑進深海，光影晃動、微粒緩緩飄落", ambient = true),
+    RIDGE("ridge", "山稜", "層層山稜沒入山嵐，越遠越淡；谷間霧氣緩緩流過，近山視差大", ambient = true),
+    GALAXY("galaxy", "星空銀河", "斜跨的銀河與三層星星，漂移的星點時連時斷地織成星座網", ambient = true),
     BEAMS("beams", "光束", "粗細不一的垂直光束呼吸、流動，往焦點聚攏", ambient = true),
+    TRAILS("trails", "光軌", "長曝光光軌，兩端交錯開合"),
+    BOKEH("bokeh", "光斑", "前後景深視差，焦點時光斑脈動"),
+    DOTS("dots", "波點圓圈", "遠近兩層波點，焦點處聚光"),
+    TRIANGLES("triangles", "幾何三角", "曲面隆起並跟著焦點移動，三角面拉伸變形"),
     SOLID("solid", "純色", "雙色漸層純色"),
     BLACK("black", "純黑（OLED）", "幾乎全黑，焦點下方一抹主色");
 
     companion object {
         fun byId(id: String?) = entries.firstOrNull { it.id == id } ?: when (id) {
-            // 舊版樣式改名：翻牌方陣／雨窗 → 星空銀河、絲綢 → 深海、極光 → 光束
+            // 舊版樣式改名：翻牌方陣／雨窗 → 星空銀河、絲綢 → 深海、極光 → 光束、紙雕層疊 → 山稜
             "flip", "rain" -> GALAXY
             "silk" -> DEEPSEA
             "aurora" -> BEAMS
+            "paper" -> RIDGE
             else -> WAVES
         }
     }
