@@ -258,8 +258,13 @@ fun HomeScreen(
     // 離開時回到原本焦點的顏色與位置
     LaunchedEffect(minimal) {
         if (!minimal) return@LaunchedEffect
-        // 自動清理記憶體：進入簡潔模式時結束背景程式（不顯示結果，畫面維持乾淨）
-        if (settings.minimalClean) launch { runCatching { tw.liuli.launcher.geek.Rocket.launch(context) } }
+        // 自動清理記憶體：進入簡潔模式時結束背景程式，畫面正中央顯示 3 秒結果（跟火箭一樣，知道有清理）
+        if (settings.minimalClean) launch {
+            try {
+                rocketResult = runCatching { tw.liuli.launcher.geek.Rocket.launch(context) }.getOrNull()
+                delay(3000)
+            } finally { rocketResult = null }
+        }
         val saved = engine.snapshotTarget()
         try {
             engine.startBounce()
@@ -1278,8 +1283,6 @@ fun HomeScreen(
                     })
                 }
 
-                // 火箭的結果：畫面正中央 3 秒
-                if (settings.geekMode) RocketReport(rocketResult)
                 // 技術宅模式：常用列下方的系統儀表列（不拿焦點，只是看的）
                 if (settings.geekMode) GeekDashboard(geekStats, null, Modifier.padding(start = 48.dp, end = 48.dp, top = 434.dp))
 
@@ -1317,6 +1320,8 @@ fun HomeScreen(
                     })
                 }
             }
+            // 清理記憶體的結果（火箭、或進入簡潔模式時自動清理）：畫面正中央 3 秒，在所有介面之上（簡潔模式收起的介面也擋不到它）
+            RocketReport(rocketResult)
             if (picking) {
                 ColorPickerPanel(
                     hue = settings.bgHue, sat = settings.bgSat,
