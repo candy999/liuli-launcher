@@ -190,6 +190,8 @@ fun GlassSheet(
                 itemsIndexed(spec.items) { index, item ->
                     Box(
                         Modifier.graphicsLayer {
+                            // 不開暫存層（ModulateAlpha）：半透明時才不會把超出這一列範圍的東西裁掉
+                            compositingStrategy = androidx.compose.ui.graphics.CompositingStrategy.ModulateAlpha
                             // 第幾個「看得到的」列決定出場順序（捲動過的清單從畫面上第一列開始算）
                             val order = (index - listState.firstVisibleItemIndex).coerceAtLeast(0)
                             val a = rowReveal(reveal.value, order)

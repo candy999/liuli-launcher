@@ -10,6 +10,7 @@ import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusGroup
@@ -167,11 +168,19 @@ fun HomeScreen(
     var lastDockPkg by remember { mutableStateOf(focusPrefs.getString("last_dock", null)) }
 
     // ── App 清單：安裝、移除、更新時自動重新載入 ──
+    // App 清單載入完成了沒（還沒載入時常用列什麼都不顯示——不能先閃出「加入常用」再換成 App）
+    var appsLoaded by remember { mutableStateOf(false) }
     LaunchedEffect(reloadKey) {
         val loaded = AppRepository.load(context)
         apps = loaded
         val installed = loaded.map { it.packageName }.toSet()
         dock = (dockStore.load() ?: DockStore.defaultFor(loaded)).filter { it in installed }
+        appsLoaded = true
+    }
+    // 常用列第一次出現：一個一個淡入浮上（和面板、抽屜同一套出場語言）
+    val dockReveal = remember { Animatable(0f) }
+    LaunchedEffect(appsLoaded) {
+        if (appsLoaded) dockReveal.animateTo(DOCK_REVEAL_MS, tween(DOCK_REVEAL_MS.toInt(), easing = androidx.compose.animation.core.LinearEasing))
     }
     DisposableEffect(Unit) {
         val receiver = object : BroadcastReceiver() {
@@ -1113,7 +1122,7 @@ fun HomeScreen(
                     contentPadding = PaddingValues(start = 48.dp, end = 48.dp, top = 14.dp, bottom = 14.dp),
                     horizontalArrangement = Arrangement.spacedBy(22.dp),
                 ) {
-                    if (dockApps.isEmpty()) {
+                    if (appsLoaded && dockApps.isEmpty()) {
                         // 常用全部移除後，這一列必須還有東西能拿焦點，否則下鍵打不開所有 App、也無法再加入常用
                         item(key = "add") {
                             AddToDockTile(
@@ -1129,8 +1138,11 @@ fun HomeScreen(
                         Box(
                             Modifier.graphicsLayer {
                                 val mp = movingPkg
-                                translationY = if (mp == app.packageName) -14.dp.toPx() else 0f
-                                alpha = if (mp != null && mp != app.packageName) 0.55f else 1f
+                                // 逐個出場：不開暫存層（ModulateAlpha），焦點放大的圖示才不會被這一層的邊界裁成直角
+                                compositingStrategy = CompositingStrategy.ModulateAlpha
+                                val a = tw.liuli.launcher.ui.components.rowReveal(dockReveal.value, i, stagger = 55f, fade = 280f)
+                                translationY = (if (mp == app.packageName) -14.dp.toPx() else 0f) + (1f - a) * 18.dp.toPx()
+                                alpha = (if (mp != null && mp != app.packageName) 0.55f else 1f) * a
                             },
                         ) {
                         AppTile(
@@ -1295,3 +1307,6 @@ private fun minimalIdleText(sec: Int) = when {
     sec < 60 -> "閒置 $sec 秒"
     else -> "閒置 ${sec / 60} 分鐘"
 }
+
+/** 常用列第一次出現的總時間（毫秒）：每個間隔 55ms、淡入 280ms。 */
+private const val DOCK_REVEAL_MS = 55f * 12 + 280f

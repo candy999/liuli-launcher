@@ -489,6 +489,8 @@ fun AppDrawer(
                 itemsIndexed(if (tw.liuli.launcher.ui.bg.PerfProbe.noTiles) emptyList() else apps, key = { _, a -> a.packageName }) { i, app ->
                     Box(
                         Modifier.graphicsLayer {
+                            // 不開暫存層（ModulateAlpha）：焦點放大 1.1 倍的圖示會超出這一格，開暫存層的話上緣會被裁成直角
+                            compositingStrategy = CompositingStrategy.ModulateAlpha
                             // 以畫面上的第幾排決定出場順序（一排 6 個），同一排左到右再錯開一點點
                             val pos = (i - gridState.firstVisibleItemIndex).coerceAtLeast(0)
                             val a = tw.liuli.launcher.ui.components.rowReveal(reveal.value, pos / 6 * 3 + pos % 6 / 2, stagger = 30f, fade = 200f)
