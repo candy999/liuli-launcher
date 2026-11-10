@@ -67,10 +67,10 @@ fun AppTile(
                 .fillMaxWidth()
                 .aspectRatio(16f / 9f)
                 .focusScale(focus, 1.10f)
-                // 焦點陰影：畫在淡入層「外面」（淡入層暫時是一張和磚同大的圖，陰影畫在裡面會被切掉＝破圖），
-                // 深淺跟著淡入一起出現
+                // 焦點陰影：畫在淡入層「外面」（淡入層暫時是一張和磚同大的圖，陰影畫在裡面會被切掉＝破圖）。
+                // 陰影在磚的正下方，磚半透明時會透出底下整片陰影（像一個方框），所以等磚幾乎不透明（90% 以上）才浮現
                 .graphicsLayer {
-                    shadowElevation = 8.dp.toPx() * focus.value() * reveal()
+                    shadowElevation = 8.dp.toPx() * focus.value() * ((reveal() - .9f) / .1f).coerceIn(0f, 1f)
                     shape = tileShape
                     clip = false
                 }
