@@ -18,7 +18,6 @@ import kotlin.math.sin
  * - 沿著一條帶子、密度由中線往外遞減的星雲（裡面有大大小小、不規則的雲團——碎形雜訊）
  * - 被彎彎曲曲的暗塵帶切開（另一組雜訊在中線附近挖出暗紋）
  * - 核心偏暖（黃白）、外圍偏冷（藍白）、飽和度很低
- * - 一大堆暗淡的微小星點糊成的顆粒感
  * 生成後再輕微模糊一次，讓它「暈開」，最後以加法混合疊在深空上。
  * 座標：涵蓋邏輯畫面的 110%（視差移動時邊緣不會露空）；帶子與 Styles 的星點同一條斜線（-24°）。
  */
@@ -118,9 +117,8 @@ internal object MilkyWay {
             val r = l * (.86f + .14f * wm)
             val g = l * (.86f + .04f * wm)
             val b = l * (.95f - .2f * wm)
-            // 微小星點糊成的顆粒：亮處多一點細碎的亮點
-            val grain = if (hash(k, 7, 91) > .985f) .25f * l + .04f else 0f
-            fun c(v: Float) = (min(1f, v + grain) * 255f + .5f).toInt()
+            // （不再在這張小圖上撒顆粒星點：小圖放大到全螢幕後，顆粒會變成糊糊的半透明斑點，像螢幕發霉；星點改由原生解析度的星點層負責）
+            fun c(v: Float) = (min(1f, v) * 255f + .5f).toInt()
             px[k] = (0xFF shl 24) or (c(r) shl 16) or (c(g) shl 8) or c(b)
         }
         return Bitmap.createBitmap(px, TW, TH, Bitmap.Config.ARGB_8888).asImageBitmap()

@@ -440,6 +440,12 @@ fun HomeScreen(
     LaunchedEffect(externalAction) {
         // 量測用（adb）：直接切換背景樣式
         // adb shell am start -n tw.liuli.launcher/.MainActivity --es tw.liuli.launcher.ACTION style:contour
+        // 量測用（adb）：山稜的時光色彩固定在某個時刻 tod:HH:MM（tod:now 回到現在時間）
+        externalAction.second?.takeIf { externalAction.first > 0 && it.startsWith("tod:") }?.let { v ->
+            val hm = v.removePrefix("tod:").split(":")
+            tw.liuli.launcher.ui.bg.TimeOfDay.overrideMinutes = if (hm.size == 2) hm[0].toFloat() * 60 + hm[1].toFloat() else -1f
+            return@LaunchedEffect
+        }
         val styleId = externalAction.second?.removePrefix("style:")
         if (externalAction.first > 0 && externalAction.second?.startsWith("style:") == true && styleId != null) {
             if (styleId == BgStyle.RANDOM_ID) {

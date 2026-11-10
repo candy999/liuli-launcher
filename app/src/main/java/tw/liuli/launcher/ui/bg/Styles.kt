@@ -55,10 +55,14 @@ private class Scratch {
     val ditherM = android.graphics.Matrix()
     val ditherInv = android.graphics.Matrix()
     val path = Path()
-    /** 山稜：貼圖網格的頂點（每一塊一組，每幀重算、不配置新陣列）、上色的畫筆與色彩矩陣。 */
-    val ridgeVerts = arrayOfNulls<FloatArray>(24)
+    /** 山稜：上色的畫筆與色彩矩陣、星軌的位置。 */
     val ridgePaint = android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG or android.graphics.Paint.ANTI_ALIAS_FLAG)
     val ridgeTint = RidgeTint()
+    val ridgeRect = android.graphics.RectF()
+    /** 雲頭的位置、半徑、高度（每格重算，不配置新陣列）。 */
+    val billowX = FloatArray(64)
+    val billowR = FloatArray(64)
+    val billowY = FloatArray(64)
     val mesh = buildMesh()
     val sampleA = FloatArray(2)
     val sampleB = FloatArray(2)
@@ -363,7 +367,8 @@ private object StarField {
     }
 }
 
-private val CLOUD_ALPHA = floatArrayOf(.1f, .18f, .3f, .5f)
+/** 銀河星點各組的透明度：最暗那組不畫（太淡的點散在銀河裡像灰塵、像螢幕發霉），其餘稍微提亮。 */
+private val CLOUD_ALPHA = floatArrayOf(0f, .24f, .36f, .56f)
 private val FIELD_ALPHA = floatArrayOf(.18f, .3f, .48f, .75f)
 
 private fun DrawScope.points(pts: FloatArray, paint: android.graphics.Paint) {
@@ -506,6 +511,7 @@ fun DrawScope.galaxyCloudStars() {
     withTransform({ rotate(-24f, pivot = Offset(W / 2, H / 2)) }) {
         paint.strokeWidth = 1.3f / ppu
         for (b in 0 until BUCKETS) {
+            if (CLOUD_ALPHA[b] <= 0f) continue
             paint.color = Color.hsl(40f, .15f, .9f, CLOUD_ALPHA[b]).toArgb()
             points(StarField.cloud[b], paint)
         }
@@ -697,30 +703,92 @@ private fun DrawScope.contour(st: BgState) {
     vignette(.4f)
 }
 
-// ───────────── 9. 山稜（從玉山北峰望主峰：真實地形＋侵蝕紋理，沿遮擋邊與主稜分塊、每一點依距離連續視差） ─────────────
+// ───────────── 9. 山稜（玉山：向量分層、時光色彩、隨風流動的平塗雲海、深夜星軌） ─────────────
 
-/** 雲海的週期（秒）：每個週期約一半的機會湧起一次，慢慢漫上來、再慢慢退去。 */
-private const val SEA_PERIOD = 80f
-
-/** 天上幾顆很淡的星（只在山的上方）。 */
+/** 天上幾顆亮星（黎明、暮色時才看得到；深夜改成星軌）。 */
 private val ridgeStars = FloatArray(60 * 2).also { a ->
-    for (i in 0 until 60) { a[i * 2] = hash01(i, 611) * W; a[i * 2 + 1] = hash01(i, 612).pow(1.6f) * H * .26f }
+    for (i in 0 until 60) { a[i * 2] = hash01(i, 611) * W; a[i * 2 + 1] = hash01(i, 612).pow(1.4f) * H * .3f }
 }
 
-/** 地形的色彩矩陣：A＝覆蓋、R＝受光、G＝霧 → 本體色＋（山嵐色－本體色）×霧＋光色×受光。顏色沒變就沿用。 */
+private fun fc(a: FloatArray, alpha: Float = 1f) = Color(a[0].coerceIn(0f, 1f), a[1].coerceIn(0f, 1f), a[2].coerceIn(0f, 1f), alpha.coerceIn(0f, 1f))
+private fun mixF(a: FloatArray, b: FloatArray, s: Float) = FloatArray(3) { a[it] + (b[it] - a[it]) * s }
+
+/** 山的色彩矩陣：A＝覆蓋、R＝受光、G＝遠近 → 陰影色＋（山嵐色－陰影色）×遠近＋光×受光。顏色沒變就沿用。 */
 private class RidgeTint {
-    var key = 0L
+    private val last = FloatArray(9) { -1f }
     var filter: android.graphics.ColorFilter? = null
-    fun get(body: Color, haze: Color, light: Color): android.graphics.ColorFilter {
-        val k = (body.toArgb().toLong() * 31 + haze.toArgb()) * 31 + light.toArgb()
-        filter?.let { if (k == key) return it }
+    fun get(body: FloatArray, haze: FloatArray, light: FloatArray): android.graphics.ColorFilter {
+        val cur = floatArrayOf(body[0], body[1], body[2], haze[0], haze[1], haze[2], light[0], light[1], light[2])
+        var same = filter != null
+        for (i in 0 until 9) if (kotlin.math.abs(cur[i] - last[i]) > .002f) { same = false; break }
+        if (same) return filter!!
+        System.arraycopy(cur, 0, last, 0, 9)
         val m = floatArrayOf(
-            light.red, haze.red - body.red, 0f, 0f, 255f * body.red,
-            light.green, haze.green - body.green, 0f, 0f, 255f * body.green,
-            light.blue, haze.blue - body.blue, 0f, 0f, 255f * body.blue,
+            light[0], haze[0] - body[0], 0f, 0f, 255f * body[0],
+            light[1], haze[1] - body[1], 0f, 0f, 255f * body[1],
+            light[2], haze[2] - body[2], 0f, 0f, 255f * body[2],
             0f, 0f, 0f, 1f, 0f,
         )
-        return android.graphics.ColorMatrixColorFilter(m).also { filter = it; key = k }
+        return android.graphics.ColorMatrixColorFilter(m).also { filter = it }
+    }
+}
+
+/**
+ * 雲量場（0～1）：跟著風移動、也慢慢自己變化。濃的地方雲頭大、連成雲海；稀的地方雲頭縮到沒有、露出山谷。
+ * [xw]＝隨風移動的座標（畫面座標減掉風吹過的距離）。
+ */
+private fun cloudDens(xw: Float, seed: Float, t: Float, amount: Float = .5f): Float {
+    val f = .5f + .3f * sin(xw * .011f + seed * .7f + t * .013f) + .24f * sin(xw * .0201f + seed * 1.3f - t * .009f) + .14f * sin(xw * .041f + seed * 2.1f + t * .02f)
+    val x = ((f - (1.02f - amount)) / .28f).coerceIn(0f, 1f)
+    return x * x * (3 - 2 * x)
+}
+
+/**
+ * 平塗雲海：一排隨風由左往右推移的雲頭（圓），三階平塗——雲頭向著太陽的那一邊最亮、中間階、下半部陰影。
+ * [base]＝雲海平面的高度、[r0]＝雲頭的大小、[spd]＝風速（邏輯像素／秒）、[dk]＝這一層的視差、[fill]＝雲海一路填到畫面底
+ * （夾在山層之間，被前面的稜線擋住＝雲穿過山脈）。
+ */
+private fun DrawScope.billowDeck(
+    base: Float, r0: Float, spd: Float, dk: Float, seed: Int, fill: Boolean, small: Boolean,
+    t: Float, par: Float, sunDir: Float, lit: Color, mid: Color, shade: Color, bx: FloatArray, br: FloatArray, by: FloatArray,
+) {
+    val span = W + 4 * r0; val sp = r0 * 1.15f
+    val n = minOf(bx.size, kotlin.math.ceil(span / sp).toInt())
+    val px = par * W * dk
+    var m = 0
+    for (i in 0 until n) {
+        val ph = i * sp + t * spd + seed * 37.1f
+        val wrap = kotlin.math.floor(ph / span).toInt()
+        val x = ph - wrap * span - 2 * r0 + px
+        val id = i + wrap * n
+        val d = cloudDens(x - px - t * spd, seed.toFloat(), t)
+        if (d < .04f) continue
+        val r = r0 * (.55f + .45f * hash01(id, seed)) * (.3f + .7f * d)
+        bx[m] = x; br[m] = r; by[m] = base - r * (.2f + .35f * hash01(id, seed + 7)) - 5f * d
+        m++
+    }
+    val bottom = if (fill) H + 2f else base + r0 * .55f
+    // 1. 雲海本體（雲頭下方）與下半部的陰影
+    for (j in 0 until m) drawRect(mid, Offset(bx[j] - br[j] * 1.05f, by[j]), Size(br[j] * 2.1f, bottom - by[j]))
+    if (fill) for (j in 0 until m) {
+        val sy = base + r0 * .6f
+        if (sy < bottom) drawRect(shade, Offset(bx[j] - br[j] * 1.05f, sy), Size(br[j] * 2.1f, bottom - sy))
+    }
+    // 2. 雲頭（中間階）
+    for (j in 0 until m) {
+        drawCircle(mid, br[j], Offset(bx[j], by[j]))
+        if (small) {
+            drawCircle(mid, br[j] * .45f, Offset(bx[j] - br[j] * .65f, by[j] + br[j] * .2f))
+            drawCircle(mid, br[j] * .42f, Offset(bx[j] + br[j] * .62f, by[j] + br[j] * .22f))
+        }
+    }
+    // 3. 向陽的受光面：比雲頭小一點、往太陽和上方偏，留下背光那一側一彎中間階
+    for (j in 0 until m) {
+        drawCircle(lit, br[j] * .8f, Offset(bx[j] + sunDir * br[j] * .18f, by[j] - br[j] * .16f))
+        if (small) {
+            drawCircle(lit, br[j] * .34f, Offset(bx[j] - br[j] * .65f + sunDir * br[j] * .08f, by[j] + br[j] * .12f))
+            drawCircle(lit, br[j] * .32f, Offset(bx[j] + br[j] * .62f + sunDir * br[j] * .08f, by[j] + br[j] * .14f))
+        }
     }
 }
 
@@ -729,83 +797,95 @@ private fun DrawScope.ridge(st: BgState) {
     val t = st.at
     val par = -(st.fx - .5f)
     val parY = -(st.fy - .5f)
-    val haze = st.c(-8f, .38f, .36f)
-    // 天色：越接近地平線越亮
-    drawRect(Brush.verticalGradient(0f to st.c(12f, .6f, .03f), .55f to st.c(4f, .5f, .1f), 1f to st.c(-4f, .45f, .22f), startY = 0f, endY = H * .55f), size = FULL)
-    drawRect(st.c(-4f, .45f, .22f), Offset(0f, H * .55f), Size(W, H * .45f))
-    val paint = sc.starPaint
-    paint.strokeWidth = .55f
-    paint.color = Color.hsl(220f, .1f, .9f, .2f).toArgb()
-    translate(par * W * .004f, 0f) { points(ridgeStars, paint) }
-    // 天光：日出前從主峰後方透出的柔光（跟著焦點左右移，按下時亮一點），只有暈、沒有圓盤
-    val lx = W * (.2f + .6f * st.fx) + par * W * .01f
-    val ly = H * .26f
-    val glowA = .2f + .08f * st.pulse
-    drawRect(gaussBrush(st.c(-20f, .5f, .7f, glowA), Offset(lx, ly), W * .55f), Offset(lx - W * .55f, ly - W * .55f), Size(W * 1.1f, W * 1.1f), blendMode = BlendMode.Plus)
+    val (sun, pal) = TimeOfDay.now(System.currentTimeMillis())
+    val D = .92f
+    fun dim(a: FloatArray) = FloatArray(3) { a[it] * D }
+    val body = dim(pal.body); val haze = dim(pal.haze)
+    val midTone = mixF(body, haze, .55f)
+    val litC = dim(pal.lit)
+    val light = FloatArray(3) { (litC[it] - midTone[it]) * pal.litK }
+    val cLit = dim(pal.cLit); val cShade = dim(pal.cShade)
+    val nightK = ((pal.stars - .5f) / .5f).coerceIn(0f, 1f)
 
-    val pieces = YushanRidge.pieces
-    if (pieces == null) { YushanRidge.request(); vignette(.32f); return }
+    // 天空：頂 → 中 → 地平線，地平線以下接遠山的山嵐色
+    drawRect(Brush.verticalGradient(0f to fc(dim(pal.skyTop)), .58f to fc(dim(pal.skyMid)), 1f to fc(dim(pal.skyHor)), startY = 0f, endY = H * .3f), size = Size(W, H * .3f))
+    drawRect(Brush.verticalGradient(0f to fc(dim(pal.skyHor)), .15f to fc(haze), 1f to fc(haze), startY = H * .3f, endY = H), Offset(0f, H * .3f), Size(W, H * .7f))
     val canvas = drawContext.canvas.nativeCanvas
-    val tp = sc.ridgePaint
-    tp.colorFilter = sc.ridgeTint.get(st.c(6f, .5f, .028f), haze, st.c(-24f, .38f, .5f))
-    val s = YushanRidge.scale
-    // 雲海：偶爾湧起，慢慢漫上來、再退去（每個週期由固定亂數決定這次有沒有）
-    val ph = t / SEA_PERIOD
-    val cyc = kotlin.math.floor(ph).toInt()
-    val sea = if (hash01(cyc, 801) > .45f) sin((ph - cyc) * PI.toFloat()).pow(2) else 0f
-    val cloud = lerp(haze, st.c(-12f, .2f, .62f), .35f)
-    val seaAfter = pieces.indexOfLast { it.depth > 3000f }
-
-    for ((pi, p) in pieces.withIndex()) {
-        // 網格：每個頂點依自己的距離移動（近的移得多），同一塊山體連續變形、不會斷
-        val n = p.gw * p.gh * 2
-        var v = sc.ridgeVerts[pi]
-        if (v == null || v.size != n) { v = FloatArray(n); sc.ridgeVerts[pi] = v }
-        val ox = par * W; val oy = parY * H * .35f
-        var q = 0
-        for (j in 0 until p.gh) {
-            val by = (p.y0 + j * p.h / (p.gh - 1f)) / s
-            for (i in 0 until p.gw) {
-                val kk = p.k[j * p.gw + i]
-                v[q++] = YushanRidge.X0 + (p.x0 + i * p.w / (p.gw - 1f)) / s + ox * kk
-                v[q++] = by + oy * kk
-            }
-        }
-        canvas.drawBitmapMesh(p.image, p.gw - 1, p.gh - 1, v, 0, null, 0, tp)
-
-        // 薄霧：中遠景的山體之間一直緩緩飄的幾縷（高斯暈開、扁長，各自忽濃忽淡）
-        if (p.depth in 1200f..12000f) {
-            val dx = ox * (.004f + .11f * (150f / p.depth).pow(.75f))
-            for (m in 0 until 3) {
-                val seed = pi * 3 + m
-                val speed = .003f + .004f * hash01(seed, 701)
-                val cx = frac(hash01(seed, 702) + t * speed) * W * 1.8f - W * .4f + dx
-                val cy = p.meanY + (4f + 12f * hash01(seed, 703)) + 3f * sin(t * .07f + seed)
-                val r = W * (.2f + .16f * hash01(seed, 704))
-                val a = (.12f + .1f * hash01(seed, 705)) * (.65f + .35f * sin(t * (.05f + .05f * hash01(seed, 706)) + seed * 2f))
-                withTransform({ scale(1f, .1f + .06f * hash01(seed, 707), pivot = Offset(cx, cy)) }) {
-                    drawRect(gaussBrush(haze.copy(alpha = a), Offset(cx, cy), r), Offset(cx - r, cy - r), Size(r * 2, r * 2))
-                }
-            }
-        }
-        // 雲海：漫在遠山的山腳，主峰與東峰矗立在雲上
-        if (pi == seaAfter && sea > .01f) {
-            val level = p.meanY + 10f - 20f * sea
-            drawRect(
-                Brush.verticalGradient(0f to cloud.copy(alpha = 0f), .3f to cloud.copy(alpha = .75f * sea), 1f to cloud.copy(alpha = .9f * sea), startY = level - 8f, endY = level + 40f),
-                Offset(-10f, level - 8f), Size(W + 20f, H - level + 10f),
-            )
-            for (m in 0 until 8) {
-                val cx = frac(hash01(m, 811) + t * (.002f + .002f * hash01(m, 812))) * W * 1.5f - W * .25f + ox * .01f
-                val r = W * (.1f + .08f * hash01(m, 813))
-                val cy = level + 2f
-                withTransform({ scale(1f, .3f, pivot = Offset(cx, cy)) }) {
-                    drawRect(gaussBrush(cloud.copy(alpha = .8f * sea), Offset(cx, cy), r), Offset(cx - r, cy - r), Size(r * 2, r * 2))
-                }
-            }
+    // 深夜：同心圓星軌，繞著山後面的南天極慢慢轉（先畫好的一張圖，每格只旋轉）
+    if (nightK > .01f) {
+        val tr = YushanRidge.trails
+        if (tr == null) YushanRidge.requestTrails()
+        else {
+            val tp = sc.ridgePaint
+            tp.colorFilter = null; tp.alpha = (nightK * .95f * 255).toInt()
+            canvas.save()
+            canvas.translate(par * W * .004f, 0f)
+            canvas.rotate(t * YushanRidge.TRAIL_DEG_PER_SEC, YushanRidge.POLE_X, YushanRidge.POLE_Y)
+            YushanRidge.trailRect(sc.ridgeRect)
+            canvas.drawBitmap(tr, null, sc.ridgeRect, tp)
+            canvas.restore()
+            tp.alpha = 255
         }
     }
-    vignette(.32f)
+    // 黎明、暮色：剩幾顆亮星
+    val dotA = pal.stars * (1 - nightK)
+    if (dotA > .01f) {
+        val paint = sc.starPaint
+        paint.strokeWidth = .7f
+        paint.color = Color(.88f, .92f, 1f, (dotA * .8f).coerceIn(0f, 1f)).toArgb()
+        translate(par * W * .003f, 0f) { points(ridgeStars, paint) }
+    }
+    // 日、月的光暈：上午在東（左）、下午在西（右）；越低越貼近地平線、越大越暖。夜裡是地平線一抹暖光
+    val day = sun.elev > -6f
+    val frac01 = ((sun.tst - 360f) / 720f).coerceIn(0f, 1f)
+    val gx = if (day) W * (.06f + .88f * frac01) else W * .3f
+    val gy = if (day) H * (.3f - .26f * (sun.elev / 50f).coerceIn(0f, 1f)) else H * .28f
+    val glow = dim(pal.glow)
+    withTransform({ scale(1f, if (day) .55f else .2f, pivot = Offset(gx, gy)) }) {
+        val rr = W * (if (day) .75f else .6f)
+        drawRect(gaussBrush(fc(glow, pal.glowA), Offset(gx, gy), rr), Offset(gx - rr, gy - rr), Size(rr * 2, rr * 2), blendMode = BlendMode.Plus)
+    }
+    withTransform({ scale(1f, .07f, pivot = Offset(gx, H * .29f)) }) {
+        val rr = W * .9f
+        drawRect(gaussBrush(fc(glow, pal.glowA * .8f), Offset(gx, H * .29f), rr), Offset(gx - rr, H * .29f - rr), Size(rr * 2, rr * 2), blendMode = BlendMode.Plus)
+    }
+    val sunDir = if (gx < W / 2) -1f else 1f
+    val hiMid = fc(mixF(cLit, cShade, .3f), .55f); val hiLit = fc(cLit, .6f)
+    // 高空的卷雲：平塗的細長流線（上半亮、下半略暗），各自緩慢往右飄
+    for (i in 0 until 7) {
+        val cx = frac(hash01(i, 901) + t * (.0015f + .0025f * hash01(i, 902))) * W * 1.6f - W * .3f + par * W * .003f
+        val cy = H * (.02f + .2f * hash01(i, 903))
+        val len = 40f + 90f * hash01(i, 905); val th = 1.4f + 2.2f * hash01(i, 906)
+        drawOval(hiMid, Offset(cx - len, cy - th), Size(len * 2, th * 2))
+        drawOval(hiLit, Offset(cx - len * .85f, cy - th * 1.15f), Size(len * 1.7f, th * 1.3f))
+    }
+
+    val layers = YushanRidge.layers
+    if (layers == null) { YushanRidge.request(); vignette(.2f); return }
+    fun topOf(name: String) = layers.firstOrNull { it.name == name }?.topY ?: H * .6f
+    val lit = fc(cLit); val mid = fc(mixF(cLit, cShade, .35f)); val shade = fc(mixF(cLit, cShade, .8f))
+    val farLit = fc(mixF(cLit, haze, .3f)); val farMid = fc(mixF(mixF(cLit, cShade, .35f), haze, .35f)); val farShade = fc(mixF(mixF(cLit, cShade, .8f), haze, .4f))
+    val bx = sc.billowX; val br = sc.billowR; val by = sc.billowY
+    // 地平線上、遠山背後的積雲
+    billowDeck(topOf("遠山") - 4f, 7f, .5f, .004f, 3, false, true, t, par, sunDir, farLit, farMid, farShade, bx, br, by)
+    val tp = sc.ridgePaint
+    tp.colorFilter = sc.ridgeTint.get(body, haze, light)
+    val ox = par * W; val oy = parY * H * .35f
+    for (p in layers) {
+        // 整層一起平移（視差），不變形
+        p.dst.set(p.x0 + ox * p.k, p.y0 + oy * p.k, p.x0 + ox * p.k + p.w, p.y0 + oy * p.k + p.h)
+        canvas.drawBitmap(p.image, null, p.dst, tp)
+        // 雲海夾在山層之間：風由左往右吹，越近的雲流得越快、雲頭越大
+        when (p.name) {
+            "遠山" -> billowDeck(p.topY + 6f, 9f, 1f, .006f, 4, true, true, t, par, sunDir, farLit, farMid, farShade, bx, br, by)
+            "主峰山體" -> billowDeck(topOf("右側稜") - 14f, 15f, 1.7f, .03f, 5, true, true, t, par, sunDir, lit, mid, shade, bx, br, by)
+            "右側稜" -> billowDeck(topOf("近稜（北峰→風口）") - 8f, 14f, 2.2f, .045f, 6, true, true, t, par, sunDir, lit, mid, shade, bx, br, by)
+            "近稜（北峰→風口）" -> billowDeck(topOf("近稜下方的稜") - 8f, 13f, 2.8f, .06f, 7, true, false, t, par, sunDir, lit, mid, shade, bx, br, by)
+            "近稜下方的稜" -> billowDeck(topOf("最前面的稜") - 8f, 12f, 3.3f, .08f, 9, false, false, t, par, sunDir, lit, mid, shade, bx, br, by)
+        }
+        tp.colorFilter = sc.ridgeTint.get(body, haze, light)
+    }
+    vignette(.16f + .1f * nightK)
 }
 
 // ───────────── 10. 光束（粗細不一的垂直光束，呼吸、流動，往焦點聚攏） ─────────────
