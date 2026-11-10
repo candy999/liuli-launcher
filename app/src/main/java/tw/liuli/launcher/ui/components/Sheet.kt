@@ -21,6 +21,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.runtime.getValue
@@ -118,9 +119,13 @@ fun GlassSheet(
             slide.animateTo(1f, SheetExit)
             onExited()
         } else {
+            // 底框「幾乎到位」（剩不到 3%）就開始逐列出現，和彈簧最後的收尾重疊，不會有一段空框在等
+            launch {
+                androidx.compose.runtime.snapshotFlow { slide.value }.first { it < .03f }
+                asLayer = false
+                reveal.animateTo(REVEAL_TOTAL_MS, tween(REVEAL_TOTAL_MS.toInt(), easing = LinearEasing))
+            }
             slide.animateTo(0f, SheetSpring)
-            asLayer = false
-            reveal.animateTo(REVEAL_TOTAL_MS, tween(REVEAL_TOTAL_MS.toInt(), easing = LinearEasing))
         }
     }
     val sheetWidthPx = with(androidx.compose.ui.platform.LocalDensity.current) { 340.dp.toPx() }

@@ -52,6 +52,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import tw.liuli.launcher.context.Festivals
 import tw.liuli.launcher.context.HomeContext
@@ -410,9 +411,13 @@ fun AppDrawer(
             runCatching { gridState.scrollToItem(0) }
             delay(16)
             runCatching { first.requestFocus() }
+            // 抽屜「幾乎到位」（剩不到 3%）就開始逐排出現，和彈簧最後的收尾重疊，不會有一段空框在等
+            launch {
+                androidx.compose.runtime.snapshotFlow { slide.value }.first { it < .03f }
+                asLayer = false
+                reveal.animateTo(DRAWER_REVEAL_MS, androidx.compose.animation.core.tween(DRAWER_REVEAL_MS.toInt(), easing = androidx.compose.animation.core.LinearEasing))
+            }
             slide.animateTo(0f, SheetSpring)
-            asLayer = false
-            reveal.animateTo(DRAWER_REVEAL_MS, androidx.compose.animation.core.tween(DRAWER_REVEAL_MS.toInt(), easing = androidx.compose.animation.core.LinearEasing))
         } else if (shown) {
             // 收起：背景與主畫面已經先畫好（背景不再裁掉被蓋住的部分），抽屜整塊當一張圖加速滑出
             asLayer = true
