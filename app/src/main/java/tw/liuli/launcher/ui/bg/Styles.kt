@@ -743,44 +743,78 @@ private fun cloudDens(xw: Float, seed: Float, t: Float, amount: Float = .5f): Fl
 }
 
 /**
- * 雲海：一層層平塗的雲帶（不是一顆顆的圓）。上緣是平順、緩緩起伏的曲線，沿著上緣一條細細的受光邊，
- * 由上往下從亮漸漸融進山嵐色、帶一點透明。雲帶的厚薄由隨風移動的雲量場決定：濃的地方雲帶變厚、抬高，
- * 稀的地方收窄到沒有——所以雲一邊往右流、一邊拉長、斷開，不是固定的形狀。
- * [base]＝雲帶中線、[up]／[down]＝最厚時往上／往下的厚度、[spd]＝風速（邏輯像素／秒）、[dk]＝這一層的視差。
+ * 雲海：一條雲帶由 2～3 層疊成——後面那層淡、高，前面那層稍深、低；每層的上緣是一排細細的圓弧雲頭（|sin|^½ 的起伏），
+ * 沿上緣一條受光細邊，往下漸漸融進山嵐色。雲帶厚薄由隨風移動的雲量場決定：濃的地方變厚、抬高，稀的地方收窄到沒有，
+ * 所以雲一邊往右流、一邊拉長、斷開。[base]＝雲帶中線、[up]／[down]＝最厚時往上／往下的厚度、[spd]＝風速、[dk]＝視差。
  */
 private fun DrawScope.mistDeck(
     base: Float, up: Float, down: Float, spd: Float, dk: Float, seed: Int,
     t: Float, par: Float, top: Color, midC: Color, bottom: Color, rim: Color, path: Path, rimPath: Path,
 ) {
     val px = par * W * dk
-    val step = 4f
+    val step = 2.5f
     val n = ((W + 20f) / step).toInt() + 1
-    path.reset(); rimPath.reset()
-    var any = false
-    var rimOn = false
-    // 上緣（左→右）
-    for (i in 0 until n) {
-        val x = -10f + i * step
-        val xw = x - px - t * spd
-        val d = cloudDens(xw, seed.toFloat(), t)
-        val ty = base - up * d * (.72f + .28f * sin(xw * .045f + seed)) - 1.4f * d * sin(xw * .13f + seed * 2f)
-        if (i == 0) path.moveTo(x, ty) else path.lineTo(x, ty)
-        if (d > .12f) {
-            if (!rimOn) { rimPath.moveTo(x, ty + .3f); rimOn = true } else rimPath.lineTo(x, ty + .3f)
-            any = true
-        } else rimOn = false
+    for (layer in 0 until 3) {
+        val ly = layer.toFloat()
+        val lb = base + ly * up * .32f                       // 前面的層低一點
+        val sUp = up * (1f - ly * .18f); val sDown = down * (1f - ly * .1f)
+        val bump = 1.6f + 1.2f * ly                          // 雲頭大小：前面的層大一點
+        val freq = .16f - ly * .035f
+        val lspd = spd * (1f + ly * .18f)                    // 前面的層流得快一點（有層次）
+        val lseed = seed * 3 + layer
+        path.reset(); rimPath.reset()
+        var any = false; var rimOn = false
+        for (i in 0 until n) {
+            val x = -10f + i * step
+            val xw = x - px - t * lspd
+            val d = cloudDens(xw, seed.toFloat() + ly * .37f, t)
+            val wave = .7f + .3f * sin(xw * .04f + lseed)
+            val scal = kotlin.math.sqrt(kotlin.math.abs(sin(xw * freq * (1f + .25f * sin(xw * .011f + lseed)) + lseed * 1.7f)))
+            val ty = lb - sUp * d * wave - bump * d * scal
+            if (i == 0) path.moveTo(x, ty) else path.lineTo(x, ty)
+            if (d > .32f) {
+                if (!rimOn) { rimPath.moveTo(x, ty + .25f); rimOn = true } else rimPath.lineTo(x, ty + .25f)
+                any = true
+            } else rimOn = false
+        }
+        if (!any) continue
+        for (i in n - 1 downTo 0) {
+            val x = -10f + i * step
+            val xw = x - px - t * lspd
+            val d = cloudDens(xw, seed.toFloat() + ly * .37f, t)
+            path.lineTo(x, lb + sDown * d * (.8f + .2f * sin(xw * .03f + lseed * 3f)))
+        }
+        path.close()
+        val k = 1f - ly * .12f   // 後面的層較淡
+        drawPath(path, Brush.verticalGradient(0f to top.copy(alpha = top.alpha * k), .4f to midC.copy(alpha = midC.alpha * k), 1f to bottom, startY = lb - sUp - bump, endY = lb + sDown))
+        drawPath(rimPath, rim.copy(alpha = rim.alpha * k), style = Stroke(.55f))
     }
-    if (!any) return
-    // 下緣（右→左）
-    for (i in n - 1 downTo 0) {
-        val x = -10f + i * step
-        val xw = x - px - t * spd
-        val d = cloudDens(xw, seed.toFloat(), t)
-        path.lineTo(x, base + down * d * (.8f + .2f * sin(xw * .03f + seed * 3f)))
+}
+
+/** 一條卷雲：細長、兩端斜斜收尖，下緣有一排細小的鋸齒（風把雲絲拉開），上半亮、下半略暗。 */
+private fun DrawScope.cirrus(cx: Float, cy: Float, len: Float, th: Float, slant: Float, seed: Int, lit: Color, mid: Color, path: Path) {
+    val nSeg = 36
+    path.reset()
+    // 上緣（左→右）：兩端收尖，略帶弧度
+    for (i in 0..nSeg) {
+        val u = i / nSeg.toFloat() * 2f - 1f
+        val taper = (1f - u * u).let { it * kotlin.math.sqrt(it) }
+        val x = cx + u * len + slant * (1f - taper) * (if (u < 0) -1f else 1f)
+        val y = cy - th * taper * (.75f + .25f * sin(u * 3f + seed))
+        if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+    }
+    // 下緣（右→左）：細鋸齒
+    for (i in nSeg downTo 0) {
+        val u = i / nSeg.toFloat() * 2f - 1f
+        val taper = (1f - u * u).let { it * kotlin.math.sqrt(it) }
+        val tooth = if (i % 2 == 0) 1f else .45f
+        val x = cx + u * len + slant * (1f - taper) * (if (u < 0) -1f else 1f) - slant * .3f
+        path.lineTo(x, cy + th * .8f * taper * tooth)
     }
     path.close()
-    drawPath(path, Brush.verticalGradient(0f to top, .45f to midC, 1f to bottom, startY = base - up, endY = base + down))
-    drawPath(rimPath, rim, style = Stroke(.7f))
+    drawPath(path, mid)
+    // 上半受光：同一條往上縮一點再畫一次
+    withTransform({ scale(.92f, .55f, pivot = Offset(cx, cy - th * .25f)) }) { drawPath(path, lit) }
 }
 
 private fun DrawScope.ridge(st: BgState) {
@@ -842,13 +876,15 @@ private fun DrawScope.ridge(st: BgState) {
     }
     val sunDir = if (gx < W / 2) -1f else 1f
     val hiMid = fc(mixF(cLit, cShade, .3f), .55f); val hiLit = fc(cLit, .6f)
-    // 高空的卷雲：平塗的細長流線（上半亮、下半略暗），各自緩慢往右飄
-    for (i in 0 until 7) {
-        val cx = frac(hash01(i, 901) + t * (.0015f + .0025f * hash01(i, 902))) * W * 1.6f - W * .3f + par * W * .003f
-        val cy = H * (.02f + .2f * hash01(i, 903))
-        val len = 40f + 90f * hash01(i, 905); val th = 1.4f + 2.2f * hash01(i, 906)
-        drawOval(hiMid, Offset(cx - len, cy - th), Size(len * 2, th * 2))
-        drawOval(hiLit, Offset(cx - len * .85f, cy - th * 1.15f), Size(len * 1.7f, th * 1.3f))
+    // 高空的卷雲：一束束細長的雲絲（兩端斜斜收尖、下緣細鋸齒），兩三條並排成一束，各自緩慢往右飄
+    for (i in 0 until 5) {
+        val cx0 = frac(hash01(i, 901) + t * (.0012f + .002f * hash01(i, 902))) * W * 1.7f - W * .35f + par * W * .003f
+        val cy0 = H * (.03f + .2f * hash01(i, 903))
+        val len0 = 36f + 60f * hash01(i, 905); val th0 = 1.3f + 1.3f * hash01(i, 906)
+        for (j in 0 until 2 + (hash01(i, 907) * 2).toInt()) {
+            val f = 1f - j * .28f
+            cirrus(cx0 + j * len0 * .22f, cy0 + j * th0 * 2.3f, len0 * f, th0 * f, 6f + 6f * hash01(i * 7 + j, 908), i * 5 + j, hiLit, hiMid, sc.mistRim)
+        }
     }
 
     val layers = YushanRidge.layers
