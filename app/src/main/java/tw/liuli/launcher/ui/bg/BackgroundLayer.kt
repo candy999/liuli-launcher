@@ -107,7 +107,9 @@ fun BackgroundLayer(engine: BackgroundEngine, blurred: () -> Float, modifier: Mo
         val ridgeNative = engine.style == BgStyle.RIDGE && YushanRidge.nativeReady
         val d = engine.renderDiv
         val w = (fullW + d - 1) / d
-        val h = (fullH + d - 1) / d
+        // 山稜：小圖只畫到天空最低點（再往下一定被原生解析度的山蓋住），合成時少貼一大塊
+        val h = if (ridgeNative) ((YushanRidge.skyBottom / BackgroundEngine.LOGICAL_H * fullH).toInt() + d - 1) / d
+            else (fullH + d - 1) / d
         Box(
             Modifier
                 .layout { measurable, _ ->

@@ -805,7 +805,7 @@ private fun DrawScope.ridge(st: BgState, skipFront: Boolean = false) {
     drawRect(Brush.verticalGradient(0f to fc(dim(pal.skyHor)), .15f to fc(haze), 1f to fc(haze), startY = H * .3f, endY = H), Offset(0f, H * .3f), Size(W, H * .7f))
     val canvas = drawContext.canvas.nativeCanvas
     // 深夜：同心圓星軌，繞著山後面的南天極慢慢轉（先畫好的一張圖，每格只旋轉）
-    if (!(skipFront && YushanRidge.nativeReady)) run {
+    if (!(skipFront && YushanRidge.nativeReady && nightK > TRAIL_NATIVE_K)) run {
         val tr = YushanRidge.trails
         if (tr == null) YushanRidge.requestTrails()
         else {
@@ -893,25 +893,41 @@ private fun DrawScope.ridge(st: BgState, skipFront: Boolean = false) {
     vignette(.16f + .1f * nightK)
 }
 
-/** 原生解析度的星軌（畫在低解析度天空之上、山之下）：高解析度的貼圖每格繞南天極旋轉，只畫天空範圍。 */
+/** 夜裡（星軌明顯）才用原生解析度畫星軌；白天只剩淡淡的痕跡，畫在低解析度的天空小圖裡就好。 */
+private const val TRAIL_NATIVE_K = .15f
+
+/**
+ * 原生解析度的星軌（畫在低解析度天空之上、山之下）：高解析度的貼圖每格繞南天極旋轉。
+ * 依直條裁到各自的天空範圍：被山蓋住的地方不畫。
+ */
 internal fun DrawScope.ridgeTrails(st: BgState, dimK: Float) {
     val tr = YushanRidge.trailsHi
     if (tr == null) { YushanRidge.requestTrails(); return }
     val sc = scratch.get()!!
     val nightK = RidgeCols(st).nightK
-    val a = (.07f + .88f * nightK) * (1f - dimK)   // 星軌全天都在轉，白天只剩淡淡的痕跡
+    if (nightK <= TRAIL_NATIVE_K) return
+    val a = (.07f + .88f * nightK) * (1f - dimK)
     if (a < .01f) return
     val par = -(st.fx - .5f)
     val canvas = drawContext.canvas.nativeCanvas
     val tp = sc.ridgePaint
     tp.colorFilter = null; tp.alpha = (a * 255).toInt()
-    canvas.save()
-    canvas.clipRect(0f, 0f, W, YushanRidge.skyBottom)
-    canvas.translate(par * W * .004f, 0f)
-    canvas.rotate(st.at * YushanRidge.TRAIL_DEG_PER_SEC, YushanRidge.POLE_X, YushanRidge.POLE_Y)
     YushanRidge.trailRect(sc.ridgeRect)
-    canvas.drawBitmap(tr, null, sc.ridgeRect, tp)
-    canvas.restore()
+    val strips = YushanRidge.skyStrips
+    val deg = st.at * YushanRidge.TRAIL_DEG_PER_SEC
+    var i = 0
+    while (i < strips.size) {
+        // 相鄰、天空最低點差不多的直條合成一段，少幾次繪製
+        var j = i; var bot = strips[i]
+        while (j + 1 < strips.size && kotlin.math.abs(strips[j + 1] - strips[i]) < 12f) { j++; bot = maxOf(bot, strips[j]) }
+        canvas.save()
+        canvas.clipRect(i * YushanRidge.TILE, 0f, (j + 1) * YushanRidge.TILE, bot)
+        canvas.translate(par * W * .004f, 0f)
+        canvas.rotate(deg, YushanRidge.POLE_X, YushanRidge.POLE_Y)
+        canvas.drawBitmap(tr, null, sc.ridgeRect, tp)
+        canvas.restore()
+        i = j + 1
+    }
     tp.alpha = 255
 }
 
@@ -967,8 +983,7 @@ internal fun DrawScope.ridgeFog(st: BgState, dimK: Float) {
         fun band(cy: Float, h: Float, spd: Float, dk: Float, v: Int, c: Color, a: Float) = fogBand(cy, h, spd, dk, v, t, par, c, a, m, mdx, mdy)
         when (p.name) {
             "遠山" -> {
-                band(p.topY + 16f, 26f, .9f, .006f, 1, fogFar, 0.85f)
-                band(p.topY + 24f, 18f, 1.4f, .008f, 2, fogFar, 0.59f)
+                band(p.topY + 18f, 30f, 1.1f, .007f, 1, fogFar, 0.9f)
             }
             "主峰山體" -> {
                 val y = topOf("右側稜")
@@ -982,13 +997,11 @@ internal fun DrawScope.ridgeFog(st: BgState, dimK: Float) {
             }
             "近稜（北峰→風口）" -> {
                 val y = topOf("近稜下方的稜")
-                band(y + 6f, 48f, 2.7f, .058f, 2, fogNear, 0.61f)
-                band(y + 16f, 30f, 3.6f, .064f, 1, fogNear, 0.44f)
+                band(y + 8f, 50f, 3f, .06f, 2, fogNear, 0.66f)
             }
             "近稜下方的稜" -> {
                 val y = topOf("最前面的稜")
-                band(y + 8f, 52f, 3.3f, .075f, 0, fogNear, 0.54f)
-                band(y + 20f, 34f, 4.3f, .082f, 2, fogNear, 0.37f)
+                band(y + 10f, 52f, 3.6f, .078f, 0, fogNear, 0.58f)
             }
         }
     }

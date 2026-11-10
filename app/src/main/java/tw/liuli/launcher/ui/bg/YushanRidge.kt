@@ -59,6 +59,9 @@ internal object YushanRidge {
     /** 天空的最低點（邏輯 y）：再往下一定是山，星軌等只畫在這之上。 */
     @Volatile var skyBottom = 270f
         private set
+    /** 每個直條（寬 [TILE]）的天空最低點：星軌只畫在各自的天空裡，不畫到一定被山蓋住的地方。 */
+    @Volatile var skyStrips = FloatArray(0)
+        private set
 
     @Volatile var layers: List<Layer>? = null
         private set
@@ -207,9 +210,15 @@ internal object YushanRidge {
             for (i in union.indices) if (o[i]) union[i] = true
         }
         // 天空最低點：全部山的聯集往下一路蓋到底的那一列，取最低的一欄，再留視差的餘量
-        var sb = 0
-        for (x in 0 until W) { var y = H; while (y > 0 && union[(y - 1) * W + x]) y--; sb = maxOf(sb, y) }
-        skyBottom = (sb + 12).coerceAtMost(H).toFloat()
+        val col = IntArray(W)
+        for (x in 0 until W) { var y = H; while (y > 0 && union[(y - 1) * W + x]) y--; col[x] = y }
+        skyBottom = ((col.maxOrNull() ?: H) + 12).coerceAtMost(H).toFloat()
+        val strips = kotlin.math.ceil(W / TILE).toInt()
+        skyStrips = FloatArray(strips) { s ->
+            var m = 0
+            for (x in (s * TILE).toInt() - 8..((s + 1) * TILE).toInt() + 8) m = maxOf(m, col[x.coerceIn(0, W - 1)])
+            (m + 10).coerceAtMost(H).toFloat()
+        }
     }
 
     // ── 山嵐（高斯霧）的貼圖：很小的 ALPHA_8 圖，畫的時候用畫筆顏色上色、雙線性放大＝高斯模糊般的柔邊 ──
