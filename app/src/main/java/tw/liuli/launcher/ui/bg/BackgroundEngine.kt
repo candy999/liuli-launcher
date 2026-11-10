@@ -460,9 +460,10 @@ class BackgroundEngine {
                     // 操作中（按鍵後一小段時間）或面板／抽屜開著：背景照常動，但降到 ÷3、每秒 30 格，GPU 留給 UI。
                     // 速度不變，所以不會停住、也不會變慢。
                     val busy = android.os.SystemClock.uptimeMillis() < yieldUntil || covered
-                    // 讓路模式：解析度降到 ÷3 就是為了換流暢——更新率固定每秒 30 格，
-                    // 不受「高畫質時量到的較低更新率」拖累（以前是取兩者較慢的那個，結果又糊又卡）
-                    val due = if (busy && !blur) BUSY_INTERVAL else if (busy) max(interval, BUSY_INTERVAL) else interval
+                    // 讓路模式：解析度降到 ÷3 是為了換流暢——更新率不再壓到每秒 15 格（以前取「15 格」與「這個樣式量到的更新率」
+                    // 較慢的那個，結果又糊又卡）。改成：這個樣式付得起每秒 30 格就 30 格，再重的樣式也至少每秒 20 格。
+                    // （不一律強制 30 格：星空這類 CPU 計算重的樣式，降解析度省不了多少，強制 30 格會拖慢焦點動畫）
+                    val due = if (busy) min(max(interval, BUSY_INTERVAL), BUSY_SLOWEST) else interval
                     if (lastBgT != 0L && t - lastBgT < due - 6f) return@withFrameNanos
                     val divBefore = renderDiv
                     var measure = false
@@ -953,6 +954,8 @@ class BackgroundEngine {
         /** 操作中的背景：至少 ÷3、每秒 30 格（解析度降下來就是為了換流暢）。 */
         private const val BUSY_DIV = 3
         private const val BUSY_INTERVAL = 33.3f
+        /** 讓路模式最慢也要每秒 20 格。 */
+        private const val BUSY_SLOWEST = 50f
         /** 每幾格背景評估一次（30fps 約 0.27 秒）。 */
         private const val ADAPT_WINDOW = 8
         /** 背景格間隔超過排定的 1.25 倍＝跟不上（連續兩窗才降）；超過 1.8 倍直接降；在 1.1 倍內＝準時，可以試著升。 */
