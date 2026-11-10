@@ -211,7 +211,7 @@ private const val REVEAL_MS = 1400
 
 /**
  * 山稜的山（動態解析度＋快取）：
- * - 焦點移動（視差）、色系或時段變化時：跟著引擎目前的解析度除數重畫（至少 ÷2），移動中一樣順
+ * - 焦點移動（視差）、色系或時段變化時：跟著引擎目前的解析度除數重畫（至少 ÷3），移動中一樣順
  * - 停下來 0.35 秒：以原生解析度重畫一次，之後內容不變，GPU 每格只把這張快取圖層貼上去
  */
 @Composable
@@ -231,7 +231,7 @@ private fun RidgeMountains(engine: BackgroundEngine, fullW: Int, fullH: Int, alp
                 if (moved) {
                     System.arraycopy(cur, 0, last, 0, cur.size)
                     stillSince = now
-                    div = maxOf(2, engine.renderDiv)
+                    div = maxOf(3, engine.renderDiv)   // 移動中看不出細節，至少 ÷3，GPU 留給焦點動畫
                     key++
                 } else if (div != 1 && now - stillSince > 350_000_000L) {
                     div = 1; key++
