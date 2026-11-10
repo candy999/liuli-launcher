@@ -155,19 +155,18 @@ fun BackgroundLayer(engine: BackgroundEngine, blurred: () -> Float, modifier: Mo
                 }
                 // 設定面板開著時壓暗：畫在 ÷d 的小圖裡，成本只有全螢幕的 1／d²
                 if (engine.dim > 0f) drawRect(Color.Black, alpha = engine.dim)
-                revealMask(from, reveal.value)
             }
         }
         if (ridgeNative) {
             val sx = fullW / BackgroundEngine.LOGICAL_W
             val sy = fullH / BackgroundEngine.LOGICAL_H
             // 星軌：原生解析度，每格旋轉（一張貼圖）
-            Canvas(Modifier.fillMaxSize().graphicsLayer { alpha = reveal.value }) {
+            Canvas(Modifier.fillMaxSize()) {
                 @Suppress("UNUSED_VARIABLE") val f = engine.frame
                 scale(sx, sy, pivot = Offset.Zero) { ridgeTrails(engine.st, engine.dim) }
             }
             // 山：動態解析度＋快取（焦點移動時降解析度、停下來畫一次原生解析度，之後每格只貼這張圖）
-            RidgeMountains(engine, fullW, fullH) { reveal.value }
+            RidgeMountains(engine, fullW, fullH) { 1f }
             // 霧：低解析度（÷3）的離屏圖層，每格流動；照前後順序畫，被前面的山擋住的部分用那層山的剪影擦掉
             val fd = maxOf(3, d)
             val fw = (fullW + fd - 1) / fd
@@ -183,7 +182,6 @@ fun BackgroundLayer(engine: BackgroundEngine, blurred: () -> Float, modifier: Mo
                         transformOrigin = TransformOrigin(0f, 0f)
                         scaleX = fd.toFloat()
                         scaleY = fd.toFloat()
-                        alpha = reveal.value
                     },
             ) {
                 Canvas(Modifier.fillMaxSize()) {
@@ -222,6 +220,9 @@ fun BackgroundLayer(engine: BackgroundEngine, blurred: () -> Float, modifier: Mo
         // 子頁面的模糊桌布畫在背景圖層「外面」：淡入淡出時每格只多貼一張小圖，背景本身維持快取不用重畫
         // （以前畫在裡面：背景靜止時已升到原生解析度，過場的每一格都要把整個背景重畫一次）
         Canvas(Modifier.fillMaxSize()) { pageBlur(engine, blurred(), IntSize(fullW, fullH)) }
+        // 冷啟動的擴散：在所有背景圖層（低解析度小圖、原生解析度的山／星軌／霧、銀河星點）之上蓋一張全螢幕的黑罩，
+        // 從焦點開一個柔邊的圓洞往外擴大——每一層一起揭開，中心一定在焦點上，也不會在圖層交界露出橫線
+        if (reveal.value < 1f) Canvas(Modifier.fillMaxSize()) { revealMask(from, reveal.value) }
         if (cover > 0.001f) Canvas(Modifier.fillMaxSize()) { drawRect(Color.Black, alpha = cover) }
     }
 }
