@@ -258,6 +258,8 @@ fun HomeScreen(
     // 離開時回到原本焦點的顏色與位置
     LaunchedEffect(minimal) {
         if (!minimal) return@LaunchedEffect
+        // 自動清理記憶體：進入簡潔模式時結束背景程式（不顯示結果，畫面維持乾淨）
+        if (settings.minimalClean) launch { runCatching { tw.liuli.launcher.geek.Rocket.launch(context) } }
         val saved = engine.snapshotTarget()
         try {
             engine.startBounce()
@@ -852,6 +854,7 @@ fun HomeScreen(
         minimalIdleText(settings.minimalIdle).let { if (settings.minimalIdle <= 0) "手動" else it },
         if (settings.minimalDim > 0) "微光" + MINIMAL_DIM_LABELS[settings.minimalDim] else null,
         if (settings.minimalDrift) "微飄移" else null,
+        if (settings.minimalClean) "自動清理" else null,
     ).joinToString("・")
 
     // 簡潔模式：只留時間與天氣的畫面；進入方式與省電、防烙印的選項都在這裡
@@ -869,6 +872,8 @@ fun HomeScreen(
                     onAdjust = { d -> settings.updateMinimalDim((settings.minimalDim + d + 4) % 4) }) { },
                 SheetItem("微飄移", subtitle = "時間與天氣緩慢飄動，避免烙印", liveDetail = { if (settings.minimalDrift) "開" else "關" },
                     onAdjust = { settings.updateMinimalDrift(!settings.minimalDrift) }) { },
+                SheetItem("自動清理記憶體", subtitle = "進入時結束背景程式", liveDetail = { if (settings.minimalClean) "開" else "關" },
+                    onAdjust = { settings.updateMinimalClean(!settings.minimalClean) }) { settings.updateMinimalClean(!settings.minimalClean) },
                 SheetItem("現在進入簡潔模式") { closeAll(); minimal = true },
             ),
             key = "minimal", reopen = { minimalSheet() },

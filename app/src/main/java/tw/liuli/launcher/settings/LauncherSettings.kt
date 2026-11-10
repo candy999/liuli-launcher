@@ -67,6 +67,15 @@ class LauncherSettings(context: Context) {
         prefs.edit().putInt("minimal_dim", level).apply()
     }
 
+    /** 進入簡潔模式時自動清理背景程式（跟火箭一樣，不限主畫面模式）。預設關。 */
+    var minimalClean by mutableStateOf(prefs.getBoolean("minimal_clean", false))
+        private set
+
+    fun updateMinimalClean(on: Boolean) {
+        minimalClean = on
+        prefs.edit().putBoolean("minimal_clean", on).apply()
+    }
+
     fun updateMinimalDrift(on: Boolean) {
         minimalDrift = on
         prefs.edit().putBoolean("minimal_drift", on).apply()
