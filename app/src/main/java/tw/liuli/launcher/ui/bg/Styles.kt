@@ -821,9 +821,9 @@ private fun DrawScope.ridge(st: BgState) {
     if (layers == null) { YushanRidge.request(); vignette(.2f); return }
     fun topOf(name: String) = layers.firstOrNull { it.name == name }?.topY ?: H * .6f
     // 霧的顏色：山嵐色帶一點雲的受光色（白天偏亮、傍晚帶暖、夜裡沉成深藍）；越遠越接近山嵐、越淡
-    val fogNear = fc(mixF(haze, cLit, .38f)); val fogFar = fc(mixF(haze, cLit, .18f))
+    val fogNear = fc(mixF(haze, cLit, .5f)); val fogFar = fc(mixF(haze, cLit, .3f))
     // 地平線、遠山背後一層很淡的霧
-    fogBand(topOf("遠山") + 4f, 22f, .6f, .004f, 0, t, par, fogFar, .45f)
+    fogBand(topOf("遠山") + 4f, 22f, .6f, .004f, 0, t, par, fogFar, 0.77f)
     val tp = sc.ridgePaint
     tp.colorFilter = sc.ridgeTint.get(body, haze, light)
     val ox = par * W; val oy = parY * H * .35f
@@ -834,34 +834,34 @@ private fun DrawScope.ridge(st: BgState) {
         // 山與山之間的霧：每個縫兩三層疊起來（各自的高度、流速、濃淡），由左往右流；被前面的稜線擋住下半＝霧從山谷裡漫出來
         when (p.name) {
             "遠山" -> {
-                fogBand(p.topY + 16f, 26f, .9f, .006f, 1, t, par, fogFar, .5f)
-                fogBand(p.topY + 24f, 18f, 1.4f, .008f, 2, t, par, fogFar, .35f)
+                fogBand(p.topY + 16f, 26f, .9f, .006f, 1, t, par, fogFar, 0.85f)
+                fogBand(p.topY + 24f, 18f, 1.4f, .008f, 2, t, par, fogFar, 0.59f)
             }
             "主峰山體" -> {
                 val y = topOf("右側稜")
-                fogBand(y + 2f, 40f, 1.6f, .028f, 0, t, par, fogNear, .42f)
-                fogBand(y + 10f, 26f, 2.3f, .032f, 2, t, par, fogNear, .3f)
+                fogBand(y + 2f, 40f, 1.6f, .028f, 0, t, par, fogNear, 0.71f)
+                fogBand(y + 10f, 26f, 2.3f, .032f, 2, t, par, fogNear, 0.51f)
             }
             "右側稜" -> {
                 val y = topOf("近稜（北峰→風口）")
-                fogBand(y + 4f, 44f, 2.1f, .042f, 1, t, par, fogNear, .4f)
-                fogBand(y + 14f, 30f, 2.9f, .048f, 0, t, par, fogNear, .28f)
+                fogBand(y + 4f, 44f, 2.1f, .042f, 1, t, par, fogNear, 0.68f)
+                fogBand(y + 14f, 30f, 2.9f, .048f, 0, t, par, fogNear, 0.48f)
             }
             "近稜（北峰→風口）" -> {
                 val y = topOf("近稜下方的稜")
-                fogBand(y + 6f, 48f, 2.7f, .058f, 2, t, par, fogNear, .36f)
-                fogBand(y + 16f, 30f, 3.6f, .064f, 1, t, par, fogNear, .26f)
+                fogBand(y + 6f, 48f, 2.7f, .058f, 2, t, par, fogNear, 0.61f)
+                fogBand(y + 16f, 30f, 3.6f, .064f, 1, t, par, fogNear, 0.44f)
             }
             "近稜下方的稜" -> {
                 val y = topOf("最前面的稜")
-                fogBand(y + 8f, 52f, 3.3f, .075f, 0, t, par, fogNear, .32f)
-                fogBand(y + 20f, 34f, 4.3f, .082f, 2, t, par, fogNear, .22f)
+                fogBand(y + 8f, 52f, 3.3f, .075f, 0, t, par, fogNear, 0.54f)
+                fogBand(y + 20f, 34f, 4.3f, .082f, 2, t, par, fogNear, 0.37f)
             }
         }
         tp.colorFilter = sc.ridgeTint.get(body, haze, light)
     }
     // 最前景貼著畫面底部一層很淡、流得最快的霧
-    fogBand(H - 6f, 40f, 5.2f, .1f, 1, t, par, fogNear, .2f)
+    fogBand(H - 6f, 40f, 5.2f, .1f, 1, t, par, fogNear, .32f)
     vignette(.16f + .1f * nightK)
 }
 

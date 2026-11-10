@@ -81,7 +81,9 @@ class StatsSampler(private val context: Context) {
     private val cpuHist = ArrayDeque<Float>(); private val fpsHist = ArrayDeque<Float>(); private val netHist = ArrayDeque<Float>()
     private var lastStat: LongArray? = null
     @Volatile private var adb: AdbClient? = null
-    private var adbTried = false
+    private var adbTryAt = 0L
+    private var adbTries = 0
+    @Volatile private var adbDenied = false
     private var lastRx = -1L; private var lastTx = -1L; private var lastAt = 0L
     private var pingAt = 0L; private var lastPing = -1f; private var lastGw = -1f
     private val pings = ArrayDeque<Float>()
@@ -187,11 +189,18 @@ class StatsSampler(private val context: Context) {
     /** /proc/stat 的 cpu 開頭幾行：先直接讀，不行再走本機 ADB（只試一次連線，失敗就不再打擾）。 */
     private fun procStat(): List<String>? {
         runCatching { File("/proc/stat").readLines().filter { it.startsWith("cpu") } }.getOrNull()?.takeIf { it.isNotEmpty() }?.let { return it }
-        if (adb == null && !adbTried) {
-            // 另開執行緒連線（第一次可能要等電視上的授權對話框），不卡住每秒的取樣
-            adbTried = true
-            Thread({ adb = runCatching { AdbClient("127.0.0.1", 5555, AdbKey.load(context)).apply { connect(3000) } }.getOrNull() }, "liuli-geek-adb")
-                .apply { isDaemon = true; start() }
+        // 另開執行緒連線（第一次可能要等電視上的授權對話框），不卡住每秒的取樣。
+        // 連不上（剛開機、剛重裝、ADB 還沒起來）就每 20 秒再試，最多 6 次；電視明確拒絕這把金鑰就不再打擾
+        val now = SystemClock.elapsedRealtime()
+        if (adb == null && !adbDenied && adbTries < 6 && now - adbTryAt > 20_000) {
+            adbTryAt = now; adbTries++
+            Thread({
+                try {
+                    adb = AdbClient("127.0.0.1", 5555, AdbKey.load(context)).apply { connect(4000) }
+                } catch (e: AdbClient.AdbException) {
+                    if (e.message?.contains("未授權") == true) adbDenied = true
+                } catch (_: Exception) { }
+            }, "liuli-geek-adb").apply { isDaemon = true; start() }
         }
         val a = adb ?: return null
         return runCatching { a.shell("grep '^cpu' /proc/stat").lines().filter { it.startsWith("cpu") } }

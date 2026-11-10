@@ -1281,7 +1281,7 @@ fun HomeScreen(
                 Column(
                     Modifier
                         .align(Alignment.BottomCenter)
-                        .padding(bottom = if (settings.geekMode) 2.dp else 16.dp)
+                        .padding(bottom = if (settings.geekMode) 6.dp else 16.dp)
                         .graphicsLayer { alpha = if (dockHasFocus && !drawerOpen) 1f else 0f },
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
