@@ -115,6 +115,43 @@ internal object YushanRidge {
         }
     }
 
+    // ── 山嵐（高斯霧）的貼圖：很小的 ALPHA_8 圖，畫的時候用畫筆顏色上色、雙線性放大＝高斯模糊般的柔邊 ──
+    private const val FOG_W = 160
+    private const val FOG_H = 36
+    private val fogTex = arrayOfNulls<Bitmap>(3)
+    val fogPaint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG)
+    val fogRect = RectF()
+
+    /** 第 [v] 種霧帶（0～2，濃淡分布不同）。水平方向首尾相接，可以無縫重複。 */
+    fun fog(v: Int): Bitmap = fogTex[v] ?: buildFog(v).also { fogTex[v] = it }
+
+    private fun buildFog(v: Int): Bitmap {
+        val px = ByteArray(FOG_W * FOG_H)
+        val tau = (2 * Math.PI).toFloat()
+        val rnd = java.util.Random(700L + v * 11L)
+        val ph = FloatArray(6) { rnd.nextFloat() * tau }
+        for (i in 0 until FOG_W) {
+            val u = i / FOG_W.toFloat() * tau
+            // 濃淡：幾個整數頻率的正弦相加（首尾接得起來），有濃有稀、偶爾幾乎斷開
+            val d = (.5f + .26f * kotlin.math.sin(u + ph[0]) + .18f * kotlin.math.sin(2 * u + ph[1]) + .12f * kotlin.math.sin(3 * u + ph[2]) + .07f * kotlin.math.sin(5 * u + ph[3]))
+                .coerceIn(0f, 1f)
+            val dd = d * d * (3 - 2 * d)
+            // 霧帶的中線與厚度也慢慢起伏
+            val c = .5f + .1f * kotlin.math.sin(2 * u + ph[4]) + .05f * kotlin.math.sin(4 * u + ph[5])
+            val sig = .12f + .16f * dd
+            for (j in 0 until FOG_H) {
+                val y = (j + .5f) / FOG_H
+                val g = kotlin.math.exp(-((y - c) * (y - c)) / (2 * sig * sig))
+                // 上下兩端一定要淡到 0（放大後不會切出一條邊）
+                val edge = (kotlin.math.min(y, 1f - y) / .12f).coerceIn(0f, 1f)
+                px[j * FOG_W + i] = (255f * dd * g * edge).toInt().coerceIn(0, 255).toByte()
+            }
+        }
+        return Bitmap.createBitmap(FOG_W, FOG_H, Bitmap.Config.ALPHA_8).apply {
+            copyPixelsFromBuffer(java.nio.ByteBuffer.wrap(px))
+        }
+    }
+
     // ── 星軌：面向南方，星星繞著地平線下的南天極轉。先畫成一張同心圓弧的圖，每格只繞著天極慢慢旋轉 ──
     /** 南天極在畫面上的位置（邏輯座標，在山的後面）與星軌圖涵蓋的半徑。 */
     const val POLE_X = 480f * .56f

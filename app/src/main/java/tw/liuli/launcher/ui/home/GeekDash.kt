@@ -91,7 +91,7 @@ private fun Big(value: String, unit: String, warn: Boolean, dim: Boolean = false
             append(value)
             withStyle(SpanStyle(fontSize = 10.sp, fontWeight = FontWeight.Normal, color = if (warn) Ink.Gold.copy(alpha = .7f) else Ink.Tertiary)) { append(" $unit") }
         },
-        style = TextStyle(color = c, fontSize = 22.sp, fontWeight = FontWeight.Light, fontFeatureSettings = Tnum),
+        style = TextStyle(color = c, fontSize = 20.sp, fontWeight = FontWeight.Light, fontFeatureSettings = Tnum),
         maxLines = 1,
     )
 }
@@ -135,7 +135,7 @@ private fun RowScope.Card(weight: Float, mod: Modifier = Modifier, content: @Com
     val shape = RoundedCornerShape(16.dp)
     Box(
         Modifier.weight(weight).fillMaxHeight().liquidGlass(shape).clip(shape).then(mod)
-            .padding(start = 10.dp, end = 10.dp, top = 6.dp),
+            .padding(start = 10.dp, end = 10.dp, top = 5.dp),
     ) { content() }
 }
 
@@ -145,7 +145,7 @@ private fun f1(v: Float) = "%.1f".format(v)
 @Composable
 fun GeekDashboard(s: Stats, freed: String?, modifier: Modifier = Modifier) {
     FrameMetricsHook()
-    Row(modifier.fillMaxWidth().height(60.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    Row(modifier.fillMaxWidth().height(62.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         // ── CPU ──
         val cpuWarn = s.cpuPct > 85f
         Card(1.2f, Modifier.spark(s.cpuHist, 0f, 100f)) {
@@ -171,7 +171,7 @@ fun GeekDashboard(s: Stats, freed: String?, modifier: Modifier = Modifier) {
             }
         }
         // ── GPU ──
-        val janky = s.frameMs > 22f
+        val janky = s.fps > 0 && s.frameMs > 25f
         val gpuWarn = s.gpuPct > 90f || janky
         Card(1f, Modifier.spark(s.fpsHist, 20f, 62f)) {
             Column {
@@ -179,10 +179,10 @@ fun GeekDashboard(s: Stats, freed: String?, modifier: Modifier = Modifier) {
                 Column(Modifier.padding(top = 2.dp)) {
                     if (s.gpuPct >= 0) {
                         Big(s.gpuPct.roundToInt().toString(), "%", gpuWarn)
-                        T(if (s.fps > 0) "${s.fps.roundToInt()} fps・每幀 ${f1(s.frameMs)} ms" else "畫面靜止", 9.sp, Ink.Tertiary)
+                        T((if (s.fps > 0) "${s.fps.roundToInt()} fps・每幀 ${f1(s.frameMs)} ms" else "畫面靜止") + bgText(s), 9.sp, Ink.Tertiary)
                     } else {
                         Big(if (s.fps > 0) s.fps.roundToInt().toString() else "—", "fps", janky, dim = s.fps <= 0)
-                        T(if (s.fps > 0) "每幀 ${f1(s.frameMs)} ms" else "畫面靜止", 9.sp, Ink.Tertiary)
+                        T((if (s.fps > 0) "每幀 ${f1(s.frameMs)} ms" else "畫面靜止") + bgText(s), 9.sp, Ink.Tertiary)
                     }
                 }
             }
@@ -259,6 +259,8 @@ fun GeekDashboard(s: Stats, freed: String?, modifier: Modifier = Modifier) {
     }
 }
 
+private fun bgText(s: Stats) = if (s.bgFps > 0) "・背景 ${s.bgFps} fps" else ""
+
 private fun dur(sec: Long): String {
     val d = sec / 86400; val h = sec % 86400 / 3600; val m = sec % 3600 / 60
     return when {
@@ -277,7 +279,8 @@ private fun FrameMetricsHook() {
         val window: Window = activity.window
         val thread = HandlerThread("liuli-frames").apply { start() }
         val listener = Window.OnFrameMetricsAvailableListener { _, m, _ ->
-            FrameStats.add(m.getMetric(FrameMetrics.TOTAL_DURATION) / 1e6f)
+            // 只算真正花在這一幀的時間（扣掉排隊等主執行緒的延遲）：閒置一陣子後的第一幀不會被算成幾百毫秒
+            FrameStats.add((m.getMetric(FrameMetrics.TOTAL_DURATION) - m.getMetric(FrameMetrics.UNKNOWN_DELAY_DURATION)) / 1e6f)
         }
         runCatching { window.addOnFrameMetricsAvailableListener(listener, Handler(thread.looper)) }
         onDispose {

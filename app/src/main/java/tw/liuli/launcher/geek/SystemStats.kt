@@ -45,6 +45,8 @@ data class Stats(
     val gpuPct: Float = -1f,
     val fps: Float = -1f,
     val frameMs: Float = -1f,
+    /** 背景引擎目前的更新率（自動在 30／20／15 之間調整）。 */
+    val bgFps: Int = 0,
     val fpsHist: List<Float> = emptyList(),
     // 記憶體
     val memTotal: Long = 0, val memAvail: Long = 0, val memLow: Boolean = false,
@@ -170,7 +172,7 @@ class StatsSampler(private val context: Context) {
 
         cur = Stats(
             cpuName = cpuName, cpuPct = pct, cpuReal = real, cores = cores, cpuGhz = if (curGhz > 0) curGhz else maxGhz, cpuHist = cpuHist.toList(),
-            gpuName = gpuName, gpuPct = GpuInfo.utilization(), fps = fps, frameMs = ms, fpsHist = fpsHist.toList(),
+            gpuName = gpuName, gpuPct = GpuInfo.utilization(), fps = fps, frameMs = ms, bgFps = tw.liuli.launcher.ui.bg.BackgroundEngine.bgFps, fpsHist = fpsHist.toList(),
             memTotal = mi.totalMem, memAvail = mi.availMem, memLow = mi.lowMemory,
             net = kind, netDetail = detail, pingMs = lastPing, gatewayMs = lastGw, jitterMs = jitter, rxMbps = rxM, txMbps = txM,
             netHist = netHist.toList(), offlineSec = if (offlineSince > 0) (now - offlineSince) / 1000 else 0,

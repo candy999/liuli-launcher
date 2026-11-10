@@ -39,7 +39,7 @@ enum class BgStyle(val id: String, val label: String, val note: String, val ambi
     CONTOUR("contour", "等高線", "焦點是山峰，等高線跟著流動"),
     WAVES("waves", "流線浪潮", "波峰朝焦點聚集"),
     DEEPSEA("deepsea", "深海", "寬而模糊、錯落重疊的耶穌光灑進深海，光影晃動、微粒緩緩飄落", ambient = true),
-    RIDGE("ridge", "山稜", "向量平塗的玉山，顏色跟著一天的時間走；雲海隨風穿過山脈，深夜是星軌", ambient = true),
+    RIDGE("ridge", "山稜", "向量平塗的玉山，顏色跟著一天的時間走；山嵐在山谷間隨風流動，星軌整天慢慢轉", ambient = true),
     GALAXY("galaxy", "星空銀河", "斜跨的銀河與三層星星，漂移的星點時連時斷地織成星座網", ambient = true),
     BEAMS("beams", "光束", "粗細不一的垂直光束呼吸、流動，往焦點聚攏", ambient = true),
     TRAILS("trails", "光軌", "長曝光光軌，兩端交錯開合"),
@@ -433,6 +433,7 @@ class BackgroundEngine {
             var div = learnedDiv[si]
             var iv = learnedIv[si]
             var interval = INTERVALS[iv]
+            bgFps = (1000f / interval + .5f).toInt()
             val forced = debugDiv in 1..MAX_DIV
             if (!blurOn) renderDiv = if (forced) debugDiv else div // 降解析度立即生效（在動，看不出切換）
             if (forced) interval = 16.7f * debugEvery.coerceIn(1, 8)
@@ -595,6 +596,7 @@ class BackgroundEngine {
                         learnedDiv[si] = div
                         learnedIv[si] = iv
                         interval = INTERVALS[iv]
+                        bgFps = (1000f / interval + .5f).toInt()
                         renderDiv = div
                         skipMeasure = 2
                     }
@@ -946,6 +948,8 @@ class BackgroundEngine {
          * 太慢時先降解析度（GPU 瓶頸）；降解析度沒有用的樣式（CPU 瓶頸）改降更新率；再慢就靠慢速播放。
          */
         private val INTERVALS = floatArrayOf(33.3f, 50f, 66.7f)
+        /** 目前背景的更新率（fps，自動在 30／20／15 之間調整）；技術宅模式的儀表列會顯示。 */
+        @Volatile var bgFps = 0
         /** 起始解析度除數（AOC 電視實測：÷2 的背景一幀 GPU 約 18ms，可以穩定 30fps）。 */
         private const val DEFAULT_DIV = 2
         /** 提前對焦／靜止後：每隔多久升一檔解析度。 */

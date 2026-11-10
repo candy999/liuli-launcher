@@ -976,7 +976,7 @@ fun HomeScreen(
             "設定", "琉璃 Launcher ${BuildConfigInfo.versionName(context)}",
             listOf(
                 SheetItem("外觀", liveDetail = { engine.style.label + if (settings.bgFollow) "・自動色彩" else "・固定色" }) { appearanceSheet() },
-                SheetItem("主畫面模式", subtitle = "技術宅模式：齒輪下方多一顆火箭（清理背景程式），常用列下方顯示 CPU、GPU、記憶體、網路與系統狀態",
+                SheetItem("主畫面模式", subtitle = "技術宅：多火箭與系統儀表",
                     liveDetail = { if (settings.geekMode) "技術宅模式" else "正常人模式" },
                     onAdjust = { settings.updateGeekMode(!settings.geekMode) }) { settings.updateGeekMode(!settings.geekMode) },
                 SheetItem("地點", liveDetail = { Cities.byId(settings.cityId).name + "・天氣" }) { citySheet() },
@@ -1275,7 +1275,7 @@ fun HomeScreen(
                 }
 
                 // 技術宅模式：常用列下方的系統儀表列（不拿焦點，只是看的）
-                if (settings.geekMode) GeekDashboard(geekStats, rocketFreed, Modifier.padding(start = 48.dp, end = 48.dp, top = 436.dp))
+                if (settings.geekMode) GeekDashboard(geekStats, rocketFreed, Modifier.padding(start = 48.dp, end = 48.dp, top = 434.dp))
 
                 // 抽屜提示
                 Column(
