@@ -693,10 +693,10 @@ private fun DrawScope.contour(st: BgState) {
     vignette(.4f)
 }
 
-// ───────────── 9. 山稜（玉山群峰的真實稜線：層層沒入山嵐，薄霧持續飄動，偶爾湧起雲海） ─────────────
+// ───────────── 9. 山稜（從玉山北峰望主峰的真實稜線：層層沒入山嵐，薄霧持續飄動，偶爾湧起雲海） ─────────────
 
-/** 每一層的遠近（0＝玉山主稜、1＝祝山腳下）：視差與顏色依此計算（真實視差和距離成反比，近山移得多很多）。 */
-private val RIDGE_NEAR = floatArrayOf(0f, .1f, .22f, .38f, .62f, 1f)
+/** 每一層的遠近（0＝8 公里外的遠山、1＝北峰山頂的前景）：視差與顏色依此計算（真實視差和距離成反比，近處移得多很多）。 */
+private val RIDGE_NEAR = floatArrayOf(0f, .06f, .15f, .3f, .55f, 1f)
 /** 雲海的週期（秒）：每個週期約一半的機會湧起一次，慢慢漫上來、再慢慢退去。 */
 private const val SEA_PERIOD = 80f
 
@@ -728,9 +728,9 @@ private fun DrawScope.ridge(st: BgState) {
     paint.strokeWidth = .55f
     paint.color = Color.hsl(220f, .1f, .9f, .2f).toArgb()
     translate(par * W * .004f, 0f) { points(RidgeStats.stars, paint) }
-    // 天光：日出前／月光從玉山後方透出的柔光（跟著焦點左右移，按下時亮一點），只有暈、沒有圓盤
+    // 天光：日出前／月光從主峰後方透出的柔光（跟著焦點左右移，按下時亮一點），只有暈、沒有圓盤
     val lx = W * (.2f + .6f * st.fx) + par * W * .01f
-    val ly = RidgeStats.top[0] - 6f
+    val ly = RidgeStats.top.min() + 10f
     val glowA = .2f + .08f * st.pulse
     drawRect(gaussBrush(st.c(-20f, .5f, .7f, glowA), Offset(lx, ly), W * .55f), Offset(lx - W * .55f, ly - W * .55f), Size(W * 1.1f, W * 1.1f), blendMode = BlendMode.Plus)
     drawRect(gaussBrush(st.c(-26f, .35f, .85f, glowA * .9f), Offset(lx, ly), W * .09f), Offset(lx - W * .09f, ly - W * .09f), Size(W * .18f, W * .18f), blendMode = BlendMode.Plus)
@@ -744,7 +744,7 @@ private fun DrawScope.ridge(st: BgState) {
     val step = YushanRidge.SPAN / (YushanRidge.N - 1)
     for (li in 0 until YushanRidge.LAYERS) {
         val near = RIDGE_NEAR[li]
-        // 景深視差：焦點左右移動時近山移得多、玉山主稜幾乎不動
+        // 景深視差：焦點左右移動時前景移得多、遠山幾乎不動
         val dx = par * W * (.006f + .11f * near)
         val dy = parY * H * (.004f + .03f * near)
         val row = ys[li]
@@ -782,9 +782,9 @@ private fun DrawScope.ridge(st: BgState) {
                 drawRect(gaussBrush(haze.copy(alpha = a), Offset(cx, cy), r), Offset(cx - r, cy - r), Size(r * 2, r * 2))
             }
         }
-        // 雲海：漫在第 4 層（3.5～6.5 公里）的山腳，遠山的下半截沒入雲裡、近山露出來
-        if (li == 3 && sea > .01f) {
-            val level = mean + 16f - 26f * sea
+        // 雲海：漫在 3～8 公里那層的山腳，兩側遠山的下半截沒入雲裡，主峰與東峰矗立在雲上
+        if (li == 1 && sea > .01f) {
+            val level = mean + 8f - 18f * sea
             drawRect(
                 Brush.verticalGradient(0f to cloud.copy(alpha = 0f), .3f to cloud.copy(alpha = .75f * sea), 1f to cloud.copy(alpha = .9f * sea), startY = level - 8f, endY = level + 40f),
                 Offset(-10f, level - 8f), Size(W + 20f, H - level + 10f),
