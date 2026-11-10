@@ -58,7 +58,11 @@ private class Scratch {
     /** 山稜：上色的畫筆與色彩矩陣、星軌的位置。 */
     val ridgePaint = android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG)
     val tileSrc = android.graphics.Rect()
-    /** 霧帶：ALPHA_8 貼圖著色器，顏色來自畫筆。 */
+    /** 霧的遮擋：用山的剪影把後面的霧擦掉。 */
+    val erasePaint = android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG).apply {
+        xfermode = android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.DST_OUT)
+    }
+    /** 霧帶：貼圖著色器，顏色來自畫筆的顏色濾鏡。 */
     val fogPaint = android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG)
     val ridgeTint = RidgeTint()
     val ridgeRect = android.graphics.RectF()
@@ -964,11 +968,13 @@ internal fun DrawScope.ridgeMountains(st: BgState, dimK: Float) {
 }
 
 /**
- * 原生解析度的霧（畫在山的快取圖層之上）：每道霧用「它後面那一層的前景剪影」挖掉被前面的山擋住的部分，
- * 看起來就像夾在山與山之間、從山谷裡漫出來。
+ * 山與山之間的霧（低解析度圖層，畫在原生解析度的山之上）：照前後順序一層一層來——
+ * 先畫這道山谷的霧，畫到前面一層山時，用那一層的剪影把它後面的霧擦掉（DST_OUT）。
+ * 每一層用自己的視差位移，遮擋關係跟真的把霧夾在山與山之間畫一模一樣；霧本來就柔，低解析度剛好。
  */
 internal fun DrawScope.ridgeFog(st: BgState, dimK: Float) {
     val layers = YushanRidge.layers ?: return
+    val sc = scratch.get()!!
     val cols = RidgeCols(st, dimK)
     val t = st.at
     val par = -(st.fx - .5f)
@@ -976,15 +982,28 @@ internal fun DrawScope.ridgeFog(st: BgState, dimK: Float) {
     fun topOf(name: String) = layers.firstOrNull { it.name == name }?.topY ?: H * .6f
     val fogNear = fc(mixF(cols.haze, cols.cLit, .5f)); val fogFar = fc(mixF(cols.haze, cols.cLit, .3f))
     val ox = par * W; val oy = parY * H * .35f
+    val canvas = drawContext.canvas.nativeCanvas
+    val erase = sc.erasePaint
+    val src = sc.tileSrc; val dst = sc.ridgeRect
+    val n = YushanRidge.SCALE
+    var anyFog = false
     for ((i, p) in layers.withIndex()) {
-        val front = layers.getOrNull(i + 1) ?: break
-        val m = p.frontMask
-        val mdx = ox * front.k; val mdy = oy * front.k
-        fun band(cy: Float, h: Float, spd: Float, dk: Float, v: Int, c: Color, a: Float) = fogBand(cy, h, spd, dk, v, t, par, c, a, m, mdx, mdy)
-        when (p.name) {
-            "遠山" -> {
-                band(p.topY + 18f, 30f, 1.1f, .007f, 1, fogFar, 0.9f)
+        // 這一層山擋住它後面所有的霧
+        if (i > 0 && anyFog) {
+            val lx = p.x0 + ox * p.k; val ly = p.y0 + oy * p.k
+            val tiles = p.tileBottom
+            for (ti in tiles.indices) {
+                val bot = minOf(tiles[ti], p.image.height / n)
+                if (bot <= 0f) continue
+                val a = ti * YushanRidge.TILE; val b = minOf(p.w, a + YushanRidge.TILE)
+                src.set((a * n).toInt(), 0, minOf(p.image.width, (b * n).toInt()), (bot * n).toInt())
+                dst.set(lx + src.left / n, ly, lx + src.right / n, ly + src.bottom / n)
+                canvas.drawBitmap(p.image, src, dst, erase)
             }
+        }
+        fun band(cy: Float, h: Float, spd: Float, dk: Float, v: Int, c: Color, a: Float) { fogBand(cy, h, spd, dk, v, t, par, c, a); anyFog = true }
+        when (p.name) {
+            "遠山" -> band(p.topY + 18f, 30f, 1.1f, .007f, 1, fogFar, 0.9f)
             "主峰山體" -> {
                 val y = topOf("右側稜")
                 band(y + 2f, 40f, 1.6f, .028f, 0, fogNear, 0.71f)
@@ -995,14 +1014,8 @@ internal fun DrawScope.ridgeFog(st: BgState, dimK: Float) {
                 band(y + 4f, 44f, 2.1f, .042f, 1, fogNear, 0.68f)
                 band(y + 14f, 30f, 2.9f, .048f, 0, fogNear, 0.48f)
             }
-            "近稜（北峰→風口）" -> {
-                val y = topOf("近稜下方的稜")
-                band(y + 8f, 50f, 3f, .06f, 2, fogNear, 0.66f)
-            }
-            "近稜下方的稜" -> {
-                val y = topOf("最前面的稜")
-                band(y + 10f, 52f, 3.6f, .078f, 0, fogNear, 0.58f)
-            }
+            "近稜（北峰→風口）" -> band(topOf("近稜下方的稜") + 8f, 50f, 3f, .06f, 2, fogNear, 0.66f)
+            "近稜下方的稜" -> band(topOf("最前面的稜") + 10f, 52f, 3.6f, .078f, 0, fogNear, 0.58f)
         }
     }
     fogBand(H - 6f, 40f, 5.2f, .1f, 1, t, par, fogNear, .32f)

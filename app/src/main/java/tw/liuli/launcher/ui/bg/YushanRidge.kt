@@ -34,7 +34,7 @@ internal object YushanRidge {
      * 通道圖的解析度：每個邏輯單位幾個像素。這份（軟體點陣圖）只給玻璃、背景模糊這些小圖用，480 寬＝480 像素就夠。
      * 主畫面上的山用 [NATIVE] 倍的硬體點陣圖、以螢幕原生解析度直接畫（見 [Layer.native]）。
      */
-    const val SCALE = 1f
+    const val SCALE = 2f
     /** 原生解析度的倍率：1080p 螢幕 1920 ÷ 480 邏輯寬＝4。 */
     const val NATIVE = 4f
 
@@ -47,8 +47,6 @@ internal object YushanRidge {
         var tileBottom = FloatArray(0)
         /** 原生解析度的山（硬體點陣圖，GPU 直接取樣；只畫到 [tileBottom] 的最低點為止，下面一定被蓋住）。 */
         @Volatile var native: Bitmap? = null
-        /** 這一層「前面所有山」的剪影（ALPHA_8，邏輯解析度 480×270）：夾在這一層後面的霧用它挖掉被前景擋住的部分。 */
-        var frontMask: Bitmap? = null
     }
 
     /** 原生解析度的山準備好了沒（Compose 狀態：好了之後背景層改成「小圖畫天空＋原生解析度畫山」）。 */
@@ -79,7 +77,6 @@ internal object YushanRidge {
     fun release() {
         nativeReady = false
         layers?.forEach { it.native?.recycle(); it.native = null }
-        layers?.forEach { it.frontMask = null }
         trailsHi?.recycle()
         layers = null; trails = null; trailsHi = null
         started.set(false); trailsStarted.set(false)
@@ -201,10 +198,6 @@ internal object YushanRidge {
                     for (x in a..b) m = maxOf(m, if (x in 0 until W) solid[x] else H)
                     (m + vm - L.y0).coerceIn(0f, L.h)
                 }
-            }
-            if (li < n - 1) {
-                val a8 = ByteArray(W * H) { if (union[it]) -1 else 0 }
-                L.frontMask = Bitmap.createBitmap(W, H, Bitmap.Config.ALPHA_8).apply { copyPixelsFromBuffer(java.nio.ByteBuffer.wrap(a8)) }
             }
             val o = opaque[li]
             for (i in union.indices) if (o[i]) union[i] = true

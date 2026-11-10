@@ -150,10 +150,30 @@ fun BackgroundLayer(engine: BackgroundEngine, blurred: () -> Float, modifier: Mo
             }
             // 山：動態解析度＋快取（焦點移動時降解析度、停下來畫一次原生解析度，之後每格只貼這張圖）
             RidgeMountains(engine, fullW, fullH) { reveal.value }
-            // 霧：原生解析度，每格流動（每道霧一個矩形，用前景剪影挖掉被山擋住的部分）
-            Canvas(Modifier.fillMaxSize().graphicsLayer { alpha = reveal.value }) {
-                @Suppress("UNUSED_VARIABLE") val f = engine.frame
-                scale(sx, sy, pivot = Offset.Zero) { ridgeFog(engine.st, engine.dim) }
+            // 霧：低解析度（÷3）的離屏圖層，每格流動；照前後順序畫，被前面的山擋住的部分用那層山的剪影擦掉
+            val fd = maxOf(3, d)
+            val fw = (fullW + fd - 1) / fd
+            val fh = (fullH + fd - 1) / fd
+            Box(
+                Modifier
+                    .layout { measurable, _ ->
+                        val p = measurable.measure(Constraints.fixed(fw, fh))
+                        layout(fw, fh) { p.place(0, 0) }
+                    }
+                    .graphicsLayer {
+                        compositingStrategy = CompositingStrategy.Offscreen
+                        transformOrigin = TransformOrigin(0f, 0f)
+                        scaleX = fd.toFloat()
+                        scaleY = fd.toFloat()
+                        alpha = reveal.value
+                    },
+            ) {
+                Canvas(Modifier.fillMaxSize()) {
+                    @Suppress("UNUSED_VARIABLE") val f = engine.frame
+                    scale(fullW / fd.toFloat() / BackgroundEngine.LOGICAL_W, fullH / fd.toFloat() / BackgroundEngine.LOGICAL_H, pivot = Offset.Zero) {
+                        ridgeFog(engine.st, engine.dim)
+                    }
+                }
             }
         }
         // 星空銀河的星點：以原生解析度另外畫在背景之上。不會動的星點畫成快取圖層、每格只移動位置（視差）；
