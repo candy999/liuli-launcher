@@ -39,7 +39,7 @@ enum class BgStyle(val id: String, val label: String, val note: String, val ambi
     CONTOUR("contour", "等高線", "焦點是山峰，等高線跟著流動"),
     WAVES("waves", "流線浪潮", "波峰朝焦點聚集"),
     DEEPSEA("deepsea", "深海", "寬而模糊、錯落重疊的耶穌光灑進深海，光影晃動、微粒緩緩飄落", ambient = true),
-    RIDGE("ridge", "山稜", "層層山稜沒入山嵐，越遠越淡；谷間霧氣緩緩流過，近山視差大", ambient = true),
+    RIDGE("ridge", "山稜", "阿里山祝山望玉山的真實稜線，層層沒入山嵐；薄霧飄動，偶爾湧起雲海", ambient = true),
     GALAXY("galaxy", "星空銀河", "斜跨的銀河與三層星星，漂移的星點時連時斷地織成星座網", ambient = true),
     BEAMS("beams", "光束", "粗細不一的垂直光束呼吸、流動，往焦點聚攏", ambient = true),
     TRAILS("trails", "光軌", "長曝光光軌，兩端交錯開合"),
