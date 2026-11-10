@@ -163,7 +163,7 @@ fun HomeScreen(
     // ── 技術宅模式：每秒取樣系統狀態（只在技術宅模式、主畫面看得到時） ──
     val geekSampler = remember { tw.liuli.launcher.geek.StatsSampler(context) }
     var geekStats by remember { mutableStateOf(tw.liuli.launcher.geek.Stats()) }
-    var rocketFreed by remember { mutableStateOf<String?>(null) }
+    var rocketResult by remember { mutableStateOf<tw.liuli.launcher.geek.RocketResult?>(null) }
     LaunchedEffect(settings.geekMode, active) {
         if (!settings.geekMode || !active) return@LaunchedEffect
         while (true) {
@@ -1267,15 +1267,16 @@ fun HomeScreen(
                     NetworkButton(home.network, null, { SystemActions.networkSettings(context) })
                     GearButton(gearReq, ::openSettings)
                     if (settings.geekMode) RocketButton(null, onLaunch = {
-                        val bytes = tw.liuli.launcher.geek.Rocket.launch(context)
-                        rocketFreed = "已清理・釋放 ${bytes / 1048576} MB"
-                        delay(5000)
-                        rocketFreed = null
+                        rocketResult = tw.liuli.launcher.geek.Rocket.launch(context)
+                        delay(3000)
+                        rocketResult = null
                     })
                 }
 
+                // 火箭的結果：畫面正中央 3 秒
+                if (settings.geekMode) RocketReport(rocketResult)
                 // 技術宅模式：常用列下方的系統儀表列（不拿焦點，只是看的）
-                if (settings.geekMode) GeekDashboard(geekStats, rocketFreed, Modifier.padding(start = 48.dp, end = 48.dp, top = 434.dp))
+                if (settings.geekMode) GeekDashboard(geekStats, null, Modifier.padding(start = 48.dp, end = 48.dp, top = 434.dp))
 
                 // 抽屜提示
                 Column(

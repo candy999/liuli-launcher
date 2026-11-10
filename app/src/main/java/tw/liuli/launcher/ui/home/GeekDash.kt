@@ -25,7 +25,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -290,28 +293,77 @@ private fun FrameMetricsHook() {
     }
 }
 
-/** 火箭（齒輪正下方）：一鍵清理背景程式。按下時圖示往右上飛出、淡掉，再從下方浮回來。 */
+/** 火箭（齒輪正下方）：一鍵清理背景程式。跟齒輪同一種圓鈕，按下不做動畫（結果顯示在畫面中央）。 */
 @Composable
 fun RocketButton(requester: FocusRequester?, onLaunch: suspend () -> Unit, modifier: Modifier = Modifier) {
-    val fly = remember { Animatable(0f) }
     val scope = rememberCoroutineScope()
+    var busy by remember { mutableStateOf(false) }
     RoundIconButton(
         LIcons.Rocket, BgColors.GEAR, requester,
         onClick = {
-            if (fly.isRunning) return@RoundIconButton
-            scope.launch {
-                fly.snapTo(0f)
-                launch { onLaunch() }
-                fly.animateTo(1f, tween(650, easing = androidx.compose.animation.core.CubicBezierEasing(.55f, 0f, .75f, .2f)))
-                fly.snapTo(-1f)
-                fly.animateTo(0f, tween(380))
-            }
+            if (busy) return@RoundIconButton
+            busy = true
+            scope.launch { try { onLaunch() } finally { busy = false } }
         },
         modifier = modifier,
-        iconModifier = Modifier.graphicsLayer {
-            val v = fly.value
-            if (v >= 0f) { translationX = v * 14.dp.toPx(); translationY = -v * 40.dp.toPx(); alpha = 1f - v }
-            else { translationY = -v * 6.dp.toPx(); alpha = 1f + v }
-        },
     )
+}
+
+/**
+ * 火箭的結果（畫面正中央，3 秒）：玻璃圓盤裡一圈記憶體環形圖，從「清理前已用」平順縮到「清理後已用」，
+ * 中間大字是釋放了多少，下面一行可用記憶體前後對照。只有白色與透明度，跟主畫面同一套語彙。
+ */
+@Composable
+fun RocketReport(r: tw.liuli.launcher.geek.RocketResult?, modifier: Modifier = Modifier) {
+    val show = remember { Animatable(0f) }
+    val shrink = remember { Animatable(0f) }
+    var last by remember { mutableStateOf(r) }
+    androidx.compose.runtime.LaunchedEffect(r) {
+        if (r == null) { show.animateTo(0f, tween(260)); return@LaunchedEffect }
+        last = r
+        shrink.snapTo(0f)
+        show.animateTo(1f, tween(240))
+        shrink.animateTo(1f, tween(1100, easing = androidx.compose.animation.core.FastOutSlowInEasing))
+    }
+    val res = last ?: return
+    if (show.value <= 0.001f && r == null) return
+    Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        val shape = RoundedCornerShape(34.dp)
+        Column(
+            Modifier
+                .graphicsLayer { alpha = show.value; val s = .94f + .06f * show.value; scaleX = s; scaleY = s }
+                .width(250.dp)
+                .liquidGlass(shape).clip(shape)
+                .padding(vertical = 18.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            val total = res.total.coerceAtLeast(1L).toFloat()
+            val usedBefore = 1f - res.before / total
+            val usedAfter = 1f - res.after / total
+            Box(Modifier.size(132.dp), contentAlignment = Alignment.Center) {
+                Box(Modifier.fillMaxSize().drawBehind {
+                    val sw = 9.dp.toPx(); val rr = size.minDimension / 2 - sw / 2
+                    val tl = Offset(size.width / 2 - rr, size.height / 2 - rr); val sz = Size(rr * 2, rr * 2)
+                    val used = usedBefore + (usedAfter - usedBefore) * shrink.value
+                    drawArc(Color.White.copy(alpha = .14f), 0f, 360f, false, tl, sz, style = Stroke(sw))
+                    // 清理掉的那一段：淡淡留著，看得出少了多少
+                    drawArc(Color.White.copy(alpha = .28f), -90f + 360f * used, 360f * (usedBefore - used), false, tl, sz, style = Stroke(sw))
+                    drawArc(Color.White.copy(alpha = .92f), -90f, 360f * used, false, tl, sz, style = Stroke(sw, cap = StrokeCap.Round))
+                })
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    val mb = (res.freed / 1048576f * shrink.value).roundToInt()
+                    BasicText(
+                        buildAnnotatedString {
+                            append("$mb")
+                            withStyle(SpanStyle(fontSize = 13.sp, fontWeight = FontWeight.Normal, color = Ink.Tertiary)) { append(" MB") }
+                        },
+                        style = TextStyle(color = Ink.Primary, fontSize = 34.sp, fontWeight = FontWeight.Light, fontFeatureSettings = Tnum),
+                    )
+                    T("已釋放", 12.sp, Ink.Secondary)
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+            T("可用記憶體  ${gb(res.before)} → ${gb(res.after)} GB", 13.sp, Ink.Secondary)
+        }
+    }
 }

@@ -99,6 +99,8 @@ fun BackgroundLayer(engine: BackgroundEngine, blurred: () -> Float, modifier: Mo
 
         // 解析度＝原生 ÷ d（d 由引擎依實測幀時間決定）。不能整除時無條件進位一個像素，
         // 放大 d 倍後多出來的邊由 clipToBounds 裁掉——每個低解析度像素都剛好對齊 d×d 個實體像素。
+        // 山稜：山與霧另外以原生解析度畫（硬體點陣圖，GPU 直接取樣），低解析度的小圖只畫天空與星軌
+        val ridgeNative = engine.style == BgStyle.RIDGE && YushanRidge.nativeReady
         val d = engine.renderDiv
         val w = (fullW + d - 1) / d
         val h = (fullH + d - 1) / d
@@ -122,11 +124,22 @@ fun BackgroundLayer(engine: BackgroundEngine, blurred: () -> Float, modifier: Mo
                 val sy = fullH / d.toFloat() / BackgroundEngine.LOGICAL_H
                 scale(sx, sy, pivot = Offset.Zero) {
                     // 抖色噪點：實體螢幕上固定 2 像素一格（畫布是 ÷d，所以一格＝2／d 個畫布像素），跟著焦點平滑視差
-                    drawStyle(engine.style, engine.st, noisePx = DitherScope.NOISE_PX / d, noiseShift = engine.st.noiseParallax(parallaxPx) / d.toFloat())
+                    drawStyle(
+                        engine.style, engine.st, noisePx = DitherScope.NOISE_PX / d, noiseShift = engine.st.noiseParallax(parallaxPx) / d.toFloat(),
+                        skipFront = ridgeNative,
+                    )
                 }
                 // 設定面板開著時壓暗：畫在 ÷d 的小圖裡，成本只有全螢幕的 1／d²
                 if (engine.dim > 0f) drawRect(Color.Black, alpha = engine.dim)
                 revealMask(from, reveal.value)
+            }
+        }
+        if (ridgeNative) {
+            val sx = fullW / BackgroundEngine.LOGICAL_W
+            val sy = fullH / BackgroundEngine.LOGICAL_H
+            Canvas(Modifier.fillMaxSize().graphicsLayer { alpha = reveal.value }) {
+                @Suppress("UNUSED_VARIABLE") val f = engine.frame // 訂閱：引擎每推進一幀就重畫（只是記錄十幾個貼圖指令）
+                scale(sx, sy, pivot = Offset.Zero) { ridgeFront(engine.st, engine.dim) }
             }
         }
         // 星空銀河的星點：以原生解析度另外畫在背景之上。不會動的星點畫成快取圖層、每格只移動位置（視差）；

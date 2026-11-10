@@ -304,9 +304,15 @@ object GpuInfo {
     }
 }
 
-/** 火箭：結束所有背景程序（不動前景與琉璃自己），回傳釋放的記憶體（位元組，估計值）。 */
+/** 火箭的結果：清理前後的可用記憶體與總量（位元組）。 */
+@Immutable
+data class RocketResult(val before: Long, val after: Long, val total: Long) {
+    val freed: Long get() = (after - before).coerceAtLeast(0L)
+}
+
+/** 火箭：結束所有背景程序（不動前景與琉璃自己），回傳清理前後的可用記憶體。 */
 object Rocket {
-    suspend fun launch(context: Context): Long = withContext(Dispatchers.IO) {
+    suspend fun launch(context: Context): RocketResult = withContext(Dispatchers.IO) {
         val am = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
         fun avail() = ActivityManager.MemoryInfo().also { am.getMemoryInfo(it) }.availMem
         val before = avail()
@@ -318,6 +324,7 @@ object Rocket {
             runCatching { am.killBackgroundProcesses(p.packageName) }
         }
         kotlinx.coroutines.delay(900)   // 系統回收記憶體要一點時間
-        (avail() - before).coerceAtLeast(0L)
+        val total = ActivityManager.MemoryInfo().also { am.getMemoryInfo(it) }.totalMem
+        RocketResult(before, avail(), total)
     }
 }

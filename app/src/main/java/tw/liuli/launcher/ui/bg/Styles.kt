@@ -56,7 +56,10 @@ private class Scratch {
     val ditherInv = android.graphics.Matrix()
     val path = Path()
     /** 山稜：上色的畫筆與色彩矩陣、星軌的位置。 */
-    val ridgePaint = android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG or android.graphics.Paint.ANTI_ALIAS_FLAG)
+    val ridgePaint = android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG)
+    val tileSrc = android.graphics.Rect()
+    /** 霧帶：ALPHA_8 貼圖著色器，顏色來自畫筆。 */
+    val fogPaint = android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG)
     val ridgeTint = RidgeTint()
     val ridgeRect = android.graphics.RectF()
     /** 雲帶的形狀與上緣的受光邊（每格重算，不配置新物件）。 */
@@ -87,13 +90,15 @@ private fun BgState.c(hOff: Float, sat: Float, l: Float, a: Float = 1f) = hsl(h 
 fun DrawScope.drawStyle(
     style: BgStyle, st: BgState,
     noisePx: Float = 2f, noiseShift: Offset = Offset.Zero,
+    /** true＝山稜的山與霧另外以原生解析度畫（[ridgeFront]），這裡只畫天空、星軌、光暈。 */
+    skipFront: Boolean = false,
 ) {
     // 所有漸層開抖色（見 DitherScope）：8 bit 面板上的大面積暗色漸層不再一圈一圈斷開
     val sc = scratch.get()!!
-    DitherScope(this, sc.ditherPaint, sc.ditherNoise, sc.ditherM, sc.ditherInv, noisePx, noiseShift).drawStyleRaw(style, st)
+    DitherScope(this, sc.ditherPaint, sc.ditherNoise, sc.ditherM, sc.ditherInv, noisePx, noiseShift).drawStyleRaw(style, st, skipFront)
 }
 
-private fun DrawScope.drawStyleRaw(style: BgStyle, st: BgState) {
+private fun DrawScope.drawStyleRaw(style: BgStyle, st: BgState, skipFront: Boolean = false) {
     when (style) {
         BgStyle.WAVES -> waves(st)
         BgStyle.BOKEH -> bokeh(st)
@@ -103,7 +108,7 @@ private fun DrawScope.drawStyleRaw(style: BgStyle, st: BgState) {
         BgStyle.DEEPSEA -> deepsea(st)
         BgStyle.TRAILS -> trails(st)
         BgStyle.CONTOUR -> contour(st)
-        BgStyle.RIDGE -> ridge(st)
+        BgStyle.RIDGE -> ridge(st, skipFront)
         BgStyle.BEAMS -> beams(st)
         BgStyle.SOLID -> solid(st)
         BgStyle.BLACK -> black(st)
@@ -736,44 +741,53 @@ private class RidgeTint {
  */
 private fun DrawScope.fogBand(cy: Float, h: Float, spd: Float, dk: Float, variant: Int, t: Float, par: Float, color: Color, alpha: Float) {
     if (alpha <= .005f) return
-    val tex = YushanRidge.fog(variant)
+    // 一個矩形＋水平重複的貼圖著色器：貼圖本身首尾相接，取樣時自然接起來，沒有拼接的接縫
     val tw = W * (1.5f + .25f * variant)
     val off = ((t * spd + par * W * dk + variant * 97f) % tw + tw) % tw
-    val paint = YushanRidge.fogPaint
+    val paint = scratch.get()!!.fogPaint
+    paint.shader = YushanRidge.fogShader(variant, off, cy - h / 2f, tw, h)
     paint.color = color.copy(alpha = alpha.coerceIn(0f, 1f)).toArgb()
-    val r = YushanRidge.fogRect
-    val canvas = drawContext.canvas.nativeCanvas
-    var x = off - tw
-    while (x < W) {
-        r.set(x, cy - h / 2f, x + tw + .5f, cy + h / 2f)
-        canvas.drawBitmap(tex, null, r, paint)
-        x += tw
-    }
+    drawContext.canvas.nativeCanvas.drawRect(0f, cy - h / 2f, W, cy + h / 2f, paint)
+    paint.shader = null
 }
 
-private fun DrawScope.ridge(st: BgState) {
-    val sc = scratch.get()!!
-    val t = st.at
-    val par = -(st.fx - .5f)
-    val parY = -(st.fy - .5f)
-    val (sun, pal) = TimeOfDay.now(System.currentTimeMillis())
-    val D = .92f
-    fun dim(a: FloatArray) = FloatArray(3) { a[it] * D }
-    val body0 = dim(pal.body); val haze = dim(pal.haze)
-    // 山的暗面帶一點目前焦點 App 的色系（換焦點時跟著主色慢慢轉）：同亮度的主色混進來，亮面、天空不動
-    val body = run {
+/** 山稜每一幀共用的顏色（時段色票＋暗面帶一點 App 色系）。[dimK]＝設定面板開著時的壓暗。 */
+private class RidgeCols(st: BgState, dimK: Float = 0f) {
+    val sun: TimeOfDay.Sun
+    val pal: TimeOfDay.Pal
+    val body: FloatArray; val haze: FloatArray; val light: FloatArray; val cLit: FloatArray; val cShade: FloatArray
+    val nightK: Float
+    init {
+        val (s0, p0) = TimeOfDay.now(System.currentTimeMillis()); sun = s0; pal = p0
+        val d = .92f * (1f - dimK)
+        fun dim(a: FloatArray) = FloatArray(3) { a[it] * d }
+        val body0 = dim(pal.body); haze = dim(pal.haze)
+        // 山的暗面帶一點目前焦點 App 的色系（換焦點時跟著主色慢慢轉）：同亮度的主色混進來，亮面、天空不動
         val ac = hsl(st.h, (st.s * 1.15f).coerceAtMost(.7f), .45f)
         val la = .3f * ac.red + .59f * ac.green + .11f * ac.blue
         val lb = .3f * body0[0] + .59f * body0[1] + .11f * body0[2]
         val k = (.2f + .08f * ((pal.stars - .5f) / .5f).coerceIn(0f, 1f)) * (st.s / .5f).coerceIn(.4f, 1.2f)
         val ar = floatArrayOf(ac.red, ac.green, ac.blue)
-        FloatArray(3) { body0[it] + ((ar[it] * lb / la.coerceAtLeast(.01f)).coerceIn(0f, 1f) - body0[it]) * k }
+        body = FloatArray(3) { body0[it] + ((ar[it] * lb / la.coerceAtLeast(.01f)).coerceIn(0f, 1f) - body0[it]) * k }
+        val midTone = mixF(body, haze, .55f)
+        val litC = dim(pal.lit)
+        light = FloatArray(3) { (litC[it] - midTone[it]) * pal.litK }
+        cLit = dim(pal.cLit); cShade = dim(pal.cShade)
+        nightK = ((pal.stars - .5f) / .5f).coerceIn(0f, 1f)
     }
-    val midTone = mixF(body, haze, .55f)
-    val litC = dim(pal.lit)
-    val light = FloatArray(3) { (litC[it] - midTone[it]) * pal.litK }
-    val cLit = dim(pal.cLit); val cShade = dim(pal.cShade)
-    val nightK = ((pal.stars - .5f) / .5f).coerceIn(0f, 1f)
+}
+
+private fun DrawScope.ridge(st: BgState, skipFront: Boolean = false) {
+    val sc = scratch.get()!!
+    val t = st.at
+    val par = -(st.fx - .5f)
+    val parY = -(st.fy - .5f)
+    val cols = RidgeCols(st)
+    val sun = cols.sun; val pal = cols.pal
+    val D = .92f
+    fun dim(a: FloatArray) = FloatArray(3) { a[it] * D }
+    val body = cols.body; val haze = cols.haze; val light = cols.light; val cLit = cols.cLit
+    val nightK = cols.nightK
 
     // 天空：頂 → 中 → 地平線，地平線以下接遠山的山嵐色
     drawRect(Brush.verticalGradient(0f to fc(dim(pal.skyTop)), .58f to fc(dim(pal.skyMid)), 1f to fc(dim(pal.skyHor)), startY = 0f, endY = H * .3f), size = Size(W, H * .3f))
@@ -787,6 +801,7 @@ private fun DrawScope.ridge(st: BgState) {
             val tp = sc.ridgePaint
             tp.colorFilter = null; tp.alpha = ((.07f + .88f * nightK) * 255).toInt()   // 星軌全天都在轉，白天只剩淡淡的痕跡
             canvas.save()
+            canvas.clipRect(0f, 0f, W, YushanRidge.skyBottom)   // 再往下一定是山，不用畫
             canvas.translate(par * W * .004f, 0f)
             canvas.rotate(t * YushanRidge.TRAIL_DEG_PER_SEC, YushanRidge.POLE_X, YushanRidge.POLE_Y)
             YushanRidge.trailRect(sc.ridgeRect)
@@ -824,6 +839,8 @@ private fun DrawScope.ridge(st: BgState) {
     val fogNear = fc(mixF(haze, cLit, .5f)); val fogFar = fc(mixF(haze, cLit, .3f))
     // 地平線、遠山背後一層很淡的霧
     fogBand(topOf("遠山") + 4f, 22f, .6f, .004f, 0, t, par, fogFar, 0.77f)
+    // 主畫面：山與霧另外以原生解析度畫（ridgeFront），這張小圖只負責天空
+    if (skipFront && YushanRidge.nativeReady) return
     val tp = sc.ridgePaint
     tp.colorFilter = sc.ridgeTint.get(body, haze, light)
     val ox = par * W; val oy = parY * H * .35f
@@ -863,6 +880,68 @@ private fun DrawScope.ridge(st: BgState) {
     // 最前景貼著畫面底部一層很淡、流得最快的霧
     fogBand(H - 6f, 40f, 5.2f, .1f, 1, t, par, fogNear, .32f)
     vignette(.16f + .1f * nightK)
+}
+
+/**
+ * 山稜的前景：七層山（原生解析度的硬體點陣圖，每層切直條、只畫到一定被前面蓋住的地方）＋夾在山與山之間的霧。
+ * 由背景層另外用一張原生解析度的畫布呼叫（邏輯座標 480×270，呼叫端負責縮放）；天空、星軌還是畫在低解析度的小圖裡。
+ */
+internal fun DrawScope.ridgeFront(st: BgState, dimK: Float) {
+    val layers = YushanRidge.layers ?: return
+    val sc = scratch.get()!!
+    val cols = RidgeCols(st, dimK)
+    val t = st.at
+    val par = -(st.fx - .5f)
+    val parY = -(st.fy - .5f)
+    fun topOf(name: String) = layers.firstOrNull { it.name == name }?.topY ?: H * .6f
+    val fogNear = fc(mixF(cols.haze, cols.cLit, .5f)); val fogFar = fc(mixF(cols.haze, cols.cLit, .3f))
+    val canvas = drawContext.canvas.nativeCanvas
+    val tp = sc.ridgePaint
+    tp.alpha = 255
+    val ox = par * W; val oy = parY * H * .35f
+    val src = sc.tileSrc; val dst = sc.ridgeRect
+    val n = YushanRidge.NATIVE
+    for (p in layers) {
+        val img = p.native ?: return
+        tp.colorFilter = sc.ridgeTint.get(cols.body, cols.haze, cols.light)
+        val lx = p.x0 + ox * p.k; val ly = p.y0 + oy * p.k
+        val tiles = p.tileBottom
+        for (ti in tiles.indices) {
+            val bot = minOf(tiles[ti], img.height / n)
+            if (bot <= 0f) continue
+            val a = ti * YushanRidge.TILE; val b = minOf(p.w, a + YushanRidge.TILE)
+            src.set((a * n).toInt(), 0, minOf(img.width, (b * n).toInt()), (bot * n).toInt())
+            dst.set(lx + src.left / n, ly, lx + src.right / n, ly + src.bottom / n)
+            canvas.drawBitmap(img, src, dst, tp)
+        }
+        when (p.name) {
+            "遠山" -> {
+                fogBand(p.topY + 16f, 26f, .9f, .006f, 1, t, par, fogFar, 0.85f)
+                fogBand(p.topY + 24f, 18f, 1.4f, .008f, 2, t, par, fogFar, 0.59f)
+            }
+            "主峰山體" -> {
+                val y = topOf("右側稜")
+                fogBand(y + 2f, 40f, 1.6f, .028f, 0, t, par, fogNear, 0.71f)
+                fogBand(y + 10f, 26f, 2.3f, .032f, 2, t, par, fogNear, 0.51f)
+            }
+            "右側稜" -> {
+                val y = topOf("近稜（北峰→風口）")
+                fogBand(y + 4f, 44f, 2.1f, .042f, 1, t, par, fogNear, 0.68f)
+                fogBand(y + 14f, 30f, 2.9f, .048f, 0, t, par, fogNear, 0.48f)
+            }
+            "近稜（北峰→風口）" -> {
+                val y = topOf("近稜下方的稜")
+                fogBand(y + 6f, 48f, 2.7f, .058f, 2, t, par, fogNear, 0.61f)
+                fogBand(y + 16f, 30f, 3.6f, .064f, 1, t, par, fogNear, 0.44f)
+            }
+            "近稜下方的稜" -> {
+                val y = topOf("最前面的稜")
+                fogBand(y + 8f, 52f, 3.3f, .075f, 0, t, par, fogNear, 0.54f)
+                fogBand(y + 20f, 34f, 4.3f, .082f, 2, t, par, fogNear, 0.37f)
+            }
+        }
+    }
+    fogBand(H - 6f, 40f, 5.2f, .1f, 1, t, par, fogNear, .32f)
 }
 
 // ───────────── 10. 光束（粗細不一的垂直光束，呼吸、流動，往焦點聚攏） ─────────────
