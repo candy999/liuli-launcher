@@ -85,6 +85,8 @@ class AdbClient(private val host: String, private val port: Int, private val key
         val out = StringBuilder()
         while (true) {
             val m = receive()
+            // 只處理這一條串流的訊息（arg1＝我方 id）；上一條串流晚到的訊息（例如 CLSE）略過，不然會提早結束、讀到錯的輸出
+            if (m.arg1 != localId) continue
             when (m.command) {
                 A_OKAY -> remoteId = m.arg0
                 A_WRTE -> {

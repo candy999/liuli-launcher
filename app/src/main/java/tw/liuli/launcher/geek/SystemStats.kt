@@ -79,7 +79,7 @@ object FrameStats {
 class StatsSampler(private val context: Context) {
     private val hist = 60
     private val cpuHist = ArrayDeque<Float>(); private val fpsHist = ArrayDeque<Float>(); private val netHist = ArrayDeque<Float>()
-    private var lastStat: LongArray? = null
+    private var lastStat: Map<String, LongArray>? = null
     @Volatile private var adb: AdbClient? = null
     private var adbTryAt = 0L
     private var adbTries = 0
@@ -108,15 +108,23 @@ class StatsSampler(private val context: Context) {
         var cores = freqs
         var pct = if (freqs.isNotEmpty()) freqs.average().toFloat() * 100f else -1f
         if (statLines != null) {
-            val prev = lastStat
-            val parsed = statLines.map { l -> l.trim().split(Regex("\\s+")).drop(1).mapNotNull { it.toLongOrNull() } }
-            val flat = parsed.flatMap { listOf(it.take(8).sum(), (it.getOrElse(3) { 0L } + it.getOrElse(4) { 0L })) }.toLongArray()
-            if (prev != null && prev.size == flat.size) {
-                fun use(i: Int): Float { val tot = flat[2 * i] - prev[2 * i]; val idle = flat[2 * i + 1] - prev[2 * i + 1]; return if (tot > 0) (1f - idle.toFloat() / tot).coerceIn(0f, 1f) else 0f }
-                pct = use(0) * 100f; real = true
-                cores = (1 until parsed.size).map { use(it) }
+            // 以名稱對應（cpu、cpu0、cpu1…）：這類晶片會動態關掉核心，/proc/stat 的行數會變
+            val cur2 = HashMap<String, LongArray>()
+            for (l in statLines) {
+                val f = l.trim().split(Regex("\\s+"))
+                val v = f.drop(1).mapNotNull { it.toLongOrNull() }
+                if (v.size >= 5) cur2[f[0]] = longArrayOf(v.take(8).sum(), v[3] + v[4])
             }
-            lastStat = flat
+            val prev = lastStat
+            fun use(k: String): Float? {
+                val a = cur2[k] ?: return null
+                val b = prev?.get(k) ?: return null
+                val tot = a[0] - b[0]; val idle = a[1] - b[1]
+                return if (tot > 0) (1f - idle.toFloat() / tot).coerceIn(0f, 1f) else null
+            }
+            use("cpu")?.let { pct = it * 100f; real = true }
+            if (real) cores = (0 until maxOf(freqs.size, 1)).map { i -> use("cpu$i") ?: 0f }   // 關掉的核心＝0
+            lastStat = cur2
         }
         push(cpuHist, pct.coerceAtLeast(0f))
         // ── 畫面 ──
