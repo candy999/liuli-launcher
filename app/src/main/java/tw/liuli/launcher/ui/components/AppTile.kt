@@ -67,17 +67,19 @@ fun AppTile(
                 .fillMaxWidth()
                 .aspectRatio(16f / 9f)
                 .focusScale(focus, 1.10f)
-                // 出場淡入：放在「已經放大過」的這一層裡、整塊先畫好再整體淡入——
+                // 焦點陰影：畫在淡入層「外面」（淡入層暫時是一張和磚同大的圖，陰影畫在裡面會被切掉＝破圖），
+                // 深淺跟著淡入一起出現
+                .graphicsLayer {
+                    shadowElevation = 8.dp.toPx() * focus.value() * reveal()
+                    shape = tileShape
+                    clip = false
+                }
+                // 出場淡入：在「已經放大過」的層裡、整塊先畫好再整體淡入——
                 // 不會透出底下的深色底（每個繪圖各自半透明會像破圖），放大的部分也不會被裁成直角
                 .graphicsLayer {
                     val a = reveal()
                     alpha = a
                     compositingStrategy = if (a < .999f) CompositingStrategy.Offscreen else CompositingStrategy.Auto
-                }
-                .graphicsLayer {
-                    shadowElevation = 8.dp.toPx() * focus.value()
-                    shape = tileShape
-                    clip = false
                 }
                 .then(extra)
                 .focusTarget(focus, req, onFocused, onClick, onLongClick = { onLongClick(req) })
