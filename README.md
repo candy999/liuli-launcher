@@ -8,7 +8,7 @@
 
 <p align="center">
   <a href="https://github.com/candy999/liuli-launcher/releases/latest">下載最新版</a> ·
-  <a href="docs/releases/v1.1.0.md">1.1.0 版本說明</a> ·
+  <a href="docs/releases/v1.1.1.md">1.1.1 版本說明</a> ·
   <a href="docs/ux-design.md">UX 設計</a> ·
   <a href="LICENSE">MIT 授權</a>
 </p>
@@ -184,7 +184,7 @@
      adb connect <電視IP>:5555
      ```
      ```bash
-     adb install -r LiuliLauncher-1.1.0.apk
+     adb install -r LiuliLauncher-1.1.1.apk
      ```
    - **不用電腦**：在電視上裝 Downloader，輸入 Release 頁面上的 APK 網址。
 3. 設為預設主畫面：**設定 → 預設主畫面**。很多 Google TV 沒有這個選項，可以改用以下任一方式：
