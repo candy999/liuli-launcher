@@ -167,7 +167,7 @@ class BackgroundEngine {
 
     /** 面板／抽屜滑入滑出的動畫期間：背景暫停（不推進、不重畫），GPU 全部留給動畫。 */
     @Volatile private var uiHoldUntil = 0L
-    /** 面板或抽屜開著（背景大半被蓋住）：背景一直用省力模式（÷3、15fps，速度不變）。 */
+    /** 面板或抽屜開著（背景大半被蓋住）：背景一直用省力模式（÷3、每秒 30 格，速度不變）。 */
     @Volatile var covered = false
     private var glassDirty = false
     /** 目前播放速度（1＝正常；GPU 跟不上時 <1）。 */
@@ -391,7 +391,7 @@ class BackgroundEngine {
         uiHoldUntil = max(uiHoldUntil, android.os.SystemClock.uptimeMillis() + ms)
     }
 
-    /** 使用者按了鍵：接下來 [YIELD_MS] 內背景改用省力模式（÷3、15fps），GPU 留給 UI（焦點彈簧、捲動）。 */
+    /** 使用者按了鍵：接下來 [YIELD_MS] 內背景改用省力模式（÷3、每秒 30 格），GPU 留給 UI（焦點彈簧、捲動）。 */
     fun noteInput() {
         val now = android.os.SystemClock.uptimeMillis()
         inputAt = now
@@ -402,7 +402,7 @@ class BackgroundEngine {
      * 由 LaunchedEffect 執行：被喚醒後推進背景，追上目標就停。
      *
      * 排程原則（UI 順暢優先）：
-     * 1. 操作中（按鍵後 [YIELD_MS]）：背景照常動，但降到 ÷3、15fps，GPU 留給 UI（焦點彈簧、捲動）。
+     * 1. 操作中（按鍵後 [YIELD_MS]）：背景照常動，但降到 ÷3、每秒 30 格，GPU 留給 UI（焦點彈簧、捲動）。
      * 2. 畫質階梯（解析度 ÷1～÷5 ＋ 更新率）依「每一幀的實際總耗時」（FrameMetrics）調整。
      *    GPU 跟不上時會把幀排隊：只看幀與幀的間隔會嚴重低估（海信實測：間隔 50ms、實際延遲 130ms，按鍵也跟著慢 0.1 秒）。
      *    總耗時超過更新間隔＝開始排隊，連續兩窗就降一檔，超過 1.8 倍立刻降。
@@ -457,10 +457,12 @@ class BackgroundEngine {
                         return@withFrameNanos
                     }
                     if (held) { held = false; lastT = 0L; lastBgT = 0L; lastAmbT = 0L; skipMeasure = 2 }
-                    // 操作中（按鍵後一小段時間）或面板／抽屜開著：背景照常動，但降到 ÷3、15fps，把 GPU 留給 UI。
-                    // 速度不變（每格推進 1/15 秒），所以不會停住、也不會變慢。
+                    // 操作中（按鍵後一小段時間）或面板／抽屜開著：背景照常動，但降到 ÷3、每秒 30 格，GPU 留給 UI。
+                    // 速度不變，所以不會停住、也不會變慢。
                     val busy = android.os.SystemClock.uptimeMillis() < yieldUntil || covered
-                    val due = if (busy) max(interval, BUSY_INTERVAL) else interval
+                    // 讓路模式：解析度降到 ÷3 就是為了換流暢——更新率固定每秒 30 格，
+                    // 不受「高畫質時量到的較低更新率」拖累（以前是取兩者較慢的那個，結果又糊又卡）
+                    val due = if (busy && !blur) BUSY_INTERVAL else if (busy) max(interval, BUSY_INTERVAL) else interval
                     if (lastBgT != 0L && t - lastBgT < due - 6f) return@withFrameNanos
                     val divBefore = renderDiv
                     var measure = false
@@ -948,9 +950,9 @@ class BackgroundEngine {
         private const val TAU_SPEED = 800f
         /** 按鍵後背景省力的時間。 */
         private const val YIELD_MS = 320L
-        /** 操作中的背景：至少 ÷3、15fps（動作照常，只是比較粗、比較少格）。 */
+        /** 操作中的背景：至少 ÷3、每秒 30 格（解析度降下來就是為了換流暢）。 */
         private const val BUSY_DIV = 3
-        private const val BUSY_INTERVAL = 66.7f
+        private const val BUSY_INTERVAL = 33.3f
         /** 每幾格背景評估一次（30fps 約 0.27 秒）。 */
         private const val ADAPT_WINDOW = 8
         /** 背景格間隔超過排定的 1.25 倍＝跟不上（連續兩窗才降）；超過 1.8 倍直接降；在 1.1 倍內＝準時，可以試著升。 */
