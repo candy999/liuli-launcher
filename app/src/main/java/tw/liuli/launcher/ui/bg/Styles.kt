@@ -772,16 +772,21 @@ private fun DrawScope.billowDeck(
     }
     if (m == 0) return
     // 雲海的厚度：夾在山層之間的雲帶較厚，下半截被前面的稜線擋住；地平線上的積雲很薄
-    val thick = if (fill) r0 * 2.2f else r0 * .55f
+    val thick = if (fill) r0 * 1.5f else r0 * .55f
     val flat = .62f   // 雲頭壓扁：雲海是平頂、緩緩起伏的，不是一顆顆圓球
     // 1. 連在一起的雲頭合成一條雲帶（平底），不再每顆雲頭下面各一根柱子
     var s = 0
     while (s < m) {
         var e = s
         while (e + 1 < m && bx[e + 1] - br[e + 1] < bx[e] + br[e] * 1.1f) e++
-        val x0 = bx[s] - br[s] * .9f; val x1 = bx[e] + br[e] * .9f
-        drawRect(mid, Offset(x0, base - r0 * .2f), Size(x1 - x0, thick + r0 * .2f))
-        if (fill) drawRect(shade, Offset(x0, base + thick * .5f), Size(x1 - x0, thick * .5f))
+        val x0 = bx[s] - br[s] * .55f; val x1 = bx[e] + br[e] * .55f
+        val hh = thick + r0 * .2f; val wid = x1 - x0
+        // 太窄的一段只留雲頭（不然像一根柱子）；雲帶兩端是圓的，不是直直切掉
+        if (wid > hh * 1.8f) {
+            val cr = androidx.compose.ui.geometry.CornerRadius(hh * .5f)
+            drawRoundRect(mid, Offset(x0, base - r0 * .2f), Size(wid, hh), cr)
+            if (fill) drawRoundRect(shade, Offset(x0 + hh * .3f, base + thick * .45f), Size(wid - hh * .6f, thick * .55f), androidx.compose.ui.geometry.CornerRadius(thick * .27f))
+        }
         s = e + 1
     }
     // 2. 雲頭（中間階，壓扁的橢圓）
