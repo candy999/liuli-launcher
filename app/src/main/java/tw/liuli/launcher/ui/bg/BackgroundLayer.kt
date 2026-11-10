@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
@@ -57,13 +58,30 @@ fun BackgroundLayer(engine: BackgroundEngine, blurred: () -> Float, modifier: Mo
         val fullH = constraints.maxHeight
         SideEffect { engine.setViewport(fullW, fullH) }
 
-        // 冷啟動：全黑（不畫背景）→ 第一個焦點出現後，從焦點往外擴散
+        // 冷啟動：全黑（不畫背景）→ 第一個焦點出現、而且這個樣式的資源（山、星軌、銀河貼圖…）都準備好之後，才從焦點往外擴散。
+        // 不然會先看到一片天空，山才突然冒出來。等太久（載入失敗）就不等了。
         val from = engine.revealFrom
-        val reveal = remember { Animatable(0f) }
-        LaunchedEffect(from) {
-            if (from != null && reveal.value < 1f) reveal.animateTo(1f, tween(REVEAL_MS, easing = FastOutSlowInEasing))
+        val style = engine.style
+        var assetsReady by remember { mutableStateOf(false) }
+        LaunchedEffect(style) {
+            var t0 = android.os.SystemClock.uptimeMillis()
+            var was = false
+            while (true) {
+                val r = style.prepareAssets()
+                val now = android.os.SystemClock.uptimeMillis()
+                if (!r && was) t0 = now   // 準備好之後又被放掉（離開琉璃時釋放記憶體）：重新計時
+                was = r
+                assetsReady = r || now - t0 > ASSET_WAIT_MS
+                kotlinx.coroutines.delay(if (r) 300L else 40L)
+            }
         }
-        if (from == null || PerfProbe.noBg) {
+        val reveal = remember { Animatable(0f) }
+        LaunchedEffect(from, assetsReady) {
+            if (from != null && assetsReady && reveal.value < 1f) reveal.animateTo(1f, tween(REVEAL_MS, easing = FastOutSlowInEasing))
+        }
+        // 已經顯示過、資源卻被放掉（離開琉璃回來）：先蓋黑，載入好再淡出，不讓山突然跳出來
+        val cover by androidx.compose.animation.core.animateFloatAsState(if (assetsReady) 0f else 1f, tween(if (assetsReady) 450 else 0), label = "assetCover")
+        if (from == null || (!assetsReady && reveal.value <= 0f) || PerfProbe.noBg) {
             Canvas(Modifier.fillMaxSize()) { drawRect(Color.Black) }
             return@BoxWithConstraints
         }
@@ -204,7 +222,24 @@ fun BackgroundLayer(engine: BackgroundEngine, blurred: () -> Float, modifier: Mo
         // 子頁面的模糊桌布畫在背景圖層「外面」：淡入淡出時每格只多貼一張小圖，背景本身維持快取不用重畫
         // （以前畫在裡面：背景靜止時已升到原生解析度，過場的每一格都要把整個背景重畫一次）
         Canvas(Modifier.fillMaxSize()) { pageBlur(engine, blurred(), IntSize(fullW, fullH)) }
+        if (cover > 0.001f) Canvas(Modifier.fillMaxSize()) { drawRect(Color.Black, alpha = cover) }
     }
+}
+
+/** 等樣式資源最久多久（毫秒）：載入失敗時不要永遠黑著。 */
+private const val ASSET_WAIT_MS = 5000L
+
+/**
+ * 這個樣式要用的資源準備好了沒；沒有的話順便請它開始載入（在背景執行緒）。
+ * 玉山星軌：七層山（含原生解析度的版本）與星軌貼圖；星空銀河：銀河貼圖；其他樣式即時畫，不用等。
+ */
+internal fun BgStyle.prepareAssets(): Boolean = when (this) {
+    BgStyle.RIDGE -> {
+        YushanRidge.request(); YushanRidge.requestTrails()
+        YushanRidge.nativeReady && YushanRidge.trails != null && YushanRidge.trailsHi != null
+    }
+    BgStyle.GALAXY -> { MilkyWay.request(); MilkyWay.image != null }
+    else -> true
 }
 
 private const val REVEAL_MS = 1400
