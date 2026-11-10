@@ -23,12 +23,12 @@ class LauncherSettings(context: Context) {
     var bgSat by mutableStateOf(prefs.getFloat("bg_sat", 0.5f))
         private set
 
-    /** 閒置幾秒後自動進入簡潔模式（0＝不自動）。 */
-    var minimalIdle by mutableStateOf(prefs.getInt("minimal_idle", 0))
+    /** 閒置幾秒後自動進入簡潔模式（0＝不自動）。預設 1 分鐘。 */
+    var minimalIdle by mutableStateOf(prefs.getInt("minimal_idle", 60))
         private set
 
-    /** 簡潔模式的微光（0＝關、1 輕、2 中、3 深）：壓暗整個畫面，省電、保護面板。 */
-    var minimalDim by mutableStateOf(prefs.getInt("minimal_dim", 0))
+    /** 簡潔模式的微光（0＝關、1 輕、2 中、3 深）：壓暗整個畫面，省電、保護面板。預設「輕」。 */
+    var minimalDim by mutableStateOf(prefs.getInt("minimal_dim", 1))
         private set
     /** 簡潔模式的微飄移：時間與天氣緩慢飄動，避免烙印。 */
     var minimalDrift by mutableStateOf(prefs.getBoolean("minimal_drift", true))
