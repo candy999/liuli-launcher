@@ -396,9 +396,26 @@ fun AppDrawer(
         )
         onDispose { bgEngine?.cover = null }
     }
-    val first = remember { FocusRequester() }
     val gridState = androidx.compose.foundation.lazy.grid.rememberLazyGridState()
     var focused by remember { mutableIntStateOf(0) }
+    // 每個 App 磚一個 FocusRequester（依套件名稱）：解除安裝後焦點要能移到原本位置上的下一個 App
+    val requesters = remember { HashMap<String, FocusRequester>() }
+    var focusedPkg by remember { mutableStateOf<String?>(null) }
+    // App 清單更新時（例如在抽屜裡解除安裝了一個 App）：原本有焦點的那一格不見了，焦點會掉到抽屜後面的主畫面，
+    // 抽屜還開著卻沒辦法操作。改成把焦點交給同一個位置上的下一個 App（刪的是最後一個就交給前一個）
+    LaunchedEffect(apps) {
+        val pkg = focusedPkg ?: return@LaunchedEffect
+        if (!open || apps.isEmpty() || apps.any { it.packageName == pkg }) return@LaunchedEffect
+        val idx = focused.coerceIn(0, apps.size - 1)
+        val target = apps[idx].packageName
+        focusedPkg = target
+        runCatching { gridState.scrollToItem(idx) }
+        // 等新的格子排好、FocusRequester 掛上去再要焦點（最多試幾次）
+        repeat(10) {
+            delay(32)
+            if (runCatching { requesters[target]?.requestFocus() }.isSuccess && requesters[target] != null) return@LaunchedEffect
+        }
+    }
     // 打開後 0.5 秒內（滑入＋主畫面淡出＋背景暫停都還在進行）整塊抽屜維持一張離屏圖，之後才回到一般繪製
     var asLayer by remember { mutableStateOf(false) }
     // 是否擺放（看得到）：打開時立刻擺放；收起時等滑出動畫結束才拿掉
@@ -413,7 +430,7 @@ fun AppDrawer(
             focused = 0
             runCatching { gridState.scrollToItem(0) }
             delay(16)
-            runCatching { first.requestFocus() }
+            apps.firstOrNull()?.let { a -> runCatching { requesters[a.packageName]?.requestFocus() } }
             // 抽屜「幾乎到位」（剩不到 3%）就開始逐排出現，和彈簧最後的收尾重疊，不會有一段空框在等
             launch {
                 androidx.compose.runtime.snapshotFlow { slide.value }.first { it < .03f }
@@ -498,8 +515,8 @@ fun AppDrawer(
                         app = app,
                         width = 124.dp,
                         showLabel = true,
-                        requester = if (i == 0) first else null,
-                        onFocused = { focused = i },
+                        requester = requesters.getOrPut(app.packageName) { FocusRequester() },
+                        onFocused = { focused = i; focusedPkg = app.packageName },
                         onClick = { onLaunch(app) },
                         onLongClick = { fr -> onLongClick(app, fr) },
                         extra = Modifier.bgTarget(app.themeColor, isApp = true),
