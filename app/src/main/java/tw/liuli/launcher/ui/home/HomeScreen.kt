@@ -1119,6 +1119,10 @@ fun HomeScreen(
     }
     val dockApps = remember(apps, dock) { dock.mapNotNull { pkg -> apps.firstOrNull { it.packageName == pkg } } }
     val recede = animateFloatAsState(if (drawerOpen || sheet != null || picking) 1f else 0f, tween(380), label = "recede")
+    // 抽屜：主畫面整個隱藏（抽屜上方改放一行精簡的時間、天氣）；側邊欄只是變淡，背後的主畫面還看得到
+    val drawerHide = animateFloatAsState(if (drawerOpen) 1f else 0f, tween(if (drawerOpen) 220 else 320), label = "drawerHide")
+    // 只在「出現／消失」這一刻重新組合，淡入淡出中不每格重組整個主畫面
+    val drawerBarShown by remember { androidx.compose.runtime.derivedStateOf { drawerHide.value > 0.001f } }
 
     CompositionLocalProvider(LocalBringIntoViewSpec provides keepVisible) {
         Box(
@@ -1169,7 +1173,7 @@ fun HomeScreen(
                 .graphicsLayer {
                     compositingStrategy = CompositingStrategy.ModulateAlpha
                     val m = minimalT.value
-                    alpha = (1f - 0.4f * recede.value) * (1f - m)
+                    alpha = (1f - 0.4f * recede.value) * (1f - m) * (1f - drawerHide.value)
                     // 簡潔模式：整片往下收、淡出（只動圖層位置，不重新排版）
                     translationY = m * 46.dp.toPx()
                 }
@@ -1333,6 +1337,9 @@ fun HomeScreen(
                     GText("所有 App", size = 13.sp, color = Ink.Tertiary)
                 }
             }
+
+            // 抽屜上方的精簡資訊列（抽屜打開時才出現）
+            if (drawerOpen || drawerBarShown) DrawerStatusBar(home, { drawerHide.value })
 
             // 抽屜預先建好（主畫面穩定 2.5 秒後，或第一次打開時），之後打開只剩滑入動畫
             if (drawerReady || drawerOpen) {

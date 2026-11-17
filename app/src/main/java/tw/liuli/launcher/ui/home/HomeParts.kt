@@ -239,6 +239,60 @@ fun WeatherGroup(home: HomeContext, requester: FocusRequester, onClick: () -> Un
     }
 }
 
+/**
+ * 抽屜打開時，主畫面整個隱藏；抽屜上方那條空白放一行精簡的資訊：左邊時間與日期，右邊天氣與網路。
+ * 只是看的，不拿焦點。[visible] 0～1（在繪製階段讀取，淡入時不重新組合）。
+ */
+@Composable
+fun DrawerStatusBar(home: HomeContext, visible: () -> Float, modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    val now = rememberMinuteClock()
+    val is24h = android.text.format.DateFormat.is24HourFormat(context)
+    val time = now.format(DateTimeFormatter.ofPattern(if (is24h) "HH:mm" else "h:mm", zh))
+    val ampm = if (is24h) null else if (now.hour < 12) "上午" else "下午"
+    val w = home.weather
+    Row(
+        modifier
+            .fillMaxWidth()
+            .height(100.dp)
+            .padding(horizontal = 52.dp)
+            .graphicsLayer {
+                compositingStrategy = CompositingStrategy.ModulateAlpha
+                val v = visible().coerceIn(0f, 1f)
+                alpha = v
+                translationY = (1f - v) * (-10).dp.toPx()
+            },
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        GText(time, size = 40.sp, weight = FontWeight.ExtraLight, shadow = true, letterSpacing = (-1).sp)
+        if (ampm != null) GText(ampm, Modifier.padding(start = 6.dp, top = 12.dp), size = 14.sp, weight = FontWeight.Light, shadow = true)
+        Box(Modifier.padding(horizontal = 14.dp).size(3.dp).background(Ink.Tertiary, CircleShape))
+        GText(now.format(DateTimeFormatter.ofPattern("M月d日 EEEE", zh)), size = 16.sp, color = Ink.Secondary, shadow = true)
+        Spacer(Modifier.weight(1f))
+        if (w == null) {
+            GText(if (home.online) "天氣載入中…" else "目前離線", size = 16.sp, color = Ink.Secondary, shadow = true)
+        } else {
+            LIcon(LIcons.weather(w.kind, w.isDay), 24.dp)
+            Spacer(Modifier.width(8.dp))
+            GText("${w.temp.roundToInt()}°", size = 32.sp, weight = FontWeight.ExtraLight, shadow = true)
+            Spacer(Modifier.width(10.dp))
+            val t = w.today
+            GText(
+                if (t != null) "${w.kind.label}　${t.max.roundToInt()}° / ${t.min.roundToInt()}°" else w.kind.label,
+                size = 16.sp, color = Ink.Secondary, shadow = true,
+            )
+        }
+        // 網路：只在有線／無線／斷線之間換圖示，斷線時變淡
+        Spacer(Modifier.width(18.dp))
+        val net = when (home.network) {
+            tw.liuli.launcher.context.NetworkStatus.WIFI -> LIcons.Wifi
+            tw.liuli.launcher.context.NetworkStatus.ETHERNET -> LIcons.Ethernet
+            tw.liuli.launcher.context.NetworkStatus.NONE -> LIcons.NoNet
+        }
+        LIcon(net, 20.dp, if (home.network == tw.liuli.launcher.context.NetworkStatus.NONE) Ink.Tertiary else Color.White.copy(alpha = 0.8f))
+    }
+}
+
 /** 設定按鈕：平常是一個圖示，焦點時變成亮白圓鈕。 */
 @Composable
 fun GearButton(requester: FocusRequester, onClick: () -> Unit, modifier: Modifier = Modifier) {
