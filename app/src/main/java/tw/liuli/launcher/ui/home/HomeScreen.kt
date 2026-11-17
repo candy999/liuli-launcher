@@ -134,6 +134,8 @@ fun HomeScreen(
     var hidden by remember { mutableStateOf(hiddenStore.load()) }
     var reloadKey by remember { mutableIntStateOf(0) }
     var fakeApps by remember { mutableIntStateOf(0) }
+    // 量測用（adb）：ACTION=fakesources:1 在沒有訊號源的機器（模擬器）上放 HDMI1～3、AV 四個假的訊號源，測訊號源列；0 拿掉
+    var fakeSources by remember { mutableStateOf(false) }
     var sheet by remember { mutableStateOf<OpenSheet?>(null) }
     var exitingSheet by remember { mutableStateOf<SheetSpec?>(null) }
     // 返回上一層：從一個面板進到另一個面板時，記下上一層（與當時焦點所在的列）
@@ -211,7 +213,16 @@ fun HomeScreen(
         ContextCompat.registerReceiver(context, receiver, filter, ContextCompat.RECEIVER_EXPORTED)
         onDispose { context.unregisterReceiver(receiver) }
     }
-    val sources = remember(reloadKey) { TvSources.list(context) }
+    val sources = remember(reloadKey, fakeSources) {
+        TvSources.list(context).ifEmpty {
+            if (!fakeSources) emptyList() else listOf(
+                tw.liuli.launcher.data.TvSource("fake.hdmi1", "HDMI1", android.media.tv.TvInputInfo.TYPE_HDMI, true, ""),
+                tw.liuli.launcher.data.TvSource("fake.hdmi2", "HDMI2", android.media.tv.TvInputInfo.TYPE_HDMI, true, ""),
+                tw.liuli.launcher.data.TvSource("fake.hdmi3", "HDMI3", android.media.tv.TvInputInfo.TYPE_HDMI, true, ""),
+                tw.liuli.launcher.data.TvSource("fake.av", "AV", android.media.tv.TvInputInfo.TYPE_COMPOSITE, true, ""),
+            )
+        }
+    }
 
     // ── 焦點：開啟時直接放到上次停留的常用 App（沒有就第一個）──
     // App 清單載入前不讓任何東西拿焦點（見下方 focusProperties）：否則系統會先把焦點給畫面上第一個元件（時鐘），
@@ -1062,6 +1073,7 @@ fun HomeScreen(
                 }
                 "drawer" -> { sheet = null; exitingSheet = null; drawerOpen = true }
                 "fakeapps" -> fakeApps = (arg.toIntOrNull() ?: 0).coerceIn(0, 200)
+                "fakesources" -> fakeSources = arg == "1"
                 // 量測用（adb）：ACTION=shot:名稱 把目前的視窗畫面存成 PNG（Android/data/tw.liuli.launcher/files/shots/名稱.png）。
                 // 直接拷貝 App 自己的畫面緩衝，不靠系統截圖（模擬器視窗縮小時 screencap 只會拿到黑畫面）
                 "shot" -> (context as? android.app.Activity)?.window?.let { win ->

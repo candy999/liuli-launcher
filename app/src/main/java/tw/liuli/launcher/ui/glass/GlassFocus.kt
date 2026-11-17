@@ -295,7 +295,8 @@ private class GlassFocusPainter(private val backdrop: GlassBackdrop) {
                 c.drawRoundRect(rf, r, r, fallback)
             }
             // 2. 一點點白霧（不是乳白）：遠看也看得出焦點；按下去／移動中再亮一點
-            val hz = (.13f + .05f * st.glow + .03f * st.lift) * pres
+            // 在玻璃面板裡（側邊欄）背後已經霧了一層，焦點要再白一點才分得出來
+            val hz = ((if (st.vertical) .24f else .13f) + .06f * st.glow + .03f * st.lift) * pres
             haze.color = android.graphics.Color.argb((hz * 255f).roundToInt().coerceIn(0, 255), 255, 255, 255)
             c.drawRoundRect(rf, r, r, haze)
             // 3. 細邊線：受光角順著移動方向轉一點
@@ -306,7 +307,7 @@ private class GlassFocusPainter(private val backdrop: GlassBackdrop) {
             rimMatrix.postRotate(ang * 57.3f, rf.width() / 2, rf.height() / 2)
             rimMatrix.postTranslate(rf.left, rf.top)
             rimShader.setLocalMatrix(rimMatrix)
-            rim.alpha = ((.62f + .3f * st.glow) * pres * 255f).roundToInt().coerceIn(0, 255)
+            rim.alpha = (((if (st.vertical) .8f else .62f) + .2f * st.glow) * pres * 255f).roundToInt().coerceIn(0, 255)
             rf.inset(sw / 2, sw / 2)
             c.drawRoundRect(rf, r - sw / 2, r - sw / 2, rim)
         }
