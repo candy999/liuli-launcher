@@ -298,6 +298,9 @@ fun HomeScreen(
         }
     }
 
+    // 打開側邊欄（設定等面板）時離開簡潔模式：背後的主畫面要看得到，不能變成一片空的
+    LaunchedEffect(sheet != null) { if (sheet != null && minimal) minimal = false }
+
     LaunchedEffect(homePresses) {
         if (homePresses == 0) return@LaunchedEffect
         minimal = false

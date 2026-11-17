@@ -46,6 +46,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import tw.liuli.launcher.ui.glass.liquidGlass
+import tw.liuli.launcher.ui.glass.GlassFocusState
+import tw.liuli.launcher.ui.glass.glassFocusHost
+import tw.liuli.launcher.ui.glass.glassFocusItem
+import tw.liuli.launcher.ui.glass.rememberGlassFocus
 import tw.liuli.launcher.ui.theme.SLIDE_THRESHOLD
 import tw.liuli.launcher.ui.theme.GText
 import tw.liuli.launcher.ui.theme.Ink
@@ -188,7 +192,14 @@ fun GlassSheet(
                 spec.header.invoke()
             }
             Spacer(Modifier.height(16.dp))
-            LazyColumn(Modifier.weight(1f), state = listState, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            // 焦點列：一顆比面板亮一點的玻璃在列之間上下滑動（取代以前的白底）
+            val glass = rememberGlassFocus(vertical = true)
+            Box(
+                Modifier
+                    .weight(1f)
+                    .glassFocusHost(glass, { spec.items.size }, slide = { Offset(slide.value * (sheetWidthPx + gapPx), 0f) }),
+            ) {
+            LazyColumn(Modifier.fillMaxSize(), state = listState, verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 itemsIndexed(spec.items) { index, item ->
                     Box(
                         Modifier.graphicsLayer {
@@ -202,9 +213,10 @@ fun GlassSheet(
                             translationY = (1f - a) * 10.dp.toPx()
                         },
                     ) {
-                        SheetRow(item, if (index == focusAt) first else null) { onFocusIndex(index) }
+                        SheetRow(item, index, glass, if (index == focusAt) first else null) { onFocusIndex(index) }
                     }
                 }
+            }
             }
         }
     }
@@ -212,7 +224,7 @@ fun GlassSheet(
 }
 
 @Composable
-private fun SheetRow(item: SheetItem, requester: FocusRequester?, onFocused: () -> Unit) {
+private fun SheetRow(item: SheetItem, index: Int, glass: GlassFocusState, requester: FocusRequester?, onFocused: () -> Unit) {
     val focus = rememberFocusAnim()
     Row(
         Modifier
@@ -222,31 +234,24 @@ private fun SheetRow(item: SheetItem, requester: FocusRequester?, onFocused: () 
                 m.onPreviewKeyEvent { e ->
                     if (e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                     when (e.nativeKeyEvent.keyCode) {
-                        android.view.KeyEvent.KEYCODE_DPAD_LEFT -> { adjust(-1); true }
-                        android.view.KeyEvent.KEYCODE_DPAD_RIGHT -> { adjust(1); true }
+                        android.view.KeyEvent.KEYCODE_DPAD_LEFT -> { glass.nudge(-1); adjust(-1); true }
+                        android.view.KeyEvent.KEYCODE_DPAD_RIGHT -> { glass.nudge(1); adjust(1); true }
                         else -> false
                     }
                 }
             }
             // 統一操作：有「‹ 值 ›」的列，確定鍵＝換到下一個值（選單不關）；其他列執行動作
+            .glassFocusItem(glass, index)
             .focusTarget(
                 focus, requester,
                 onFocused = { onFocused(); item.onFocus?.invoke() },
-                onClick = item.onAdjust?.let { adj -> { adj(1) } } ?: item.action,
+                onClick = item.onAdjust?.let { adj -> { glass.nudge(1); adj(1) } } ?: { glass.press(); item.action() },
             )
-            .drawBehind {
-                val v = focus.value()
-                if (v > 0.01f) {
-                    drawRoundRect(
-                        Color.White.copy(alpha = 0.94f * v),
-                        cornerRadius = CornerRadius(16.dp.toPx()),
-                    )
-                }
-            }
             .padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        val onLight = focus.focused
+        // 焦點是背後那一顆透明玻璃，文字維持白色
+        val onLight = false
         if (item.selected) {
             Box(
                 Modifier

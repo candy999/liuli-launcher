@@ -72,6 +72,9 @@ import tw.liuli.launcher.ui.components.focusScale
 import tw.liuli.launcher.ui.components.focusTarget
 import tw.liuli.launcher.ui.components.rememberFocusAnim
 import tw.liuli.launcher.ui.glass.liquidGlass
+import tw.liuli.launcher.ui.glass.glassFocusHost
+import tw.liuli.launcher.ui.glass.glassFocusItem
+import tw.liuli.launcher.ui.glass.glassHairline
 import tw.liuli.launcher.ui.theme.GText
 import tw.liuli.launcher.ui.theme.Ink
 import tw.liuli.launcher.ui.theme.LIcon
@@ -319,34 +322,37 @@ fun InputsRow(
     onSwitch: (TvSource) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Row(modifier.focusRow(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+    // 一顆玻璃焦點在膠囊之間滑動（不是每顆膠囊各自亮起來）
+    val glass = tw.liuli.launcher.ui.glass.rememberGlassFocus()
+    Row(
+        modifier.focusRow().glassFocusHost(glass, { sources.size }),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
         GText("訊號源", Modifier.padding(end = 4.dp), size = 13.sp, color = Ink.Tertiary, shadow = true)
         sources.forEachIndexed { i, src ->
-            InputChip(src, if (i == 0) firstRequester else null) { onSwitch(src) }
+            InputChip(src, i, glass, if (i == 0) firstRequester else null) { glass.press(); onSwitch(src) }
         }
     }
 }
 
 @Composable
-private fun InputChip(src: TvSource, requester: FocusRequester?, onClick: () -> Unit) {
+private fun InputChip(src: TvSource, index: Int, glass: tw.liuli.launcher.ui.glass.GlassFocusState, requester: FocusRequester?, onClick: () -> Unit) {
     val focus = rememberFocusAnim()
     val color = when (src.type) {
         TvInputInfo.TYPE_TUNER -> BgColors.TV
         TvInputInfo.TYPE_HDMI -> BgColors.HDMI
         else -> BgColors.OTHER_INPUT
     }
-    val dark = focus.focused
+    // 文字一律白色：焦點是背後那一顆透明玻璃，不是白底
+    val dark = false
     Row(
         Modifier
             .height(40.dp)
-            .focusScale(focus, 1.1f)
             .bgTarget(color)
+            .glassFocusItem(glass, index)
             .focusTarget(focus, requester, onClick = onClick)
-            .liquidGlass(RoundedCornerShape(20.dp), tint = 0.08f)
-            .drawBehind {
-                val v = focus.value()
-                if (v > 0.01f) drawRoundRect(Color.White.copy(alpha = 0.95f * v), cornerRadius = CornerRadius(20.dp.toPx()))
-            }
+            // 沒選中：只有一圈很淡的細線；玻璃滑過來時細線讓位
+            .glassHairline(20.dp) { 1f - focus.value() }
             .padding(start = 12.dp, end = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
