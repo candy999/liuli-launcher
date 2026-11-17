@@ -589,6 +589,13 @@ class BackgroundEngine {
                                 renderDiv--
                                 nextRampT = t + RAMP_STEP_MS
                             }
+                            // 持續流動的樣式沒有「轉場結束」：提前對焦升完就把它當成新的檔位、繼續量測。
+                            // 以前這裡一直停在「對焦中」，之後再也不評估——剛啟動時量到的慢檔位（÷3～4、每秒 20～30 格）就這樣卡到最後
+                            if (ramping && renderDiv <= rampTarget && style.ambient) {
+                                ramping = false
+                                div = renderDiv; learnedDiv[si] = div
+                                skipMeasure = 2
+                            }
                         }
                     }
 
