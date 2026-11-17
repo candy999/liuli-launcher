@@ -386,7 +386,7 @@ fun InputsRow(
             }
         }
         // 玻璃比膠囊大一點點（像一片透鏡蓋上去）
-        GlassFocusCapsule(glass, pad = 2.dp, haze = .12f)
+        GlassFocusCapsule(glass, pad = 2.dp, haze = .17f)
     }
 }
 

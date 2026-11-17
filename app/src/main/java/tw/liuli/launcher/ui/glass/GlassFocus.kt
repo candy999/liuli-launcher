@@ -423,7 +423,7 @@ fun BoxScope.GlassFocusCapsule(
                     } else {
                         val band = max(1.25.dp.toPx(), padPx)
                         drawRoundRect(
-                            Color.White.copy(alpha = .55f), topLeft = Offset(band / 2f, band / 2f),
+                            Color.White.copy(alpha = .36f), topLeft = Offset(band / 2f, band / 2f),
                             size = Size(size.width - band, size.height - band),
                             cornerRadius = CornerRadius(max(0f, r - band / 2f)), style = Stroke(band),
                         )
