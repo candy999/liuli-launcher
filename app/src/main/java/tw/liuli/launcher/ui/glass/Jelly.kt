@@ -74,7 +74,8 @@ class JellyState internal constructor(private val gain: Float) {
     internal var z = 0f; internal var zv = 0f         // 按壓
     internal var axisY = false
 
-    private fun ref() = max(24f, min(if (axisY) h else w, refMax))
+    // 參考長度：太矮的東西（側邊欄的一列上下移動）也至少當成 70dp 來算，位移才看得見
+    private fun ref() = max(refMax * .64f, min(if (axisY) h else w, refMax))
 
     /** 拿到焦點：依最後一次方向鍵的方向被帶一下。 */
     internal fun arrive() {

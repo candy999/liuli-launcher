@@ -1272,7 +1272,6 @@ fun HomeScreen(
                             if (cur != null && e.nativeKeyEvent.repeatCount == 0 && movingPkg == null && !picking) scope.launch {
                                 androidx.compose.runtime.withFrameNanos { }
                                 androidx.compose.runtime.withFrameNanos { }
-                                android.util.Log.d("LiuliUi", "bump? same=${ji.current === cur} gen=${ji.gen == g} drawer=${drawerOpen == wasDrawer}")
                                 if (ji.current === cur && ji.gen == g && drawerOpen == wasDrawer && minimal == wasMinimal) cur.bump(dx, dy)
                             }
                         }
