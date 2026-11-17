@@ -122,7 +122,9 @@ class GlassFocusState internal constructor() {
     }
 
     internal fun focusTo(key: Any) {
-        val wasHere = present && presence > 0.05f && target != null
+        // 玻璃還看得見就從它現在的位置滑過去。不能看 present：焦點在同一組裡換格時，舊的那一格先收到「失去焦點」、
+        // 新的一格才收到「取得焦點」——上一版在這中間把玻璃標成離開，結果每次換格都直接跳過去、完全沒有滑動（海信上錄影確認）
+        val wasHere = presence > 0.05f && target != null
         val from = rectOf(target) ?: last
         target = key
         present = true
@@ -142,7 +144,9 @@ class GlassFocusState internal constructor() {
         if (snap()) { presence = 1f; glow = 0f; lift = 0f; frame++ } else kick()
     }
 
-    internal fun leave() {
+    /** [key] 那一格失去焦點：如果玻璃還停在它上面（焦點不是換到同組的另一格），玻璃收掉。 */
+    internal fun blur(key: Any) {
+        if (target != key || !present) return
         present = false
         if (snap()) { presence = 0f; frame++ } else kick()
     }
@@ -241,11 +245,12 @@ fun Modifier.glassFocusItem(state: GlassFocusState, key: Any): Modifier = compos
             if (key == state.target) state.syncSize()
             state.layoutTick++
         }
-        .onFocusChanged { if (it.isFocused) state.focusTo(key) }
+        .onFocusChanged { if (it.isFocused) state.focusTo(key) else state.blur(key) }
 }
 
 /**
- * 一組玻璃焦點的容器：焦點離開這一組時玻璃收掉；已經在最邊邊還往外按（焦點沒有動）時玻璃往那邊頂一下。
+ * 一組玻璃焦點的容器：已經在最邊邊還往外按（焦點沒有動）時玻璃往那邊頂一下。
+ * （焦點離開這一組時玻璃收掉——由每一格自己的「失去焦點」處理，和事件先後順序無關。）
  * 裡面要放一個 [GlassFocusCapsule]（放在內容之後＝蓋在內容上面）。
  */
 fun Modifier.glassFocusHost(
@@ -255,7 +260,6 @@ fun Modifier.glassFocusHost(
 ): Modifier = composed {
     val scope = rememberCoroutineScope()
     this
-        .onFocusChanged { if (!it.hasFocus && state.present) state.leave() }
         .onPreviewKeyEvent { e ->
             if (e.type == KeyEventType.KeyDown && e.nativeKeyEvent.repeatCount == 0 && state.present) {
                 var dx = 0; var dy = 0
