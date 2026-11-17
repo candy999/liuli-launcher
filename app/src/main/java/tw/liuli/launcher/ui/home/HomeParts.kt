@@ -45,6 +45,7 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
@@ -366,7 +367,7 @@ private fun InputChip(src: TvSource, requester: FocusRequester?, onClick: () -> 
  * 預先建好：主畫面穩定後就組合好（28 個 App 格子），[open] 為 false 時只量尺寸、不擺放——不畫、拿不到焦點。
  * 打開時只剩滑入動畫；以前每次打開才組合，海信上第一格要 110ms，滑出來會頓一下。
  */
-@OptIn(ExperimentalComposeUiApi::class)
+@OptIn(ExperimentalComposeUiApi::class, androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun AppDrawer(
     open: Boolean,
@@ -398,6 +399,24 @@ fun AppDrawer(
     }
     val gridState = androidx.compose.foundation.lazy.grid.rememberLazyGridState()
     var focused by remember { mutableIntStateOf(0) }
+    // ── 整排對齊：格子區剛好放得下幾整排，捲動一次捲一整排，上下都不會切到半排 ──
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    var cellPx by remember { mutableIntStateOf(0) }          // 一格（磚＋名稱）的實際高度
+    var rowsFit by remember { mutableIntStateOf(3) }          // 可視範圍放得下幾整排
+    var topRow by remember { mutableIntStateOf(0) }           // 目前最上面是第幾排
+    fun showRow(row: Int, animate: Boolean = true) {
+        val newTop = when {
+            row < topRow -> row
+            row >= topRow + rowsFit -> row - rowsFit + 1
+            else -> topRow
+        }.coerceAtLeast(0)
+        if (newTop == topRow && gridState.firstVisibleItemIndex == newTop * DRAWER_COLS && gridState.firstVisibleItemScrollOffset == 0) return
+        topRow = newTop
+        scope.launch {
+            if (animate) runCatching { gridState.animateScrollToItem(newTop * DRAWER_COLS) }
+            else runCatching { gridState.scrollToItem(newTop * DRAWER_COLS) }
+        }
+    }
     // 每個 App 磚一個 FocusRequester（依套件名稱）：解除安裝後焦點要能移到原本位置上的下一個 App
     val requesters = remember { HashMap<String, FocusRequester>() }
     var focusedPkg by remember { mutableStateOf<String?>(null) }
@@ -409,7 +428,8 @@ fun AppDrawer(
         val idx = focused.coerceIn(0, apps.size - 1)
         val target = apps[idx].packageName
         focusedPkg = target
-        runCatching { gridState.scrollToItem(idx) }
+        focused = idx
+        showRow(idx / DRAWER_COLS, animate = false)
         // 等新的格子排好、FocusRequester 掛上去再要焦點（最多試幾次）
         repeat(10) {
             delay(32)
@@ -428,6 +448,7 @@ fun AppDrawer(
             asLayer = true
             reveal.snapTo(0f)
             focused = 0
+            topRow = 0
             runCatching { gridState.scrollToItem(0) }
             delay(16)
             apps.firstOrNull()?.let { a -> runCatching { requesters[a.packageName]?.requestFocus() } }
@@ -485,7 +506,7 @@ fun AppDrawer(
                 )
                 .padding(start = 28.dp, end = 28.dp, top = 24.dp)
                 .onPreviewKeyEvent { e ->
-                    if (e.type == KeyEventType.KeyDown && e.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_DPAD_UP && focused < 6) {
+                    if (e.type == KeyEventType.KeyDown && e.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_DPAD_UP && focused < DRAWER_COLS) {
                         onClose(); true
                     } else false
                 }
@@ -499,30 +520,58 @@ fun AppDrawer(
                 GText("長按確定鍵：更多選項　返回：收合", Modifier.padding(bottom = 3.dp), size = 12.sp, color = Ink.Faint)
             }
             Spacer(Modifier.height(10.dp))
+            // 格子區：抽屜往螢幕下方多延伸的那段（彈簧衝過頭用）看不到，不算進可視範圍
+            androidx.compose.foundation.layout.BoxWithConstraints(
+                Modifier.fillMaxWidth().weight(1f).padding(bottom = DRAWER_OVERSHOOT),
+            ) {
+                val dens = androidx.compose.ui.platform.LocalDensity.current
+                val padTop = 14.dp; val padBottom = 14.dp; val gap = 20.dp
+                val cell = with(dens) { if (cellPx > 0) cellPx.toFloat() else 112.dp.toPx() }
+                val fit = with(dens) {
+                    val avail = maxHeight.toPx() - padTop.toPx() - padBottom.toPx()
+                    ((avail + gap.toPx()) / (cell + gap.toPx())).toInt().coerceAtLeast(1)
+                }
+                androidx.compose.runtime.SideEffect { if (fit != rowsFit) rowsFit = fit }
+                // 格子區的高度＝剛好 fit 整排（加上下邊距）：任何時候畫面上都是完整的幾排
+                val gridH = with(dens) { (padTop.toPx() + fit * cell + (fit - 1) * gap.toPx() + padBottom.toPx()).toDp() }
+                // 焦點移動不讓清單自己捲（預設會捲到「剛好看見」＝切出半排），改由 showRow 一次捲一整排
+                val noAutoScroll = remember {
+                    object : androidx.compose.foundation.gestures.BringIntoViewSpec {
+                        override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float) = 0f
+                    }
+                }
+                androidx.compose.runtime.CompositionLocalProvider(androidx.compose.foundation.gestures.LocalBringIntoViewSpec provides noAutoScroll) {
             LazyVerticalGrid(
                 state = gridState,
-                columns = GridCells.Fixed(6),
-                contentPadding = PaddingValues(start = 4.dp, end = 4.dp, top = 12.dp, bottom = 40.dp),
+                columns = GridCells.Fixed(DRAWER_COLS),
+                modifier = Modifier.fillMaxWidth().height(gridH),
+                contentPadding = PaddingValues(start = 4.dp, end = 4.dp, top = padTop, bottom = padBottom),
                 horizontalArrangement = Arrangement.spacedBy(22.dp),
-                verticalArrangement = Arrangement.spacedBy(20.dp),
+                verticalArrangement = Arrangement.spacedBy(gap),
             ) {
                 itemsIndexed(if (tw.liuli.launcher.ui.bg.PerfProbe.noTiles) emptyList() else apps, key = { _, a -> a.packageName }) { i, app ->
                     // 出場順序：以畫面上的第幾排決定（一排 6 個），同一排左到右再錯開一點點
                     val pos = { (i - gridState.firstVisibleItemIndex).coerceAtLeast(0) }
                     val revealOf = { tw.liuli.launcher.ui.components.rowReveal(reveal.value, pos() / 6 * 3 + pos() % 6 / 2, stagger = 30f, fade = 200f) }
-                    Box(Modifier.graphicsLayer { translationY = (1f - revealOf()) * 14.dp.toPx() }) {
+                    Box(
+                        Modifier
+                            .onSizeChanged { if (it.height > cellPx) cellPx = it.height }
+                            .graphicsLayer { translationY = (1f - revealOf()) * 14.dp.toPx() },
+                    ) {
                     AppTile(
                         app = app,
                         width = 124.dp,
                         showLabel = true,
                         requester = requesters.getOrPut(app.packageName) { FocusRequester() },
-                        onFocused = { focused = i; focusedPkg = app.packageName },
+                        onFocused = { focused = i; focusedPkg = app.packageName; showRow(i / DRAWER_COLS) },
                         onClick = { onLaunch(app) },
                         onLongClick = { fr -> onLongClick(app, fr) },
                         extra = Modifier.bgTarget(app.themeColor, isApp = true),
                         reveal = revealOf,
                     )
                     }
+                }
+            }
                 }
             }
         }
@@ -538,6 +587,9 @@ internal const val PANEL_LAYER_MS = 700L
 
 /** 抽屜裡的 App 逐排出現的總時間（毫秒）。 */
 private const val DRAWER_REVEAL_MS = 30f * 14 + 200f
+
+/** 抽屜一排幾個 App。 */
+private const val DRAWER_COLS = 6
 
 /** 抽屜往螢幕下方多延伸的高度：容納滑入彈簧衝過頭的那一段（約 4～5%，20dp 左右）。 */
 private val DRAWER_OVERSHOOT = 48.dp
