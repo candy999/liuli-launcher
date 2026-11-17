@@ -77,6 +77,8 @@ fun Modifier.liquidGlass(
     frozen: () -> Boolean = { false },
     /** 邊緣的折射帶、色散與亮線。 */
     edge: Boolean = true,
+    /** 大片面板的受光：光的位置（0～1 的比例）；null＝不加。在繪製階段讀取。 */
+    light: (() -> Offset)? = null,
 ): Modifier = composed {
     val backdrop = LocalGlassBackdrop.current
     var origin by remember { mutableStateOf(Offset.Zero) }
@@ -112,7 +114,8 @@ fun Modifier.liquidGlass(
                     drawPath(path, Color(0x99141A2E))
                     return@onDrawBehind
                 }
-                bake.request(origin, size, radii, tint, hl, v, dens)
+                val lp = light?.invoke()
+                bake.request(origin, size, radii, tint, hl, v, dens, lp?.x ?: -1f, lp?.y ?: 0f)
                 val paint = bake.paint(matrix)
                 if (paint != null) drawIntoCanvas { it.nativeCanvas.drawPath(androidPath, paint) }
                 // 第一張還沒烘好（剛出現的那一兩格）：先用半透明的深色頂著
@@ -143,10 +146,10 @@ private class GlassBake(private val backdrop: GlassBackdrop, private val edge: B
 
     private class Req(
         val ox: Float, val oy: Float, val w: Float, val h: Float, val radii: FloatArray,
-        val tint: Float, val hl: Float, val version: Long, val density: Float,
+        val tint: Float, val hl: Float, val version: Long, val density: Float, val lx: Float, val ly: Float,
     ) {
         fun same(o: Req?) = o != null && ox == o.ox && oy == o.oy && w == o.w && h == o.h && tint == o.tint && hl == o.hl &&
-            version == o.version && radii.contentEquals(o.radii)
+            version == o.version && lx == o.lx && ly == o.ly && radii.contentEquals(o.radii)
     }
 
     private var wanted: Req? = null
@@ -156,10 +159,10 @@ private class GlassBake(private val backdrop: GlassBackdrop, private val edge: B
     private var bakedFor: Req? = null
     private var buf = IntArray(0)
 
-    fun request(origin: Offset, size: Size, radii: FloatArray, tint: Float, hl: Float, version: Long, density: Float) {
+    fun request(origin: Offset, size: Size, radii: FloatArray, tint: Float, hl: Float, version: Long, density: Float, lx: Float, ly: Float) {
         val image = backdrop.image ?: return
         if (size.width < 2f || size.height < 2f) return
-        val r = Req(origin.x, origin.y, size.width, size.height, radii, tint, hl, version, density)
+        val r = Req(origin.x, origin.y, size.width, size.height, radii, tint, hl, version, density, lx, ly)
         if (r.same(wanted)) return
         BackdropPixels.sync(image, version)
         wanted = r
@@ -193,6 +196,7 @@ private class GlassBake(private val backdrop: GlassBackdrop, private val edge: B
             var b = bitmap
             if (b == null || b.width != bw || b.height != bh) {
                 b = android.graphics.Bitmap.createBitmap(bw, bh, android.graphics.Bitmap.Config.ARGB_8888)
+                b.setHasAlpha(false)   // 不透明：GPU 填色時不用混合
                 bitmap = b
                 paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG or android.graphics.Paint.FILTER_BITMAP_FLAG).apply {
                     shader = android.graphics.BitmapShader(b, android.graphics.Shader.TileMode.CLAMP, android.graphics.Shader.TileMode.CLAMP)
@@ -266,7 +270,21 @@ private class GlassBake(private val backdrop: GlassBackdrop, private val edge: B
                         cg = (((a shr 8) and 255) * w00 + ((b shr 8) and 255) * w10 + ((c shr 8) and 255) * w01 + ((dd shr 8) and 255) * w11).toInt()
                         cb = ((a and 255) * w00 + (b and 255) * w10 + (c and 255) * w01 + (dd and 255) * w11).toInt()
                     }
-                    var white = g
+                    // 背景越亮，白霧越少（亮背景上不會整片發白）；越暗，邊緣補的光越多（暗背景上折射帶才看得見）
+                    val lum = (cr * 3 + cg * 6 + cb) / 2550f
+                    val dark = 1f - lum
+                    var white = g * (1f - .5f * lum)
+                    if (r.lx >= 0f) {
+                        // 大片面板的受光：上緣一道光、一片柔光（跟著焦點那一欄）、往下漸暗
+                        val ty = py / r.h
+                        val tg = 1f - ty / .5f
+                        if (tg > 0f) white += .09f * tg * tg
+                        val ddx = (px / r.w - r.lx) / .34f; val ddy = (ty - r.ly) / .62f
+                        val dd2 = ddx * ddx + ddy * ddy
+                        if (dd2 < 4f) { val k = 1f - dd2 / 4f; white += .13f * k * k * k }
+                        val shade = 1f - .22f * ty * sqrt(ty)
+                        cr = (cr * shade).toInt(); cg = (cg * shade).toInt(); cb = (cb * shade).toInt()
+                    }
                     if (e > 0f) {
                         // 色散：紅色偏得更遠、藍色偏得少一點
                         val ur = u + du * .9f; val vr = v + dv * .9f
@@ -292,7 +310,13 @@ private class GlassBake(private val backdrop: GlassBackdrop, private val edge: B
                         val el = sqrt(e)   // 線性的邊緣程度：顏色、亮度的變化比位移寬一點，折射帶看得出是一整圈
                         val sat = 1f + 1.0f * el
                         cr = (gray + (cr - gray) * sat).toInt(); cg = (gray + (cg - gray) * sat).toInt(); cb = (gray + (cb - gray) * sat).toInt()
-                        white += .06f * el
+                        white += el * (.03f + .12f * dark)
+                        // 暗、平的背景上沒有東西可以分色：補兩道很細的色邊（靠外偏紅、靠內偏青），越暗補越多
+                        val k1 = 1f - (el - .84f) * (el - .84f) / .03f
+                        val k2 = 1f - (el - .52f) * (el - .52f) / .05f
+                        val amt = .3f + .7f * dark
+                        if (k1 > 0f) { cr += (46f * k1 * amt).toInt(); cb += (12f * k1 * amt).toInt() }
+                        if (k2 > 0f) { cb += (44f * k2 * amt).toInt(); cg += (22f * k2 * amt).toInt() }
                         // 最外緣的受光亮線：左上最亮、右下次之
                         if (d > -lineW * 1.6f) {
                             val k = (1f + d / (lineW * 1.6f)).coerceIn(0f, 1f)

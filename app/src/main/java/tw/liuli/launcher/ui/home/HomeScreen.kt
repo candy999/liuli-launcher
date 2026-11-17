@@ -165,13 +165,14 @@ fun HomeScreen(
     val gearReq = remember { FocusRequester() }
     // ── 技術宅模式：每秒取樣系統狀態（只在技術宅模式、主畫面看得到時） ──
     val geekSampler = remember { tw.liuli.launcher.geek.StatsSampler(context) }
-    var geekStats by remember { mutableStateOf(tw.liuli.launcher.geek.Stats()) }
+    // 用 State 物件傳下去、不在這裡讀值：每秒更新時只有儀表列重新組合（以前整個主畫面每秒重組一次，海信上 UI 執行緒每次卡 50ms）
+    val geekStats = remember { mutableStateOf(tw.liuli.launcher.geek.Stats()) }
     var rocketResult by remember { mutableStateOf<tw.liuli.launcher.geek.RocketResult?>(null) }
     LaunchedEffect(settings.geekMode, active, tw.liuli.launcher.AppForeground.resumed) {
         // 琉璃在背景（看 YouTube、HDMI）時不取樣：不量網路延遲、不讀 CPU
         if (!settings.geekMode || !active || !tw.liuli.launcher.AppForeground.resumed) return@LaunchedEffect
         while (true) {
-            runCatching { geekSampler.sample() }.onSuccess { geekStats = it }
+            runCatching { geekSampler.sample() }.onSuccess { geekStats.value = it }
             delay(1000)
         }
     }
@@ -1137,6 +1138,13 @@ fun HomeScreen(
                     }
                 }
                 "clock" -> settings.updateClock(on = arg == "1" || arg == "on")
+                // 量測用（adb）：ACTION=color:色相,飽和度 固定背景顏色（關掉自動色彩）；color:auto 回到自動色彩
+                "color" -> if (arg == "auto") { settings.updateBgFollow(true); engine.applyFollow(true, settings.bgHue, settings.bgSat) } else {
+                    val hs = arg.split(',')
+                    val h = hs.getOrNull(0)?.toFloatOrNull() ?: 228f; val sa = hs.getOrNull(1)?.toFloatOrNull() ?: .5f
+                    settings.updateBgFollow(false); engine.applyFollow(false, h, sa)
+                    settings.updateBgColor(h, sa); engine.applyFixedColor(h, sa)
+                }
             }
         }
     }
@@ -1178,6 +1186,8 @@ fun HomeScreen(
     var overlaySeen by remember { mutableStateOf(false) }
     LaunchedEffect(drawerOpen, sheet?.spec, picking) {
         engine.covered = overlay
+        tw.liuli.launcher.geek.WeakGpu.init()
+        engine.ambientPaused = drawerOpen && tw.liuli.launcher.geek.WeakGpu.value
         // 設定面板開著：背景壓暗（以前是全螢幕疊一層半透明黑，每格多混一整個螢幕）
         engine.dim = if (sheet != null) 0.22f else 0f
         if (overlaySeen || overlay) engine.holdForUi(UI_SLIDE_HOLD_MS)
@@ -1417,7 +1427,7 @@ fun HomeScreen(
                 }
 
                 // 技術宅模式：常用列下方的系統儀表列（不拿焦點，只是看的）
-                if (settings.geekMode) GeekDashboard(geekStats, null, Modifier.padding(start = 48.dp, end = 48.dp, top = 434.dp))
+                if (settings.geekMode) GeekDashboardLive(geekStats, Modifier.padding(start = 48.dp, end = 48.dp, top = 434.dp))
 
                 // 抽屜提示
                 Column(

@@ -263,6 +263,22 @@ class StatsSampler(private val context: Context) {
     }
 }
 
+/** 弱 GPU（填色很慢的舊款）：只有這些機器才做「省畫面」的取捨。問一次 GL_RENDERER（在背景執行緒）。 */
+object WeakGpu {
+    @Volatile var value = false
+        private set
+    private var asked = false
+    fun init() {
+        if (asked) return
+        asked = true
+        Thread {
+            val r = GpuInfo.renderer()
+            value = Regex("Mali-4\\d\\d|Mali-T6|Mali-T7[26]|PowerVR SGX|Adreno \\(TM\\) [23]\\d\\d|VideoCore|Vivante GC", RegexOption.IGNORE_CASE).containsMatchIn(r)
+            android.util.Log.i("LiuliUi", "gpu: $r weak=$value")
+        }.start()
+    }
+}
+
 /** GPU 型號（OpenGL 的 GL_RENDERER，開一個 1×1 的離屏 EGL 環境問一次）與使用率（讀得到才有）。 */
 object GpuInfo {
     @Volatile private var name: String? = null

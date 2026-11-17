@@ -182,6 +182,13 @@ class BackgroundEngine {
     @Volatile private var uiHoldUntil = 0L
     /** 面板或抽屜開著（背景大半被蓋住）：背景一直用省力模式（÷3、每秒 30 格，速度不變）。 */
     @Volatile var covered = false
+    /**
+     * 弱 GPU（海信 Mali-470）上抽屜開著時：持續流動的樣式不再「一直動」，只在焦點換色的轉場期間動、追上目標就停。
+     * 背景每動一格，整個畫面（含蓋住大半個螢幕的抽屜）都要重畫一次；停下來之後，按鈕的布丁動畫只需要重畫那一小塊。
+     * 代價：抽屜上方露出的那一條背景在抽屜開著、沒有操作時是靜止的。
+     */
+    @Volatile var ambientPaused = false
+        set(v) { val was = field; field = v; if (was && !v) wake.trySend(Unit) }
     private var glassDirty = false
     /** 目前播放速度（1＝正常；GPU 跟不上時 <1）。 */
     private var speed = 1f
@@ -500,7 +507,7 @@ class BackgroundEngine {
                     if (holdMs > 0) { holdUntil = t + holdMs; holdMs = 0 }
                     stepBounce(t)
                     // 持續動畫的樣式（星空、深海、光束）與簡潔模式的彈跳點：追上目標也不停
-                    done = step(t) && t > holdUntil && !style.ambient && !bounce
+                    done = step(t) && t > holdUntil && (!style.ambient || ambientPaused) && !bounce
                     if (done) snapToTarget()
                     if (lastAmbT != 0L) st.at += min(t - lastAmbT, 100L) / 1000f
                     lastAmbT = t

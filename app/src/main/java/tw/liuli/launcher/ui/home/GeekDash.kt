@@ -149,6 +149,12 @@ private fun RowScope.Card(weight: Float, mod: Modifier = Modifier, content: @Com
 private fun gb(b: Long) = "%.2f".format(b / 1073741824f)
 private fun f1(v: Float) = "%.1f".format(v)
 
+/** 每秒更新的儀表列：在這裡才讀取數值，更新時只有這一塊重新組合。 */
+@Composable
+fun GeekDashboardLive(stats: androidx.compose.runtime.State<Stats>, modifier: Modifier = Modifier) {
+    GeekDashboard(stats.value, null, modifier)
+}
+
 @Composable
 fun GeekDashboard(s: Stats, freed: String?, modifier: Modifier = Modifier) {
     FrameMetricsHook()

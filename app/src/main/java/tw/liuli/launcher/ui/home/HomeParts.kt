@@ -464,6 +464,7 @@ fun AppDrawer(
         onDispose { bgEngine?.cover = null }
     }
     val gridState = androidx.compose.foundation.lazy.grid.rememberLazyGridState()
+    val lightX = remember { Animatable(.1f) }
     var focused by remember { mutableIntStateOf(0) }
     // ── 整排對齊：格子區剛好放得下幾整排，捲動一次捲一整排，上下都不會切到半排 ──
     val scope = androidx.compose.runtime.rememberCoroutineScope()
@@ -569,6 +570,8 @@ fun AppDrawer(
                     RoundedCornerShape(topStart = 34.dp, topEnd = 34.dp), tint = 0.09f,
                     slide = { drawerSlideOffset(slide.value, drawerHeightPx) },
                     frozen = { asLayer || slide.value > 0.001f },
+                    // 受光：上緣一道光、一片跟著焦點那一欄移動的柔光、往下漸暗（烘在同一張圖裡；位置量化成 24 格，移動中最多每 0.12 秒重烘一次）
+                    light = { androidx.compose.ui.geometry.Offset((lightX.value * 24f).roundToInt() / 24f, .08f) },
                 )
                 .padding(start = 28.dp, end = 28.dp, top = 24.dp)
                 .onPreviewKeyEvent { e ->
@@ -622,14 +625,29 @@ fun AppDrawer(
                     Box(
                         Modifier
                             .onSizeChanged { if (it.height > cellPx) cellPx = it.height }
-                            .graphicsLayer { translationY = (1f - revealOf()) * 14.dp.toPx() },
+                            .graphicsLayer {
+                                translationY = (1f - revealOf()) * 14.dp.toPx()
+                                // 捲動中往上離開的那一排：越過上緣多少就淡掉多少，不會被切一半（只改這幾格的圖層透明度）
+                                val firstRow = gridState.firstVisibleItemIndex / DRAWER_COLS
+                                val off = gridState.firstVisibleItemScrollOffset
+                                val row = i / DRAWER_COLS
+                                alpha = when {
+                                    row < firstRow -> 0f
+                                    row == firstRow && off > 0 -> (1f - off / (cellPx.coerceAtLeast(1) * .5f)).coerceIn(0f, 1f)
+                                    else -> 1f
+                                }
+                            },
                     ) {
                     AppTile(
                         app = app,
                         width = 124.dp,
                         showLabel = true,
                         requester = requesters.getOrPut(app.packageName) { FocusRequester() },
-                        onFocused = { focused = i; focusedPkg = app.packageName; showRow(i / DRAWER_COLS) },
+                        onFocused = {
+                            focused = i; focusedPkg = app.packageName; showRow(i / DRAWER_COLS)
+                            // 面板上的那一片光跟著焦點的那一欄慢慢移過去
+                            scope.launch { lightX.animateTo((i % DRAWER_COLS + .5f) / DRAWER_COLS, androidx.compose.animation.core.tween(520)) }
+                        },
                         onClick = { onLaunch(app) },
                         onLongClick = { fr -> onLongClick(app, fr) },
                         extra = Modifier.bgTarget(app.themeColor, isApp = true),
