@@ -760,7 +760,7 @@ private fun SystemToggleTile(
         }
         Spacer(Modifier.height(10.dp))
         GText(
-            if (loading) "載入中…" else if (expanded) "隱藏系統應用（$count）" else "顯示系統應用",
+            if (loading) "載入中…" else if (expanded) "隱藏系統應用" else "顯示系統應用",
             Modifier.fillMaxWidth().graphicsLayer { alpha = reveal() },
             size = 14.sp,
             weight = if (focus.focused) FontWeight.Medium else FontWeight.Normal,
