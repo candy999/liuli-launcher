@@ -135,13 +135,6 @@ class BgState {
  * 3. 脈動是充放電，漣漪相位連續前進
  * 只在轉場期間逐幀繪製，追上目標後停止。
  */
-/** 沒有模糊的背景小圖（已過曝，和玻璃用的模糊小圖同一個亮度）：玻璃邊緣的折射取樣用。背景執行緒寫、烘玻璃的執行緒讀。 */
-object SharpBackdrop {
-    @Volatile var px = IntArray(0)
-    @Volatile var w = 0
-    @Volatile var h = 0
-}
-
 /** 量測用：按鍵 → 處理完按鍵之後的第一格畫面畫完，隔了多久。 */
 object KeyLat {
     @Volatile var enabled = false
@@ -289,12 +282,6 @@ class BackgroundEngine {
     private val px = IntArray(GLASS_W * GLASS_H)
     private val tmp = IntArray(GLASS_W * GLASS_H)
     private val glassReq = Channel<Unit>(Channel.CONFLATED)
-    // 沒有模糊的背景小圖（玻璃邊緣那一圈折射用）：在同一條背景執行緒畫，更新得比模糊的那張慢
-    private val sharpImage = ImageBitmap(SHARP_W, SHARP_H)
-    private val sharpCanvas = Canvas(sharpImage)
-    private val sharpBitmap = sharpImage.asAndroidBitmap()
-    private val sharpPx = IntArray(SHARP_W * SHARP_H)
-    private var nextSharpAt = 0L
 
     private var tH = 228f; private var tS = 0.5f; private var tFx = 0.2f; private var tFy = 0.7f
     private var mH = 228f; private var mS = 0.5f; private var mFx = 0.2f; private var mFy = 0.7f
@@ -851,22 +838,6 @@ class BackgroundEngine {
                     }
                 }
                 expose(px)
-                val t0 = android.os.SystemClock.uptimeMillis()
-                if (t0 >= nextSharpAt) {
-                    if (!revealed) sharpPx.fill(0xFF000000.toInt()) else {
-                        workScope.draw(Density(1f), LayoutDirection.Ltr, sharpCanvas, Size(SHARP_W.toFloat(), SHARP_H.toFloat())) {
-                            scale(SHARP_W / LOGICAL_W, SHARP_H / LOGICAL_H, pivot = androidx.compose.ui.geometry.Offset.Zero) {
-                                drawStyle(s, workState)
-                            }
-                        }
-                        sharpBitmap.getPixels(sharpPx, 0, SHARP_W, 0, 0, SHARP_W, SHARP_H)
-                        expose(sharpPx)
-                    }
-                    SharpBackdrop.w = SHARP_W; SharpBackdrop.h = SHARP_H; SharpBackdrop.px = sharpPx
-                    // 這張比較貴（像素是模糊那張的十倍）：至少隔 0.3 秒，而且不超過背景執行緒五分之一的時間
-                    val t1 = android.os.SystemClock.uptimeMillis()
-                    nextSharpAt = t1 + max(300L, (t1 - t0) * 5)
-                }
             }
             glassBitmap.setPixels(px, 0, GLASS_W, 0, 0, GLASS_W, GLASS_H)
             // 轉場中：等下一格背景一起重畫（省一次整個畫面的重繪）；靜止時立刻更新
@@ -1074,9 +1045,6 @@ class BackgroundEngine {
         private const val FAST_AFFORD = 13.5f
         /** 量測用：不升到每秒 60 格。 */
         @Volatile var debugNoFast = false
-        /** 給玻璃邊緣折射用的「清楚的」背景小圖大小（1080p 的 1／5）。 */
-        const val SHARP_W = 384
-        const val SHARP_H = 216
         /** 目前背景的更新率（fps，自動在 30／20／15 之間調整）；技術宅模式的儀表列會顯示。 */
         @Volatile var bgFps = 0
         /** 起始解析度除數（AOC 電視實測：÷2 的背景一幀 GPU 約 18ms，可以穩定 30fps）。 */
