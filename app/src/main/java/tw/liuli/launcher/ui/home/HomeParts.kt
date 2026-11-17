@@ -113,25 +113,16 @@ fun GlassOnFocus(
     content: @Composable () -> Unit,
 ) {
     val focus = rememberFocusAnim()
+    // 和訊號源、側邊欄同一種玻璃：焦點時背後凝結出一塊透明玻璃（帶一點霧、一條細邊線），不是乳白色的板子
+    val glass = tw.liuli.launcher.ui.glass.rememberGlassFocus()
+    val corner = 28.dp
     Box(
         modifier
-            .focusScale(focus, 1.03f)
+            .glassFocusHost(glass, { 1 }, corner = corner, bumps = false)
+            .glassFocusItem(glass, 0)
             .bgTarget(color)
             .focusTarget(focus, requester, onClick = onClick),
     ) {
-        Box(
-            Modifier
-                .matchParentSize()
-                .graphicsLayer {
-                    // 淡入不開離屏緩衝（弱 GPU 上每次焦點動畫都多一張圖）
-                    compositingStrategy = CompositingStrategy.ModulateAlpha
-                    val v = focus.value()
-                    alpha = v
-                    scaleX = 0.94f + 0.06f * v
-                    scaleY = 0.94f + 0.06f * v
-                }
-                .liquidGlass(shape, tint = 0.10f, highlight = focus.value),
-        )
         content()
     }
 }

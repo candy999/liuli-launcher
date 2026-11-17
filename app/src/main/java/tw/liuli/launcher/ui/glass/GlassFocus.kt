@@ -180,6 +180,10 @@ fun Modifier.glassFocusHost(
     state: GlassFocusState,
     count: () -> Int,
     slide: () -> Offset = { Offset.Zero },
+    /** 圓角；null＝膠囊（兩端全圓）。 */
+    corner: androidx.compose.ui.unit.Dp? = null,
+    /** 到最邊邊還往外按時頂一下（只有一格的東西不用，不然往旁邊走時會先抖一下）。 */
+    bumps: Boolean = true,
 ): Modifier = composed {
     val backdrop = LocalGlassBackdrop.current
     val snap = tw.liuli.launcher.ui.components.LocalFocusSnap.current
@@ -205,7 +209,7 @@ fun Modifier.glassFocusHost(
         }
         .onFocusChanged { if (!it.hasFocus && state.present) state.leave() }
         .onPreviewKeyEvent { e ->
-            if (e.type != KeyEventType.KeyDown || state.target < 0) return@onPreviewKeyEvent false
+            if (!bumps || e.type != KeyEventType.KeyDown || state.target < 0) return@onPreviewKeyEvent false
             val code = e.nativeKeyEvent.keyCode
             val back = if (state.vertical) KeyEvent.KEYCODE_DPAD_UP else KeyEvent.KEYCODE_DPAD_LEFT
             val fwd = if (state.vertical) KeyEvent.KEYCODE_DPAD_DOWN else KeyEvent.KEYCODE_DPAD_RIGHT
@@ -217,7 +221,7 @@ fun Modifier.glassFocusHost(
             @Suppress("UNUSED_VARIABLE") val f = state.frame
             @Suppress("UNUSED_VARIABLE") val ver = backdrop.version()
             if (state.presence <= 0f || state.target < 0) return@drawBehind
-            painter.draw(this, state)
+            painter.draw(this, state, corner?.toPx())
         }
 }
 
@@ -257,7 +261,7 @@ private class GlassFocusPainter(private val backdrop: GlassBackdrop) {
     }
     private val rf = android.graphics.RectF()
 
-    fun draw(scope: DrawScope, st: GlassFocusState) = with(scope) {
+    fun draw(scope: DrawScope, st: GlassFocusState, corner: Float?) = with(scope) {
         val base = st.rectAt(st.x) ?: return@with
         // 換到容器座標
         val l = base.left - st.hostRoot.x; val t = base.top - st.hostRoot.y
@@ -277,7 +281,7 @@ private class GlassFocusPainter(private val backdrop: GlassBackdrop) {
             hw = w / 2 * scale * along; hh = h / 2 * scale * cross
         }
         rf.set(cx - hw, cy - hh, cx + hw, cy + hh)
-        val r = min(hw, hh)
+        val r = min(corner ?: Float.MAX_VALUE, min(hw, hh))
         val alpha = (pres * 255f).roundToInt().coerceIn(0, 255)
         drawIntoCanvas { cv ->
             val c = cv.nativeCanvas
