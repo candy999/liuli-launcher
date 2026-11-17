@@ -296,17 +296,26 @@ private class GlassBake(private val backdrop: GlassBackdrop, private val edge: B
                             dR = -refract(slope, N_R) * thick
                             dG = -refract(slope, N_G) * thick
                             dB = -refract(slope, N_B) * thick
-                            // 反射（Fresnel，Schlick 近似）：越斜的地方反射越多；反射進眼睛的是那盞主光加一點環境光
-                            val inv = 1f / sqrt(1f + slope * slope)
-                            val cosi = inv
-                            val om = 1f - cosi
-                            fres = .04f + .96f * om * om * om * om * om
-                            // 反射方向 R＝I＋2cosi·N，N＝(往外的法線·slope, 1)·inv
-                            val k2 = 2f * cosi * inv
-                            val rx = k2 * slope * nx; val ry = k2 * slope * ny; val rz = -1f + k2
-                            var sp = rx * lxk + ry * lyk + rz * lzk
-                            if (sp < 0f) sp = 0f
-                            env = .16f + .84f * sp * sp * sp
+                            // 反射（Fresnel，Schlick 近似）：越斜的地方反射越多；反射進眼睛的是那盞主光加一點環境光。
+                            // 最陡的那一圈比一個像素還窄，所以在這個像素涵蓋的範圍內取三點平均（大片面板烘得粗，一個像素涵蓋更寬）
+                            val fp = max(q.toFloat(), 1.5f) / bevel
+                            var fSum = 0f; var rSum = 0f
+                            for (kk in -1..1) {
+                                var tt = -d / bevel + kk * .4f * fp
+                                if (tt < .01f) tt = .01f else if (tt > 1f) tt = 1f
+                                val wk = 1f - tt
+                                val sl = wk / sqrt(1f - wk * wk)
+                                val inv = 1f / sqrt(1f + sl * sl)
+                                val om = 1f - inv
+                                val f = .04f + .96f * om * om * om * om * om
+                                // 反射方向 R＝I＋2cosi·N，N＝(往外的法線·斜率, 1)·inv
+                                val k2 = 2f * inv * inv
+                                var sp = k2 * sl * (nx * lxk + ny * lyk) + (-1f + k2) * lzk
+                                if (sp < 0f) sp = 0f
+                                fSum += f; rSum += f * (.16f + .84f * sp * sp * sp)
+                            }
+                            fres = fSum / 3f
+                            env = rSum / fSum
                         }
                     }
                     var cr: Int; var cg: Int; var cb: Int
