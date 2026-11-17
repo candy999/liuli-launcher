@@ -46,11 +46,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import tw.liuli.launcher.ui.glass.liquidGlass
-import tw.liuli.launcher.ui.glass.GlassFocusState
-import tw.liuli.launcher.ui.glass.glassFocusHost
-import tw.liuli.launcher.ui.glass.GlassFocusCapsule
-import tw.liuli.launcher.ui.glass.glassFocusItem
-import tw.liuli.launcher.ui.glass.rememberGlassFocus
+import tw.liuli.launcher.ui.glass.GlassLit
+import tw.liuli.launcher.ui.glass.jellyFocus
+import tw.liuli.launcher.ui.glass.rememberJelly
 import tw.liuli.launcher.ui.theme.SLIDE_THRESHOLD
 import tw.liuli.launcher.ui.theme.GText
 import tw.liuli.launcher.ui.theme.Ink
@@ -193,9 +191,8 @@ fun GlassSheet(
                 spec.header.invoke()
             }
             Spacer(Modifier.height(16.dp))
-            // 焦點列：一顆比面板亮一點的玻璃在列之間上下滑動（取代以前的白底）
-            val glass = rememberGlassFocus()
-            Box(Modifier.weight(1f).glassFocusHost(glass, bumpY = { true })) {
+            // 焦點列：和主畫面的按鈕同一套——有焦點的那一列自己像布丁一樣被帶一下、彈回來，上面亮一層玻璃
+            Box(Modifier.weight(1f)) {
             LazyColumn(Modifier.fillMaxSize(), state = listState, verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 itemsIndexed(spec.items) { index, item ->
                     Box(
@@ -210,15 +207,10 @@ fun GlassSheet(
                             translationY = (1f - a) * 10.dp.toPx()
                         },
                     ) {
-                        SheetRow(item, index, glass, if (index == focusAt) first else null) { onFocusIndex(index) }
+                        SheetRow(item, if (index == focusAt) first else null) { onFocusIndex(index) }
                     }
                 }
             }
-                // 面板本身已經霧了一層，焦點要再白一點才分得出來；清單還在逐列出現時玻璃跟著淡入
-                GlassFocusCapsule(
-                    glass, corner = 18.dp, haze = .17f,
-                    gate = { (reveal.value / REVEAL_FADE_MS).coerceIn(0f, 1f) }, watch = { reveal.value },
-                )
             }
         }
     }
@@ -226,30 +218,36 @@ fun GlassSheet(
 }
 
 @Composable
-private fun SheetRow(item: SheetItem, index: Int, glass: GlassFocusState, requester: FocusRequester?, onFocused: () -> Unit) {
+private fun SheetRow(item: SheetItem, requester: FocusRequester?, onFocused: () -> Unit) {
     val focus = rememberFocusAnim()
-    Row(
+    val jelly = rememberJelly()
+    Box(
         Modifier
-            .glassFocusItem(glass, index)
             .fillMaxWidth()
             .let { m ->
                 val adjust = item.onAdjust ?: return@let m
                 m.onPreviewKeyEvent { e ->
                     if (e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                     when (e.nativeKeyEvent.keyCode) {
-                        android.view.KeyEvent.KEYCODE_DPAD_LEFT -> { glass.nudge(-1); adjust(-1); true }
-                        android.view.KeyEvent.KEYCODE_DPAD_RIGHT -> { glass.nudge(1); adjust(1); true }
+                        android.view.KeyEvent.KEYCODE_DPAD_LEFT -> { jelly.nudge(-1); adjust(-1); true }
+                        android.view.KeyEvent.KEYCODE_DPAD_RIGHT -> { jelly.nudge(1); adjust(1); true }
                         else -> false
                     }
                 }
             }
+            // 整列（亮起來的玻璃＋文字）一起變形；列很寬，放大只給一點點
+            .jellyFocus(jelly, focus, 1.02f)
             // 統一操作：有「‹ 值 ›」的列，確定鍵＝換到下一個值（選單不關）；其他列執行動作
             .focusTarget(
                 focus, requester,
                 onFocused = { onFocused(); item.onFocus?.invoke() },
-                onClick = item.onAdjust?.let { adj -> { glass.nudge(1); adj(1) } } ?: { glass.press(); item.action() },
-            )
-            .padding(horizontal = 14.dp, vertical = 12.dp),
+                onClick = item.onAdjust?.let { adj -> { jelly.nudge(1); adj(1) } } ?: { jelly.press(); item.action() },
+            ),
+    ) {
+    // 面板本身已經霧了一層，焦點要再白一點才分得出來（靜態內容，只改透明度）
+    GlassLit(focus, 18.dp, Modifier.matchParentSize(), haze = .17f)
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         // 焦點是背後那一顆透明玻璃，文字維持白色
@@ -290,6 +288,7 @@ private fun SheetRow(item: SheetItem, index: Int, glass: GlassFocusState, reques
                 color = if (onLight) Ink.OnLight.copy(alpha = 0.6f) else Ink.Tertiary,
             )
         }
+    }
     }
 }
 

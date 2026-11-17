@@ -1076,6 +1076,11 @@ fun HomeScreen(
                 "drawer" -> { sheet = null; exitingSheet = null; drawerOpen = true }
                 "fakeapps" -> fakeApps = (arg.toIntOrNull() ?: 0).coerceIn(0, 200)
                 "fakesources" -> fakeSources = arg == "1"
+                // 量測用（adb）：bgpace＝記錄接下來 300 格背景的間隔、印到 logcat（LiuliBg pace）；bgcap:30＝背景不升到每秒 60 格（比較用），bgcap:0 恢復；
+                // keylat:1＝每次按鍵印出「按下 → 下一格畫面畫完」的延遲（LiuliBg keylat）
+                "bgpace" -> engine.startPaceLog()
+                "bgcap" -> tw.liuli.launcher.ui.bg.BackgroundEngine.debugNoFast = arg == "30"
+                "keylat" -> tw.liuli.launcher.ui.bg.KeyLat.enabled = arg == "1"
                 // 量測用（adb）：ACTION=glassslow:0.1 玻璃焦點的動畫放慢十倍（截滑動中的畫面用）；glassslow:1 恢復。不存設定
                 "glassslow" -> tw.liuli.launcher.ui.glass.GlassDebug.timeScale = (arg.toFloatOrNull() ?: 1f).coerceIn(0.01f, 1f)
                 // 量測用（adb）：ACTION=shot:名稱 把目前的視窗畫面存成 PNG（Android/data/tw.liuli.launcher/files/shots/名稱.png）。
@@ -1230,6 +1235,7 @@ fun HomeScreen(
                 .onPreviewKeyEvent { e ->
                     if (e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                     lastKeyAt[0] = android.os.SystemClock.uptimeMillis()
+                    tw.liuli.launcher.ui.bg.KeyLat.onKey(e.nativeKeyEvent.eventTime)
                     // 布丁按鈕：記下方向（按鈕拿到焦點時知道從哪邊來）；按完焦點沒有動＝已經到底，那一顆撞牆彈一下
                     run {
                         var dx = 0; var dy = 0
@@ -1244,10 +1250,10 @@ fun HomeScreen(
                             ji.note(dx, dy)
                             val cur = ji.current; val g = ji.gen
                             val wasDrawer = drawerOpen; val wasMinimal = minimal
-                            if (cur != null && e.nativeKeyEvent.repeatCount == 0 && movingPkg == null && sheet == null && !picking) scope.launch {
+                            if (cur != null && e.nativeKeyEvent.repeatCount == 0 && movingPkg == null && !picking) scope.launch {
                                 androidx.compose.runtime.withFrameNanos { }
                                 androidx.compose.runtime.withFrameNanos { }
-                                if (ji.current === cur && ji.gen == g && drawerOpen == wasDrawer && minimal == wasMinimal && sheet == null) cur.bump(dx, dy)
+                                if (ji.current === cur && ji.gen == g && drawerOpen == wasDrawer && minimal == wasMinimal) cur.bump(dx, dy)
                             }
                         }
                     }
@@ -1384,7 +1390,7 @@ fun HomeScreen(
                 // 單行、依實際文字寬度置中在焦點圖塊正下方；只有快超出畫面時才往內推（常用列很長、捲到邊緣也不會跑版）
                 Box(
                     Modifier
-                        .padding(top = 412.dp)
+                        .padding(top = 398.dp)   // 緊貼在放大後的磚下方（磚底 388dp＋放大約 3dp），技術宅儀表列（434dp）上方留得出空間
                         .fillMaxWidth()
                         .layout { measurable, constraints ->
                             val p = measurable.measure(constraints.copy(minWidth = 0))

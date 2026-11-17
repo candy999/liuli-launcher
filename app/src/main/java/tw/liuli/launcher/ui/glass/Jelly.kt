@@ -33,6 +33,11 @@ import kotlin.math.min
 import kotlin.math.sign
 import kotlin.math.sqrt
 
+/** 量測用：布丁動畫的時間倍率（adb 動作 glassslow:0.1＝放慢十倍，方便截到動畫中的畫面）。不存設定。 */
+object GlassDebug {
+    @Volatile var timeScale = 1f
+}
+
 /**
  * 最後一次方向鍵的方向、目前有焦點的那一顆按鈕。
  * 主畫面在按鍵一進來時記下方向（[note]）；按鈕拿到焦點時就知道焦點是從哪邊來的。
@@ -96,6 +101,16 @@ class JellyState internal constructor(private val gain: Float) {
     }
 
     fun press() { if (snap()) return; zv -= 2.6f; wake.trySend(Unit) }
+
+    /** 左右調整數值（側邊欄的「‹ 值 ›」）：整列往按的那邊被帶一下、順向拉長再彈回（不是撞牆）。 */
+    fun nudge(dir: Int) {
+        JellyInput.gen++   // 這一下已經處理了，主畫面不要再當成「到底了」補一個撞牆
+        if (snap()) return
+        axisY = false
+        v += dir * BUMP * .8f * ref() * gain
+        sv += 1.4f * gain
+        wake.trySend(Unit)
+    }
 
     internal fun busy() = o != 0f || v != 0f || s != 0f || sv != 0f || z != 0f || zv != 0f
 

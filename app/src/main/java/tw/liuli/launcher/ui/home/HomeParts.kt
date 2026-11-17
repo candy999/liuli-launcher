@@ -72,17 +72,9 @@ import tw.liuli.launcher.ui.components.focusScale
 import tw.liuli.launcher.ui.components.focusTarget
 import tw.liuli.launcher.ui.components.rememberFocusAnim
 import tw.liuli.launcher.ui.glass.liquidGlass
-import tw.liuli.launcher.ui.glass.glassFocusHost
-import tw.liuli.launcher.ui.glass.glassFocusItem
-import tw.liuli.launcher.ui.glass.glassFocusFollow
-import tw.liuli.launcher.ui.glass.GlassFocusCapsule
-import tw.liuli.launcher.ui.glass.GlassFocusState
-import tw.liuli.launcher.ui.glass.GlassKind
-import tw.liuli.launcher.ui.glass.rememberGlassFocus
 import tw.liuli.launcher.ui.glass.GlassLit
 import tw.liuli.launcher.ui.glass.jellyFocus
 import tw.liuli.launcher.ui.glass.rememberJelly
-import tw.liuli.launcher.ui.glass.glassHairline
 import tw.liuli.launcher.ui.theme.GText
 import tw.liuli.launcher.ui.theme.Ink
 import tw.liuli.launcher.ui.theme.LIcon

@@ -75,6 +75,7 @@ class MainActivity : ComponentActivity() {
         // 每一幀的實際總耗時（vsync → 畫完）交給背景引擎決定解析度；在另一條執行緒回報，不佔主執行緒
         val metricsThread = HandlerThread("liuli-frames").apply { start() }
         window.addOnFrameMetricsAvailableListener({ _, m, _ ->
+            tw.liuli.launcher.ui.bg.KeyLat.onFrame(m.getMetric(FrameMetrics.INTENDED_VSYNC_TIMESTAMP), m.getMetric(FrameMetrics.TOTAL_DURATION))
             BackgroundEngine.active?.onFrameMetrics(
                 m.getMetric(FrameMetrics.VSYNC_TIMESTAMP),
                 m.getMetric(FrameMetrics.TOTAL_DURATION),

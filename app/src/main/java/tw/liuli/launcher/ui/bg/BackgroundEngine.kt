@@ -135,6 +135,27 @@ class BgState {
  * 3. 脈動是充放電，漣漪相位連續前進
  * 只在轉場期間逐幀繪製，追上目標後停止。
  */
+/** 沒有模糊的背景小圖（已過曝，和玻璃用的模糊小圖同一個亮度）：玻璃邊緣的折射取樣用。背景執行緒寫、烘玻璃的執行緒讀。 */
+object SharpBackdrop {
+    @Volatile var px = IntArray(0)
+    @Volatile var w = 0
+    @Volatile var h = 0
+}
+
+/** 量測用：按鍵 → 處理完按鍵之後的第一格畫面畫完，隔了多久。 */
+object KeyLat {
+    @Volatile var enabled = false
+    @Volatile private var keyAt = 0L
+    @Volatile private var handledNs = 0L
+    fun onKey(eventTimeMs: Long) { if (!enabled) return; keyAt = eventTimeMs; handledNs = System.nanoTime() }
+    fun onFrame(vsyncNs: Long, totalNs: Long) {
+        val k = keyAt
+        if (!enabled || k == 0L || vsyncNs < handledNs - 17_000_000L) return
+        keyAt = 0L
+        Log.i("LiuliBg", "keylat total=%.1fms (dispatch=%.1f frame=%.1f)".format((vsyncNs + totalNs) / 1e6f - k, handledNs / 1e6f - k, totalNs / 1e6f))
+    }
+}
+
 class BackgroundEngine {
     val st = BgState()
 
@@ -182,6 +203,28 @@ class BackgroundEngine {
     @Volatile private var uiHoldUntil = 0L
     /** 面板或抽屜開著（背景大半被蓋住）：背景一直用省力模式（÷3、每秒 30 格，速度不變）。 */
     @Volatile var covered = false
+    /** 這個樣式付得起每秒 60 格（一幀總耗時夠短）：背景的流動就不會一格一格跳。 */
+    private val fastOk = BooleanArray(BgStyle.entries.size)
+    private var fastBlockedUntil = 0L
+    private var fastBackoff = 8000L
+    // 量測用：記錄背景每一格的間隔
+    @Volatile private var paceLeft = 0
+    private val paceBuf = FloatArray(300)
+    private var paceN = 0
+    private var paceLastNs = 0L
+    fun startPaceLog() { paceN = 0; paceLastNs = 0L; paceLeft = paceBuf.size }
+    private fun pace(ns: Long) {
+        if (paceLeft <= 0) return
+        if (paceLastNs != 0L) { paceBuf[paceN++] = (ns - paceLastNs) / 1e6f; paceLeft-- }
+        paceLastNs = ns
+        if (paceLeft == 0 && paceN > 0) {
+            val a = paceBuf.copyOf(paceN); a.sort()
+            val mean = a.average().toFloat()
+            var sd = 0f; for (v in a) sd += (v - mean) * (v - mean); sd = kotlin.math.sqrt(sd / a.size)
+            fun cnt(lo: Float, hi: Float) = a.count { it >= lo && it < hi }
+            Log.i(TAG, "pace ${style.id} n=${a.size} mean=%.1f sd=%.1f p50=%.1f p90=%.1f max=%.1f | <25ms:${cnt(0f, 25f)} 25-42:${cnt(25f, 42f)} 42-60:${cnt(42f, 60f)} >60:${cnt(60f, 1e9f)}".format(mean, sd, a[a.size / 2], a[(a.size * 9) / 10], a[a.size - 1]))
+        }
+    }
     private var glassDirty = false
     /** 目前播放速度（1＝正常；GPU 跟不上時 <1）。 */
     private var speed = 1f
@@ -245,6 +288,12 @@ class BackgroundEngine {
     private val px = IntArray(GLASS_W * GLASS_H)
     private val tmp = IntArray(GLASS_W * GLASS_H)
     private val glassReq = Channel<Unit>(Channel.CONFLATED)
+    // 沒有模糊的背景小圖（玻璃邊緣那一圈折射用）：在同一條背景執行緒畫，更新得比模糊的那張慢
+    private val sharpImage = ImageBitmap(SHARP_W, SHARP_H)
+    private val sharpCanvas = Canvas(sharpImage)
+    private val sharpBitmap = sharpImage.asAndroidBitmap()
+    private val sharpPx = IntArray(SHARP_W * SHARP_H)
+    private var nextSharpAt = 0L
 
     private var tH = 228f; private var tS = 0.5f; private var tFx = 0.2f; private var tFy = 0.7f
     private var mH = 228f; private var mS = 0.5f; private var mFx = 0.2f; private var mFy = 0.7f
@@ -441,8 +490,11 @@ class BackgroundEngine {
             var div = learnedDiv[si]
             var iv = learnedIv[si]
             var interval = INTERVALS[iv]
-            bgFps = (1000f / interval + .5f).toInt()
             val forced = debugDiv in 1..MAX_DIV
+            var fast = fastOk[si] && !debugNoFast && !forced && iv == 0
+            if (fast) interval = FAST_INTERVAL
+            var fastUp = 0
+            bgFps = (1000f / interval + .5f).toInt()
             if (!blurOn) renderDiv = if (forced) debugDiv else div // 降解析度立即生效（在動，看不出切換）
             if (forced) interval = 16.7f * debugEvery.coerceIn(1, 8)
             // 剛降過解析度：下一個量測窗要確認有沒有變快（沒變快＝CPU 瓶頸）
@@ -480,7 +532,8 @@ class BackgroundEngine {
                     // 讓路模式：解析度降到 ÷3 是為了換流暢——更新率不再壓到每秒 15 格（以前取「15 格」與「這個樣式量到的更新率」
                     // 較慢的那個，結果又糊又卡）。改成：這個樣式付得起每秒 30 格就 30 格，再重的樣式也至少每秒 20 格。
                     // （不一律強制 30 格：星空這類 CPU 計算重的樣式，降解析度省不了多少，強制 30 格會拖慢焦點動畫）
-                    val due = if (busy) min(max(interval, BUSY_INTERVAL), BUSY_SLOWEST) else interval
+                    // 每秒 60 格的時候操作中也維持 60 格（只降解析度）：更新率一變，流動看起來就頓一下
+                    val due = if (busy && !fast) min(max(interval, BUSY_INTERVAL), BUSY_SLOWEST) else interval
                     if (lastBgT != 0L && t - lastBgT < due - 6f) return@withFrameNanos
                     val divBefore = renderDiv
                     var measure = false
@@ -497,6 +550,7 @@ class BackgroundEngine {
                         if (skipMeasure > 0) skipMeasure-- else { winSum += (t - lastBgT).toFloat(); winN++; measure = true }
                     }
                     lastBgT = t
+                    pace(ns)
                     if (holdMs > 0) { holdUntil = t + holdMs; holdMs = 0 }
                     stepBounce(t)
                     // 持續動畫的樣式（星空、深海、光束）與簡潔模式的彈跳點：追上目標也不停
@@ -536,7 +590,7 @@ class BackgroundEngine {
                     }
 
                     // 玻璃（畫小張背景＋高斯模糊）在背景執行緒做，主執行緒只送出要求；忙的話自動合併成一次
-                    if (done || bgTicks++ % 2 == 0) requestGlass()
+                    if (done || bgTicks++ % (if (fast) 4 else 2) == 0) requestGlass()
                     if (blur) blurReq.trySend(Unit)
                     if (glassDirty) { glassDirty = false; glassVersion++ }
                     // 這一格的實際耗時稍後由 FrameMetrics 送回；只採計「穩定在同一檔、不在操作中」的格
@@ -560,6 +614,24 @@ class BackgroundEngine {
                         else -> false
                     }
                     val now = android.os.SystemClock.uptimeMillis()
+                    // ── 每秒 60 格：這個樣式一幀夠便宜就升上去（優先於升解析度——流暢比清楚重要）；跟不上就退回 30 格，退避時間加倍 ──
+                    if (fast) {
+                        if (debugNoFast || (slow && (++slowWins >= 2 || verySlow))) {
+                            slowWins = 0; fast = false; fastOk[si] = false
+                            fastBlockedUntil = now + fastBackoff; fastBackoff = min(fastBackoff * 2, 120_000L)
+                            interval = INTERVALS[iv]; bgFps = (1000f / interval + .5f).toInt(); skipMeasure = 2
+                            Log.i(TAG, "${style.id} 60->30fps lat=${lat.toInt()}ms gap=${avg.toInt()}ms")
+                        } else if (!slow) slowWins = 0
+                        continue
+                    }
+                    if (!debugNoFast && iv == 0 && checkDivFrom == 0f && !slow && lat >= 0f && lat <= FAST_AFFORD && avg < interval * FAST_RATIO && now >= fastBlockedUntil) {
+                        if (++fastUp >= 2) {
+                            fastUp = 0; fast = true; fastOk[si] = true; slowWins = 0; fastWins = 0
+                            interval = FAST_INTERVAL; bgFps = 60; skipMeasure = 2
+                            Log.i(TAG, "${style.id} 30->60fps lat=${lat.toInt()}ms")
+                            continue
+                        }
+                    } else fastUp = 0
                     val oldDiv = div
                     val oldIv = iv
                     if (checkDivFrom > 0f) {
@@ -754,6 +826,22 @@ class BackgroundEngine {
                     }
                 }
                 expose(px)
+                val t0 = android.os.SystemClock.uptimeMillis()
+                if (t0 >= nextSharpAt) {
+                    if (!revealed) sharpPx.fill(0xFF000000.toInt()) else {
+                        workScope.draw(Density(1f), LayoutDirection.Ltr, sharpCanvas, Size(SHARP_W.toFloat(), SHARP_H.toFloat())) {
+                            scale(SHARP_W / LOGICAL_W, SHARP_H / LOGICAL_H, pivot = androidx.compose.ui.geometry.Offset.Zero) {
+                                drawStyle(s, workState)
+                            }
+                        }
+                        sharpBitmap.getPixels(sharpPx, 0, SHARP_W, 0, 0, SHARP_W, SHARP_H)
+                        expose(sharpPx)
+                    }
+                    SharpBackdrop.w = SHARP_W; SharpBackdrop.h = SHARP_H; SharpBackdrop.px = sharpPx
+                    // 這張比較貴（像素是模糊那張的十倍）：至少隔 0.3 秒，而且不超過背景執行緒五分之一的時間
+                    val t1 = android.os.SystemClock.uptimeMillis()
+                    nextSharpAt = t1 + max(300L, (t1 - t0) * 5)
+                }
             }
             glassBitmap.setPixels(px, 0, GLASS_W, 0, 0, GLASS_W, GLASS_H)
             // 轉場中：等下一格背景一起重畫（省一次整個畫面的重繪）；靜止時立刻更新
@@ -956,6 +1044,14 @@ class BackgroundEngine {
          * 太慢時先降解析度（GPU 瓶頸）；降解析度沒有用的樣式（CPU 瓶頸）改降更新率；再慢就靠慢速播放。
          */
         private val INTERVALS = floatArrayOf(33.3f, 50f, 66.7f)
+        /** 每秒 60 格的間隔，以及升到 60 格的門檻：30 格時量到的一幀總耗時要在這個數以內（毫秒）。 */
+        private const val FAST_INTERVAL = 16.7f
+        private const val FAST_AFFORD = 13.5f
+        /** 量測用：不升到每秒 60 格。 */
+        @Volatile var debugNoFast = false
+        /** 給玻璃邊緣折射用的「清楚的」背景小圖大小（1080p 的 1／5）。 */
+        const val SHARP_W = 384
+        const val SHARP_H = 216
         /** 目前背景的更新率（fps，自動在 30／20／15 之間調整）；技術宅模式的儀表列會顯示。 */
         @Volatile var bgFps = 0
         /** 起始解析度除數（AOC 電視實測：÷2 的背景一幀 GPU 約 18ms，可以穩定 30fps）。 */

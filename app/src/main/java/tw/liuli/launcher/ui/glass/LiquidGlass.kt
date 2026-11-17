@@ -244,7 +244,18 @@ private class GlassBake(private val backdrop: GlassBackdrop, private val edge: B
             return tx / -tz
         }
 
-        fun bake(out: IntArray, bw: Int, bh: Int, q: Int, r: Req, sx: Float, sy: Float, edge: Boolean) {
+/** 清楚的背景小圖上某一個通道的雙線性取樣。 */
+        private fun sharpCh(px: IntArray, w: Int, h: Int, u: Float, v: Float, shift: Int): Float {
+            val mx = w - 1.001f; val my = h - 1.001f
+            val uu = if (u < 0f) 0f else if (u > mx) mx else u
+            val vv = if (v < 0f) 0f else if (v > my) my else v
+            val x0 = uu.toInt(); val y0 = vv.toInt(); val fx = uu - x0; val fy = vv - y0
+            val i = y0 * w + x0
+            return ((px[i] shr shift) and 255) * (1f - fx) * (1f - fy) + ((px[i + 1] shr shift) and 255) * fx * (1f - fy) +
+                ((px[i + w] shr shift) and 255) * (1f - fx) * fy + ((px[i + w + 1] shr shift) and 255) * fx * fy
+        }
+
+                fun bake(out: IntArray, bw: Int, bh: Int, q: Int, r: Req, sx: Float, sy: Float, edge: Boolean) {
             val src = BackdropPixels.px; val sw = BackdropPixels.w; val sh = BackdropPixels.h
             if (src.isEmpty() || sw < 2 || sh < 2) return
             val hw = r.w / 2f; val hh = r.h / 2f
@@ -254,6 +265,11 @@ private class GlassBake(private val backdrop: GlassBackdrop, private val edge: B
             val mid = r.tint + .10f * r.hl
             val top = 1f - (1f - mid) * (1f - (.06f + .06f * r.hl))
             val maxX = sw - 1.001f; val maxY = sh - 1.001f
+            // 清楚的（沒有模糊的）背景小圖：邊緣的斜面折射的是它，所以背景的線條會被彎進來、顏色會分開一點點
+            val shp = tw.liuli.launcher.ui.bg.SharpBackdrop.px
+            val shw = tw.liuli.launcher.ui.bg.SharpBackdrop.w; val shh = tw.liuli.launcher.ui.bg.SharpBackdrop.h
+            val hasSharp = shw > 1 && shh > 1 && shp.size >= shw * shh
+            val ssx = if (hasSharp) shw * sx / sw else 0f; val ssy = if (hasSharp) shh * sy / sh else 0f
             // 一盞柔和的主光，在左上方、朝向觀看者
             val lxk = -.50f; val lyk = -.68f; val lzk = .54f
             for (y in 0 until bh) {
@@ -269,7 +285,7 @@ private class GlassBake(private val backdrop: GlassBackdrop, private val edge: B
                     val v = (r.oy + py) * sy - .5f
                     var dR = 0f; var dG = 0f; var dB = 0f     // 三個波長各自的取樣偏移（像素，沿著往外的法線；負的＝往裡面）
                     var nx = 0f; var ny = 0f
-                    var fres = 0f; var env = 0f
+                    var fres = 0f; var env = 0f; var mix = 0f
                     if (edge) {
                         // 到圓角矩形邊緣的距離（裡面是負的）與往外的法線
                         val rad = if (cy < 0f) (if (cx < 0f) r.radii[0] else r.radii[1]) else (if (cx < 0f) r.radii[3] else r.radii[2])
@@ -291,7 +307,9 @@ private class GlassBake(private val backdrop: GlassBackdrop, private val edge: B
                             val root = sqrt(1f - w1 * w1)
                             val slope = w1 / root
                             // 光線在玻璃裡走的厚度＝這一點的高度＋底下那一層平的玻璃
-                            val thick = bevel * (root + 1.2f)
+                            val thick = bevel * (root + 2.2f)
+                            // 霧面只在平的地方：表面越陡，看到的越是清楚的背景（斜率 1.1 以上完全清楚）
+                            mix = min(1f, slope / 1.1f)
                             // 折射（Snell）：三個波長各算一次，偏移的方向是往玻璃裡面
                             dR = -refract(slope, N_R) * thick
                             dG = -refract(slope, N_G) * thick
@@ -331,26 +349,13 @@ private class GlassBake(private val backdrop: GlassBackdrop, private val edge: B
                         cg = (((a shr 8) and 255) * w00 + ((b shr 8) and 255) * w10 + ((c shr 8) and 255) * w01 + ((dd shr 8) and 255) * w11).toInt()
                         cb = ((a and 255) * w00 + (b and 255) * w10 + (c and 255) * w01 + (dd and 255) * w11).toInt()
                     }
-                    if (dG != 0f) {
-                        // 色散：紅、藍用各自的偏移量再取樣一次（和綠色只差百分之幾，背景有明暗變化的地方才分得出顏色）
-                        run {
-                            val u1 = u + nx * dR * sx; val v1 = v + ny * dR * sy
-                            val uu = if (u1 < 0f) 0f else if (u1 > maxX) maxX else u1
-                            val vv = if (v1 < 0f) 0f else if (v1 > maxY) maxY else v1
-                            val x0 = uu.toInt(); val y0 = vv.toInt(); val fx = uu - x0; val fy = vv - y0
-                            val i = y0 * sw + x0
-                            cr = (((src[i] shr 16) and 255) * (1f - fx) * (1f - fy) + ((src[i + 1] shr 16) and 255) * fx * (1f - fy) +
-                                ((src[i + sw] shr 16) and 255) * (1f - fx) * fy + ((src[i + sw + 1] shr 16) and 255) * fx * fy).toInt()
-                        }
-                        run {
-                            val u1 = u + nx * dB * sx; val v1 = v + ny * dB * sy
-                            val uu = if (u1 < 0f) 0f else if (u1 > maxX) maxX else u1
-                            val vv = if (v1 < 0f) 0f else if (v1 > maxY) maxY else v1
-                            val x0 = uu.toInt(); val y0 = vv.toInt(); val fx = uu - x0; val fy = vv - y0
-                            val i = y0 * sw + x0
-                            cb = ((src[i] and 255) * (1f - fx) * (1f - fy) + (src[i + 1] and 255) * fx * (1f - fy) +
-                                (src[i + sw] and 255) * (1f - fx) * fy + (src[i + sw + 1] and 255) * fx * fy).toInt()
-                        }
+                    if (mix > 0f && hasSharp) {
+                        // 斜面上：三個波長各用自己的偏移量，到清楚的背景上取樣（色散就是這三次取樣位置的差別），再依陡峭程度和霧面混合
+                        val bu = (r.ox + px) * ssx - .5f; val bv = (r.oy + py) * ssy - .5f
+                        val sr = sharpCh(shp, shw, shh, bu + nx * dR * ssx, bv + ny * dR * ssy, 16)
+                        val sg = sharpCh(shp, shw, shh, bu + nx * dG * ssx, bv + ny * dG * ssy, 8)
+                        val sb = sharpCh(shp, shw, shh, bu + nx * dB * ssx, bv + ny * dB * ssy, 0)
+                        cr = (cr + (sr - cr) * mix).toInt(); cg = (cg + (sg - cg) * mix).toInt(); cb = (cb + (sb - cb) * mix).toInt()
                     }
                     // 玻璃本身的一點白霧：背景越亮加得越少（亮背景上不會整片發白）
                     val lum = (cr * 3 + cg * 6 + cb) / 2550f
