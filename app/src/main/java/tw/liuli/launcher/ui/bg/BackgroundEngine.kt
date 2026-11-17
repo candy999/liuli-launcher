@@ -183,9 +183,9 @@ class BackgroundEngine {
     /** 面板或抽屜開著（背景大半被蓋住）：背景一直用省力模式（÷3、每秒 30 格，速度不變）。 */
     @Volatile var covered = false
     /**
-     * 弱 GPU（海信 Mali-470）上抽屜開著時：持續流動的樣式不再「一直動」，只在焦點換色的轉場期間動、追上目標就停。
+     * 弱 GPU（海信 Mali-470）上抽屜開著時：背景停住（持續流動的樣式不再動，焦點換色也延到抽屜收起來才開始）。
      * 背景每動一格，整個畫面（含蓋住大半個螢幕的抽屜）都要重畫一次；停下來之後，按鈕的布丁動畫只需要重畫那一小塊。
-     * 代價：抽屜上方露出的那一條背景在抽屜開著、沒有操作時是靜止的。
+     * 代價：抽屜開著時，上方露出的那一條背景是靜止的，面板的色調也不跟著焦點的 App 換色。
      */
     @Volatile var ambientPaused = false
         set(v) { val was = field; field = v; if (was && !v) wake.trySend(Unit) }
@@ -402,7 +402,8 @@ class BackgroundEngine {
             charge = min(0.45f, charge + 0.45f)
             rippleTarget = floor(rippleTarget) + 1f
             // 只有翻牌方陣需要讓色彩波傳完（其他樣式追上目標就停）
-            wake.trySend(Unit)
+            // 弱 GPU、抽屜開著：先記下新的目標，等抽屜收起來再換色（換色的每一格都要重畫整個畫面，抽屜裡的操作會跟著卡）
+            if (!ambientPaused) wake.trySend(Unit)
         }
     }
 

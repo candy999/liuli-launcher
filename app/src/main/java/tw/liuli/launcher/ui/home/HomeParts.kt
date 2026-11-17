@@ -465,6 +465,8 @@ fun AppDrawer(
     }
     val gridState = androidx.compose.foundation.lazy.grid.rememberLazyGridState()
     val lightX = remember { Animatable(.1f) }
+    // 量化成 24 格：只有跨到下一格才重畫、重烘（直接讀動畫值的話，移動的半秒內每一格都要重畫整個面板）
+    val lightStep by remember { androidx.compose.runtime.derivedStateOf { (lightX.value * 24f).roundToInt() } }
     var focused by remember { mutableIntStateOf(0) }
     // ── 整排對齊：格子區剛好放得下幾整排，捲動一次捲一整排，上下都不會切到半排 ──
     val scope = androidx.compose.runtime.rememberCoroutineScope()
@@ -571,7 +573,7 @@ fun AppDrawer(
                     slide = { drawerSlideOffset(slide.value, drawerHeightPx) },
                     frozen = { asLayer || slide.value > 0.001f },
                     // 受光：上緣一道光、一片跟著焦點那一欄移動的柔光、往下漸暗（烘在同一張圖裡；位置量化成 24 格，移動中最多每 0.12 秒重烘一次）
-                    light = { androidx.compose.ui.geometry.Offset((lightX.value * 24f).roundToInt() / 24f, .08f) },
+                    light = { androidx.compose.ui.geometry.Offset(lightStep / 24f, .08f) },
                 )
                 .padding(start = 28.dp, end = 28.dp, top = 24.dp)
                 .onPreviewKeyEvent { e ->
