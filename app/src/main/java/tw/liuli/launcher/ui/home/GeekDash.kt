@@ -137,7 +137,11 @@ private fun Modifier.spark(data: List<Float>, lo: Float, hi: Float): Modifier = 
 private fun RowScope.Card(weight: Float, mod: Modifier = Modifier, content: @Composable () -> Unit) {
     val shape = RoundedCornerShape(16.dp)
     Box(
-        Modifier.weight(weight).fillMaxHeight().liquidGlass(shape, edge = false).clip(shape).then(mod)
+        Modifier.weight(weight).fillMaxHeight().liquidGlass(shape)
+            // 卡片的內容（文字、折線圖）畫成一張離屏圖留著：每秒才更新一次，其餘每一格 GPU 只貼這張圖
+            // （折線圖是反鋸齒的路徑，Mali-470 每格重畫很貴）
+            .graphicsLayer { clip = true; this.shape = shape; compositingStrategy = androidx.compose.ui.graphics.CompositingStrategy.Offscreen }
+            .then(mod)
             .padding(start = 10.dp, end = 10.dp, top = 5.dp),
     ) { content() }
 }

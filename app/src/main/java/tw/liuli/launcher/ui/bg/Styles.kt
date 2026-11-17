@@ -46,6 +46,34 @@ private val FULL = Size(W, H)
  */
 private class Scratch {
     val ditherPaint = DitherScope.newPaint()
+    /**
+     * 光束：一條光束上下的明暗輪廓（兩端淡出、中間最亮），做成一張只有透明度的小貼圖。
+     * 每條光束＝同一張貼圖拉成不同的位置、寬度，顏色由畫筆給——56 條光束共用一張貼圖，
+     * 不用每格為每一條各建一個五段漸層（各自一個著色器、一張漸層貼圖，還有一堆立刻丟掉的物件）。
+     */
+    val beamTex: android.graphics.Bitmap = run {
+        val n = 64
+        val bmp = android.graphics.Bitmap.createBitmap(2, n, android.graphics.Bitmap.Config.ALPHA_8)
+        val rb = bmp.rowBytes
+        val px = ByteArray(rb * n)
+        for (i in 0 until n) {
+            val t = (i + .5f) / n
+            val a = when {
+                t < .3f -> t / .3f * .55f
+                t < .5f -> .55f + (t - .3f) / .2f * .45f
+                t < .7f -> 1f - (t - .5f) / .2f * .45f
+                else -> (1f - t) / .3f * .55f
+            }
+            val v = (a.coerceIn(0f, 1f) * 255f + .5f).toInt().toByte()
+            px[i * rb] = v; px[i * rb + 1] = v
+        }
+        bmp.copyPixelsFromBuffer(java.nio.ByteBuffer.wrap(px))
+        bmp
+    }
+    val beamPaint = android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG).apply {
+        xfermode = android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.ADD)
+    }
+    val beamRect = android.graphics.RectF()
     /** 批次畫星點用的畫筆（圓頭，約一個像素）。 */
     val starPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { strokeCap = android.graphics.Paint.Cap.ROUND }
     /** 星座網的星點位置（每幀重算，不配置新陣列）。 */
@@ -1061,6 +1089,8 @@ private fun DrawScope.beams(st: BgState) {
     drawRect(Brush.verticalGradient(listOf(st.c(-10f, .6f, .025f), st.c(10f, .7f, .06f)), 0f, H), size = FULL)
     val lx = st.fx * W
     focusGlow(st, W * .45f, .08f)
+    val sc = scratch.get()!!
+    val cv = drawContext.canvas.nativeCanvas
     for (i in 0 until 56) {
         val h1 = hash01(i, 1); val h2 = hash01(i, 2); val h3 = hash01(i, 3); val h4 = hash01(i, 4)
         val base = h1 * W * 1.3f - W * .15f
@@ -1076,20 +1106,15 @@ private fun DrawScope.beams(st: BgState) {
         val yc = H * (.5f + .22f * sin(t * (.1f + .15f * h3) + i))
         val span = H * (.55f + .45f * h4)
         val hOff = (h3 - .5f) * 80f
-        drawRect(
-            Brush.verticalGradient(
-                0f to st.c(hOff, .95f, .55f, 0f), .3f to st.c(hOff, .95f, .55f, a * .55f), .5f to st.c(hOff, .9f, .62f, a),
-                .7f to st.c(hOff, .95f, .55f, a * .55f), 1f to st.c(hOff, .95f, .5f, 0f),
-                startY = yc - span, endY = yc + span,
-            ),
-            Offset(x - w / 2, 0f), Size(w, H), blendMode = BlendMode.Plus,
-        )
+        // 同一張明暗輪廓貼圖、加法混合；顏色（含亮度）由畫筆給
+        sc.beamPaint.color = st.c(hOff, .93f, .59f, a).toArgb()
+        sc.beamRect.set(x - w / 2, yc - span, x + w / 2, yc + span)
+        cv.drawBitmap(sc.beamTex, null, sc.beamRect, sc.beamPaint)
         // 寬的光帶中間加一條更亮的細芯
         if (w > 4f) {
-            drawRect(
-                Brush.verticalGradient(0f to Color.Transparent, .5f to st.c(hOff, .6f, .8f, a * .5f), 1f to Color.Transparent, startY = yc - span * .8f, endY = yc + span * .8f),
-                Offset(x - w * .12f, 0f), Size(w * .24f, H), blendMode = BlendMode.Plus,
-            )
+            sc.beamPaint.color = st.c(hOff, .6f, .8f, a * .42f).toArgb()
+            sc.beamRect.set(x - w * .12f, yc - span * .8f, x + w * .12f, yc + span * .8f)
+            cv.drawBitmap(sc.beamTex, null, sc.beamRect, sc.beamPaint)
         }
     }
     vignette(.3f)

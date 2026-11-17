@@ -141,7 +141,8 @@ fun GlassOnFocus(
                 }
                 .liquidGlass(shape, tint = 0.05f),
         )
-        content()
+        // 文字（大時鐘、帶陰影的字）畫成一張離屏圖留著：一分鐘才變一次，其餘每一格只貼這張圖
+        Box(Modifier.graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }) { content() }
     }
 }
 

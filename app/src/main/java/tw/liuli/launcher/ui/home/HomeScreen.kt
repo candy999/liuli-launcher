@@ -1103,6 +1103,7 @@ fun HomeScreen(
                     val parts = arg.split(',')
                     val name = parts.getOrNull(0).orEmpty().ifBlank { "burst" }
                     val n = (parts.getOrNull(1)?.toIntOrNull() ?: 24).coerceIn(1, 60)
+                    // 後續動作 key:23＝送一個按鍵給自己（例如在面板裡按確定進下一層）
                     val follow = parts.getOrNull(2).orEmpty()
                     val v = win.decorView
                     val frames = arrayOfNulls<android.graphics.Bitmap>(n)
@@ -1130,6 +1131,9 @@ fun HomeScreen(
                     when (follow) {
                         "sheet:settings" -> openSettings()
                         "drawer" -> { sheet = null; exitingSheet = null; drawerOpen = true }
+                        else -> follow.removePrefix("key:").toIntOrNull()?.takeIf { follow.startsWith("key:") }?.let { code ->
+                            Thread { runCatching { android.app.Instrumentation().sendKeyDownUpSync(code) } }.start()
+                        }
                     }
                 }
                 "clock" -> settings.updateClock(on = arg == "1" || arg == "on")

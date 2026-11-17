@@ -119,11 +119,11 @@ class JellyState internal constructor(private val gain: Float) {
 
     private companion object {
         const val K = 300f; const val Z = .50f           // 位移：被帶出去再彈回，晃一下半
-        const val A = .050f; const val B = .0010f
+        const val A = .070f; const val B = .0010f
         const val S_MAX = .24f; const val S_MIN = -.16f
         const val JK = 900f; const val JZ = .30f         // 形狀：布丁的晃動
         const val ZK = 900f; const val ZZ = .36f
-        const val ARRIVE = 2.3f                          // 焦點過來：初速＝參考長度 × 這個數（像素／秒）
+        const val ARRIVE = 3.0f                          // 焦點過來：初速＝參考長度 × 這個數（像素／秒）
         const val BUMP = 1.9f                            // 撞牆
     }
 }
