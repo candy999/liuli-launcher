@@ -117,7 +117,20 @@ fun Modifier.liquidGlass(
                 val lp = light?.invoke()
                 bake.request(origin, size, radii, tint, hl, v, dens, lp?.x ?: -1f, lp?.y ?: 0f)
                 val paint = bake.paint(matrix)
-                if (paint != null) drawIntoCanvas { it.nativeCanvas.drawPath(androidPath, paint) }
+                if (paint != null) drawIntoCanvas {
+                    val c = it.nativeCanvas
+                    if (size.width * size.height > 250_000f) {
+                        // 大片面板（側邊欄、抽屜）：中間絕大部分是一個不透明、不用反鋸齒的矩形（GPU 不必混合、不必算邊緣覆蓋率），
+                        // 只有上下兩條含圓角的窄帶才用反鋸齒的路徑。海信上抽屜的玻璃是整個畫面最貴的一筆填色
+                        val top = kotlin.math.ceil(max(radii[0], radii[1]))
+                        val bot = kotlin.math.ceil(max(radii[2], radii[3]))
+                        if (top > 0f) { c.save(); c.clipRect(0f, 0f, size.width, top); c.drawPath(androidPath, paint); c.restore() }
+                        paint.isAntiAlias = false
+                        c.drawRect(0f, top, size.width, size.height - bot, paint)
+                        paint.isAntiAlias = true
+                        if (bot > 0f) { c.save(); c.clipRect(0f, size.height - bot, size.width, size.height); c.drawPath(androidPath, paint); c.restore() }
+                    } else c.drawPath(androidPath, paint)
+                }
                 // 第一張還沒烘好（剛出現的那一兩格）：先用半透明的深色頂著
                 else drawPath(path, Color(0x66202432))
             }
