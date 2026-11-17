@@ -198,6 +198,7 @@ class BackgroundEngine {
     @Volatile var covered = false
     /** 這個樣式付得起每秒 60 格（一幀總耗時夠短）：背景的流動就不會一格一格跳。 */
     private val fastOk = BooleanArray(BgStyle.entries.size)
+    private val fastFails = IntArray(BgStyle.entries.size)
     private var fastBlockedUntil = 0L
     private var fastBackoff = 8000L
     // 量測用：記錄背景每一格的間隔
@@ -533,7 +534,9 @@ class BackgroundEngine {
                     if (busy) {
                         wasBusy = true
                         // 每秒 60 格的樣式夠便宜，操作中不用降解析度（一降一升，細的光束看起來忽粗忽細）
-                        if (!forced && !blur && !fast && renderDiv < BUSY_DIV) renderDiv = BUSY_DIV // 降解析度立即生效
+                        // 這個樣式本來就便宜（量到的一幀總耗時 12ms 以內）也不用降：一降一升，背景看起來忽糊忽清楚
+                        val cheap = costLat[si] in 0f..12f && costDiv[si] <= renderDiv
+                        if (!forced && !blur && !fast && !cheap && renderDiv < BUSY_DIV) renderDiv = BUSY_DIV // 降解析度立即生效
                     } else if (wasBusy) {
                         // 操作結束：重新量測，解析度之後逐檔拉回
                         wasBusy = false
@@ -627,7 +630,9 @@ class BackgroundEngine {
                         }
                         if (debugNoFast || (slow && (++slowWins >= 2 || verySlow))) {
                             slowWins = 0; fast = false; fastOk[si] = false
-                            fastBlockedUntil = now + fastBackoff; fastBackoff = min(fastBackoff * 2, 120_000L)
+                            // 試過兩次都撐不住：這次執行期間不再試（每試一次，流動的節奏就變一次，反而頓）
+                            if (++fastFails[si] >= 2) fastBlockedUntil = Long.MAX_VALUE
+                            else { fastBlockedUntil = now + fastBackoff; fastBackoff = min(fastBackoff * 2, 120_000L) }
                             interval = INTERVALS[iv]; bgFps = (1000f / interval + .5f).toInt(); skipMeasure = 2
                             Log.i(TAG, "${style.id} 60->30fps lat=${lat.toInt()}ms gap=${avg.toInt()}ms")
                         } else if (!slow) {

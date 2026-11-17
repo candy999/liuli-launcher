@@ -554,7 +554,9 @@ fun AppDrawer(
                     // 大面積的動作要有「重量」：從稍小、稍透明，一邊上升一邊長到原大（以底邊中央為支點），
                     // 收起時反過來。整塊是一張離屏圖，縮放只是貼圖變形，不會重畫裡面的內容。
                     val k = s.coerceIn(0f, 1f)
-                    scaleX = 1f - .05f * k; scaleY = 1f - .05f * k
+                    // 和按鈕同一種布丁：移動得越快、順著移動方向（上下）拉得越長；衝過停靠位置的那一下被壓扁，再晃回來
+                    val st = (kotlin.math.abs(slide.velocity) * .020f).coerceAtMost(.09f) - (-s).coerceAtLeast(0f) * 1.4f
+                    scaleX = (1f - .05f * k) / (1f + .5f * st); scaleY = (1f - .05f * k) * (1f + st)
                     transformOrigin = androidx.compose.ui.graphics.TransformOrigin(.5f, 1f)
                     alpha = 1f - .55f * k * k
                     // 滑動中：整塊抽屜（玻璃＋App 格子）畫成一張離屏圖，GPU 每格只貼一個四邊形；停下來恢復一般繪製
