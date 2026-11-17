@@ -159,7 +159,7 @@ object Updater {
     }
 
     /** 交給系統的套件安裝程式（系統會再顯示確認畫面）。 */
-    private fun install(context: Context, target: Available) {
+    private fun install(context: Context, target: State.Available) {
         stallJob?.cancel()
         val app = context.applicationContext
         state = runCatching {
