@@ -221,7 +221,9 @@ private class GlassBake(private val backdrop: GlassBackdrop, private val edge: B
             bakedFor = r
             tick++
             // 背景在動時每秒最多烘十幾次：玻璃後面是模糊的背景，慢一兩格看不出來
-            delay(if (nq >= 3) 120 else 66)
+            // 面板上的光正在移動：馬上接著烘下一張（不然光是一段一段跳過去的）
+            val lightMoving = wanted?.let { it.lx != r.lx } == true
+            delay(if (lightMoving) 1 else if (nq >= 3) 120 else 66)
         }
     }
 
@@ -380,6 +382,9 @@ private class GlassBake(private val backdrop: GlassBackdrop, private val edge: B
                         val refl = 255f * fres * env; val tr = 1f - fres
                         rr = rr * tr + refl; gg = gg * tr + refl; bb = bb * tr + refl
                     }
+                    // 抖色：寫成 8 位元之前加不到一階的規則噪點，大面積的緩漸層不會斷成一條一條
+                    val dn = (((x * 5 + y * 11) and 15) + .5f) / 16f
+                    rr += dn; gg += dn; bb += dn
                     val ri = if (rr < 0f) 0 else if (rr > 255f) 255 else rr.toInt()
                     val gi = if (gg < 0f) 0 else if (gg > 255f) 255 else gg.toInt()
                     val bi = if (bb < 0f) 0 else if (bb > 255f) 255 else bb.toInt()

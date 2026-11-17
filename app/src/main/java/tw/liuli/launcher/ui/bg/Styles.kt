@@ -51,11 +51,14 @@ private class Scratch {
      * 每條光束＝同一張貼圖拉成不同的位置、寬度，顏色由畫筆給——56 條光束共用一張貼圖，
      * 不用每格為每一條各建一個五段漸層（各自一個著色器、一張漸層貼圖，還有一堆立刻丟掉的物件）。
      */
-    val beamTex: android.graphics.Bitmap = run {
+    val beamTex: Array<android.graphics.Bitmap> = Array(5) { k ->
+        // 第 k 張的亮度是 1／2^k：暗的光束用暗的貼圖、畫筆的透明度就能維持在 128～255 之間——
+        // 畫筆的透明度只有 8 位元，直接拿它表示很暗的光束（例如 13／255）的話，光束呼吸時亮度是一階一階跳的（一階 8%）
         val n = 64
         val bmp = android.graphics.Bitmap.createBitmap(2, n, android.graphics.Bitmap.Config.ALPHA_8)
         val rb = bmp.rowBytes
         val px = ByteArray(rb * n)
+        val amp = 1f / (1 shl k)
         for (i in 0 until n) {
             val t = (i + .5f) / n
             val a = when {
@@ -64,13 +67,14 @@ private class Scratch {
                 t < .7f -> 1f - (t - .5f) / .2f * .45f
                 else -> (1f - t) / .3f * .55f
             }
-            val v = (a.coerceIn(0f, 1f) * 255f + .5f).toInt().toByte()
+            val v = (a.coerceIn(0f, 1f) * amp * 255f + .5f).toInt().toByte()
             px[i * rb] = v; px[i * rb + 1] = v
         }
         bmp.copyPixelsFromBuffer(java.nio.ByteBuffer.wrap(px))
         bmp
     }
-    val beamPaint = android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG).apply {
+    // 反鋸齒：光束的左右邊緣可以落在像素中間（不開的話邊緣只能貼齊像素，背景又是降解析度畫的，光束飄移時會一次跳好幾個像素）
+    val beamPaint = android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG or android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
         xfermode = android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.ADD)
     }
     val beamRect = android.graphics.RectF()
@@ -1107,14 +1111,18 @@ private fun DrawScope.beams(st: BgState) {
         val span = H * (.55f + .45f * h4)
         val hOff = (h3 - .5f) * 80f
         // 同一張明暗輪廓貼圖、加法混合；顏色（含亮度）由畫筆給
-        sc.beamPaint.color = st.c(hOff, .93f, .59f, a).toArgb()
+        var k = 0; var ak = a
+        while (ak < .5f && k < 4) { ak *= 2f; k++ }
+        sc.beamPaint.color = st.c(hOff, .93f, .59f, ak).toArgb()
         sc.beamRect.set(x - w / 2, yc - span, x + w / 2, yc + span)
-        cv.drawBitmap(sc.beamTex, null, sc.beamRect, sc.beamPaint)
+        cv.drawBitmap(sc.beamTex[k], null, sc.beamRect, sc.beamPaint)
         // 寬的光帶中間加一條更亮的細芯
         if (w > 4f) {
-            sc.beamPaint.color = st.c(hOff, .6f, .8f, a * .42f).toArgb()
+            k = 0; ak = a * .42f
+            while (ak < .5f && k < 4) { ak *= 2f; k++ }
+            sc.beamPaint.color = st.c(hOff, .6f, .8f, ak).toArgb()
             sc.beamRect.set(x - w * .12f, yc - span * .8f, x + w * .12f, yc + span * .8f)
-            cv.drawBitmap(sc.beamTex, null, sc.beamRect, sc.beamPaint)
+            cv.drawBitmap(sc.beamTex[k], null, sc.beamRect, sc.beamPaint)
         }
     }
     vignette(.3f)

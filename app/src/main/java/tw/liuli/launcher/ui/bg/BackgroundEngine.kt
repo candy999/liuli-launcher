@@ -212,6 +212,7 @@ class BackgroundEngine {
     private val paceBuf = FloatArray(300)
     private var paceN = 0
     private var paceLastNs = 0L
+    private var atD = 0.0
     fun startPaceLog() { paceN = 0; paceLastNs = 0L; paceLeft = paceBuf.size }
     private fun pace(ns: Long) {
         if (paceLeft <= 0) return
@@ -539,7 +540,8 @@ class BackgroundEngine {
                     var measure = false
                     if (busy) {
                         wasBusy = true
-                        if (!forced && !blur && renderDiv < BUSY_DIV) renderDiv = BUSY_DIV // 降解析度立即生效
+                        // 每秒 60 格的樣式夠便宜，操作中不用降解析度（一降一升，細的光束看起來忽粗忽細）
+                        if (!forced && !blur && !fast && renderDiv < BUSY_DIV) renderDiv = BUSY_DIV // 降解析度立即生效
                     } else if (wasBusy) {
                         // 操作結束：重新量測，解析度之後逐檔拉回
                         wasBusy = false
@@ -556,7 +558,8 @@ class BackgroundEngine {
                     // 持續動畫的樣式（星空、深海、光束）與簡潔模式的彈跳點：追上目標也不停
                     done = step(t) && t > holdUntil && !style.ambient && !bounce
                     if (done) snapToTarget()
-                    if (lastAmbT != 0L) st.at += min(t - lastAmbT, 100L) / 1000f
+                    // 累加用雙精度（單精度一路加上去，幾個小時後每一格加的量會被捨入吃掉一部分，流動就不均勻）
+                    if (lastAmbT != 0L) { atD += min(t - lastAmbT, 100L) / 1000.0; st.at = atD.toFloat() }
                     lastAmbT = t
                     st.nowMs = t
                     st.record(t)
@@ -616,12 +619,27 @@ class BackgroundEngine {
                     val now = android.os.SystemClock.uptimeMillis()
                     // ── 每秒 60 格：這個樣式一幀夠便宜就升上去（優先於升解析度——流暢比清楚重要）；跟不上就退回 30 格，退避時間加倍 ──
                     if (fast) {
+                        if (!debugNoFast && slow && now - lastUpgradeAt < 3000 && div < MAX_DIV) {
+                            // 剛升完解析度就跟不上：解析度退回去、過一陣子再試，60 格留著
+                            div++; learnedDiv[si] = div; renderDiv = div; skipMeasure = 2; slowWins = 0
+                            upBackoff = min(upBackoff * 2, MAX_BACKOFF_MS); upBlockedUntil = now + upBackoff
+                            continue
+                        }
                         if (debugNoFast || (slow && (++slowWins >= 2 || verySlow))) {
                             slowWins = 0; fast = false; fastOk[si] = false
                             fastBlockedUntil = now + fastBackoff; fastBackoff = min(fastBackoff * 2, 120_000L)
                             interval = INTERVALS[iv]; bgFps = (1000f / interval + .5f).toInt(); skipMeasure = 2
                             Log.i(TAG, "${style.id} 60->30fps lat=${lat.toInt()}ms gap=${avg.toInt()}ms")
-                        } else if (!slow) slowWins = 0
+                        } else if (!slow) {
+                            slowWins = 0
+                            // 60 格還有餘裕：解析度一檔一檔升回去（推估付得起才升）
+                            if (div > 1 && lat >= 0f && lat * scaleCost(div, div - 1) <= interval * LAT_UP && now >= upBlockedUntil) {
+                                if (++fastWins >= 2) {
+                                    fastWins = 0; div--; learnedDiv[si] = div; renderDiv = div; skipMeasure = 2; lastUpgradeAt = now
+                                    Log.i(TAG, "${style.id} 60fps div ${div + 1}->$div lat=${lat.toInt()}ms")
+                                }
+                            } else fastWins = 0
+                        }
                         continue
                     }
                     if (!debugNoFast && iv == 0 && checkDivFrom == 0f && !slow && lat >= 0f && lat <= FAST_AFFORD && avg < interval * FAST_RATIO && now >= fastBlockedUntil) {

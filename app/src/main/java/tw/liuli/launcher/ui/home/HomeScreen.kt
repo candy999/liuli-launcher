@@ -173,8 +173,7 @@ fun HomeScreen(
         if (!settings.geekMode || !active || !tw.liuli.launcher.AppForeground.resumed) return@LaunchedEffect
         while (true) {
             runCatching { geekSampler.sample() }.onSuccess { geekStats.value = it }
-            // 弱 GPU 的電視 CPU 也弱：儀表列每更新一次，UI 執行緒要花 30～50ms 重排二十幾段文字，改成兩秒一次
-            delay(if (tw.liuli.launcher.geek.WeakGpu.value) 2000 else 1000)
+            delay(1000)
         }
     }
     DisposableEffect(Unit) { onDispose { geekSampler.close() } }
