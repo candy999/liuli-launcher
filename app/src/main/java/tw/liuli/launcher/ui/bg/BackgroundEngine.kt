@@ -206,6 +206,7 @@ class BackgroundEngine {
     private var paceN = 0
     private var paceLastNs = 0L
     private var atD = 0.0
+    private var coldStart = true
     fun startPaceLog() { paceN = 0; paceLastNs = 0L; paceLeft = paceBuf.size }
     private fun pace(ns: Long) {
         if (paceLeft <= 0) return
@@ -482,6 +483,10 @@ class BackgroundEngine {
             var fast = fastOk[si] && !debugNoFast && !forced && iv == 0
             if (fast) interval = FAST_INTERVAL
             var fastUp = 0
+            var fpsDrops = 0
+            // 剛啟動的前幾秒（載入 App 清單、圖示、第一次烘玻璃）每一幀都慢，不拿來決定檔位
+            val evalFrom = android.os.SystemClock.uptimeMillis() + if (coldStart) 7000L else 0L
+            coldStart = false
             bgFps = (1000f / interval + .5f).toInt()
             if (!blurOn) renderDiv = if (forced) debugDiv else div // 降解析度立即生效（在動，看不出切換）
             if (forced) interval = 16.7f * debugEvery.coerceIn(1, 8)
@@ -595,7 +600,8 @@ class BackgroundEngine {
                     frame++
                 }
                 drainLatency()
-                if (!forced && !blurOn && !ramping && renderDiv == div && (latN >= LAT_WINDOW || winN >= ADAPT_WINDOW * 2)) {
+                if (android.os.SystemClock.uptimeMillis() < evalFrom) { winSum = 0f; winN = 0; latN = 0 }
+                else if (!forced && !blurOn && !ramping && renderDiv == div && (latN >= LAT_WINDOW || winN >= ADAPT_WINDOW * 2)) {
                     // 總耗時（中位數）：沒有排隊時就是這一幀真正的成本；超過更新間隔＝開始排隊
                     val lat = if (latN > 0) median(latBuf, latN) else -1f
                     val avg = if (winN > 0) winSum / winN else interval
@@ -661,6 +667,8 @@ class BackgroundEngine {
                                 fastWins = 0
                                 if (++slowWins >= 2 || verySlow) {
                                     slowWins = 0
+                                    // 「卡在 CPU」的判斷可能是量測時剛好被別的事拖慢而誤判：靠降更新率降了兩次還是慢，就改回降解析度再試
+                                    if (cpuBound[si] && ++fpsDrops >= 2 && div < MAX_DIV) { cpuBound[si] = false; fpsDrops = 0 }
                                     if (!cpuBound[si] && div < MAX_DIV) {
                                         div++
                                         checkDivFrom = cost
