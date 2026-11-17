@@ -13,9 +13,11 @@ object PerfProbe {
     var noHome by mutableStateOf(false)
     var noGlass by mutableStateOf(false)
     var noTiles by mutableStateOf(false)
+    /** 量測用：弱 GPU 上抽屜開著時不凍結背景（probe:freeze）。 */
+    var noFreeze by mutableStateOf(false)
 
     fun apply(arg: String) {
         val f = arg.split(',').map { it.trim() }.toSet()
-        noBg = "bg" in f; noHome = "home" in f; noGlass = "glass" in f; noTiles = "tiles" in f
+        noBg = "bg" in f; noHome = "home" in f; noGlass = "glass" in f; noTiles = "tiles" in f; noFreeze = "freeze" in f
     }
 }
