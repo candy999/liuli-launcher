@@ -1062,6 +1062,26 @@ fun HomeScreen(
                 }
                 "drawer" -> { sheet = null; exitingSheet = null; drawerOpen = true }
                 "fakeapps" -> fakeApps = (arg.toIntOrNull() ?: 0).coerceIn(0, 200)
+                // 量測用（adb）：ACTION=shot:名稱 把目前的視窗畫面存成 PNG（Android/data/tw.liuli.launcher/files/shots/名稱.png）。
+                // 直接拷貝 App 自己的畫面緩衝，不靠系統截圖（模擬器視窗縮小時 screencap 只會拿到黑畫面）
+                "shot" -> (context as? android.app.Activity)?.window?.let { win ->
+                    val v = win.decorView
+                    if (v.width > 0 && v.height > 0) {
+                        val bmp = android.graphics.Bitmap.createBitmap(v.width, v.height, android.graphics.Bitmap.Config.ARGB_8888)
+                        android.view.PixelCopy.request(win, bmp, { r ->
+                            if (r == android.view.PixelCopy.SUCCESS) Thread {
+                                runCatching {
+                                    val dir = java.io.File(context.getExternalFilesDir(null), "shots").apply { mkdirs() }
+                                    java.io.File(dir, arg.ifBlank { "shot" } + ".png").outputStream().use {
+                                        bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
+                                    }
+                                    android.util.Log.i("LiuliUi", "shot saved: $arg")
+                                }
+                                bmp.recycle()
+                            }.start() else android.util.Log.w("LiuliUi", "shot failed: $r")
+                        }, android.os.Handler(android.os.Looper.getMainLooper()))
+                    }
+                }
                 "probe" -> tw.liuli.launcher.ui.bg.PerfProbe.apply(arg)
                 "clock" -> settings.updateClock(on = arg == "1" || arg == "on")
             }
