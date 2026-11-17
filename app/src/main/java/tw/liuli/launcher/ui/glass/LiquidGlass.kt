@@ -183,7 +183,8 @@ private class GlassBake(private val backdrop: GlassBackdrop, private val edge: B
             val r = wanted ?: continue
             if (r.same(bakedFor)) continue
             val area = r.w * r.h
-            val nq = when { area <= 40_000f -> 1; area <= 300_000f -> 2; area <= 900_000f -> 3; else -> 4 }
+            // 越大片烘得越粗（中間本來就是模糊的背景，粗一點看不出來）：抽屜 1880×976 用 ÷6，約 5 萬個像素
+            val nq = when { area <= 40_000f -> 1; area <= 160_000f -> 2; area <= 500_000f -> 3; area <= 1_000_000f -> 4; else -> 6 }
             val bw = max(1, (r.w / nq + .999f).toInt()); val bh = max(1, (r.h / nq + .999f).toInt())
             if (buf.size != bw * bh) buf = IntArray(bw * bh)
             val out = buf
@@ -202,7 +203,7 @@ private class GlassBake(private val backdrop: GlassBackdrop, private val edge: B
             bakedFor = r
             tick++
             // 背景在動時每秒最多烘十幾次：玻璃後面是模糊的背景，慢一兩格看不出來
-            delay(60)
+            delay(if (nq >= 3) 120 else 66)
         }
     }
 
@@ -212,8 +213,8 @@ private class GlassBake(private val backdrop: GlassBackdrop, private val edge: B
             if (src.isEmpty() || sw < 2 || sh < 2) return
             val hw = r.w / 2f; val hh = r.h / 2f
             val short = min(r.w, r.h)
-            // 折射帶的基本厚度：短邊的 14%，夾在 4～13dp
-            val band0 = if (edge) (short * .14f).coerceIn(4f * r.density, 13f * r.density) else 0f
+            // 折射帶的基本厚度：短邊的 17%，夾在 5～16dp
+            val band0 = if (edge) (short * .17f).coerceIn(5f * r.density, 16f * r.density) else 0f
             val lineW = 1.3f * r.density
             val mid = r.tint + .10f * r.hl
             val top = 1f - (1f - mid) * (1f - (.06f + .06f * r.hl))
@@ -248,7 +249,7 @@ private class GlassBake(private val backdrop: GlassBackdrop, private val edge: B
                             if (e > 1f) e = 1f
                             e *= e
                             // 取樣位置往玻璃外面偏：周圍的顏色被彎進來
-                            val shift = e * band * 3.2f
+                            val shift = e * band * 5.5f
                             du = nx * shift * sx; dv = ny * shift * sy
                             u += du; v += dv
                         }
@@ -268,8 +269,8 @@ private class GlassBake(private val backdrop: GlassBackdrop, private val edge: B
                     var white = g
                     if (e > 0f) {
                         // 色散：紅色偏得更遠、藍色偏得少一點
-                        val ur = u + du * .55f; val vr = v + dv * .55f
-                        val ub = u - du * .55f; val vb = v - dv * .55f
+                        val ur = u + du * .9f; val vr = v + dv * .9f
+                        val ub = u - du * .9f; val vb = v - dv * .9f
                         run {
                             val uu = if (ur < 0f) 0f else if (ur > maxX) maxX else ur
                             val vv = if (vr < 0f) 0f else if (vr > maxY) maxY else vr
@@ -288,9 +289,10 @@ private class GlassBake(private val backdrop: GlassBackdrop, private val edge: B
                         }
                         // 折射帶比中間亮一點、顏色濃一點（厚玻璃邊緣把光聚起來）
                         val gray = (cr * 3 + cg * 6 + cb) / 10
-                        val sat = 1f + .55f * e
+                        val el = sqrt(e)   // 線性的邊緣程度：顏色、亮度的變化比位移寬一點，折射帶看得出是一整圈
+                        val sat = 1f + 1.0f * el
                         cr = (gray + (cr - gray) * sat).toInt(); cg = (gray + (cg - gray) * sat).toInt(); cb = (gray + (cb - gray) * sat).toInt()
-                        white += .07f * e
+                        white += .06f * el
                         // 最外緣的受光亮線：左上最亮、右下次之
                         if (d > -lineW * 1.6f) {
                             val k = (1f + d / (lineW * 1.6f)).coerceIn(0f, 1f)
