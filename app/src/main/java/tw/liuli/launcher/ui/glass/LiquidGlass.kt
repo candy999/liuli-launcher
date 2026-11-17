@@ -85,6 +85,13 @@ fun Modifier.liquidGlass(
     val bake = remember(backdrop.image) { GlassBake(backdrop, edge) }
     LaunchedEffect(bake) { bake.run() }
     val matrix = remember { android.graphics.Matrix() }
+    val rough = remember(backdrop.image) {
+        backdrop.image?.let { img ->
+            android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG or android.graphics.Paint.FILTER_BITMAP_FLAG).apply {
+                shader = android.graphics.BitmapShader(img.asAndroidBitmap(), android.graphics.Shader.TileMode.CLAMP, android.graphics.Shader.TileMode.CLAMP)
+            }
+        }
+    }
 
     this
         .onGloballyPositioned {
@@ -131,8 +138,16 @@ fun Modifier.liquidGlass(
                         if (bot > 0f) { c.save(); c.clipRect(0f, size.height - bot, size.width, size.height); c.drawPath(androidPath, paint); c.restore() }
                     } else c.drawPath(androidPath, paint)
                 }
-                // 第一張還沒烘好（剛出現的那一兩格）：先用半透明的深色頂著
-                else drawPath(path, Color(0x66202432))
+                // 第一張還沒烘好（剛出現的那一兩格）：直接貼霧化的背景小圖＋同樣的白霧——和烘好的中間幾乎一樣，只差邊緣那一圈，
+                // 不會先看到一塊深色的板子再跳成玻璃
+                else if (rough != null) drawIntoCanvas {
+                    val img = backdrop.image!!
+                    matrix.setScale(backdrop.screen.width / img.width, backdrop.screen.height / img.height)
+                    matrix.postTranslate(-origin.x, -origin.y)
+                    rough.shader.setLocalMatrix(matrix)
+                    it.nativeCanvas.drawPath(androidPath, rough)
+                    drawPath(path, Color.White.copy(alpha = (tint + .05f).coerceIn(0f, 1f)))
+                }
             }
         }
 }

@@ -196,6 +196,22 @@ fun HomeScreen(
     }
     // 常用列第一次出現：一個一個淡入浮上（和面板、抽屜同一套出場語言）
     val dockReveal = remember { Animatable(0f) }
+    // 冷啟動的出場：背景開始從焦點擴散（＝玻璃取樣的背景已經是真的、不是黑的）之後，時鐘 → 天氣 → 右上角圓鈕 → 訊號源 → 儀表列
+    // 一個一個淡入浮上。在那之前這些都不顯示——不然會先看到一塊塊還沒算好的玻璃貼在全黑的畫面上
+    val entrance = remember { Animatable(0f) }
+    val bgStarted = engine.revealFrom != null
+    LaunchedEffect(bgStarted, appsLoaded) {
+        if (bgStarted && appsLoaded && entrance.value == 0f) {
+            delay(160)   // 讓每一片玻璃先烘好第一張
+            entrance.animateTo(ENTRANCE_MS, tween(ENTRANCE_MS.toInt(), easing = androidx.compose.animation.core.LinearEasing))
+        }
+    }
+    fun Modifier.enter(order: Int): Modifier = graphicsLayer {
+        val a = tw.liuli.launcher.ui.components.rowReveal(entrance.value, order, stagger = 90f, fade = 340f)
+        compositingStrategy = CompositingStrategy.ModulateAlpha
+        alpha = a
+        translationY = (1f - a) * 12.dp.toPx()
+    }
     LaunchedEffect(appsLoaded) {
         if (appsLoaded) dockReveal.animateTo(DOCK_REVEAL_MS, tween(DOCK_REVEAL_MS.toInt(), easing = androidx.compose.animation.core.LinearEasing))
     }
@@ -1111,6 +1127,8 @@ fun HomeScreen(
                     val n = (parts.getOrNull(1)?.toIntOrNull() ?: 24).coerceIn(1, 60)
                     // 後續動作 key:23＝送一個按鍵給自己（例如在面板裡按確定進下一層）
                     val follow = parts.getOrNull(2).orEmpty()
+                    // 第四個參數：每幾格拷貝一張（冷啟動要看好幾秒，例如 burst:cold,60,,5）
+                    val every = (parts.getOrNull(3)?.toIntOrNull() ?: 1).coerceIn(1, 30)
                     val v = win.decorView
                     val frames = arrayOfNulls<android.graphics.Bitmap>(n)
                     val handler = android.os.Handler(android.os.Looper.getMainLooper())
@@ -1131,7 +1149,9 @@ fun HomeScreen(
                                 }
                             }.start()
                         }, handler)
-                        android.view.Choreographer.getInstance().postFrameCallback { grab(i + 1) }
+                        var left = every
+                        fun next() { android.view.Choreographer.getInstance().postFrameCallback { if (--left <= 0) grab(i + 1) else next() } }
+                        next()
                     }
                     grab(0)
                     when (follow) {
@@ -1252,6 +1272,7 @@ fun HomeScreen(
                             if (cur != null && e.nativeKeyEvent.repeatCount == 0 && movingPkg == null && !picking) scope.launch {
                                 androidx.compose.runtime.withFrameNanos { }
                                 androidx.compose.runtime.withFrameNanos { }
+                                android.util.Log.d("LiuliUi", "bump? same=${ji.current === cur} gen=${ji.gen == g} drawer=${drawerOpen == wasDrawer}")
                                 if (ji.current === cur && ji.gen == g && drawerOpen == wasDrawer && minimal == wasMinimal) cur.bump(dx, dy)
                             }
                         }
@@ -1293,7 +1314,7 @@ fun HomeScreen(
                         sources = sources,
                         firstRequester = firstInput,
                         onSwitch = { src -> if (!TvSources.open(context, src)) toast("無法切換到 ${src.label}") },
-                        modifier = Modifier.padding(start = 48.dp, top = 232.dp),
+                        modifier = Modifier.padding(start = 48.dp, top = 232.dp).enter(3),
                     )
                 }
 
@@ -1414,11 +1435,11 @@ fun HomeScreen(
 
             // 第 3 層：固定介面（時鐘、天氣、右上按鈕、抽屜提示）——在黑框之上，不會被遮住
             if (!tw.liuli.launcher.ui.bg.PerfProbe.noHome) Box(recedeLayer) {
-                TodayGroup(home, todayReq, openCalendar, Modifier.padding(start = 28.dp, top = 22.dp))
-                WeatherGroup(home, weatherReq, openWeather, Modifier.align(Alignment.TopEnd).padding(end = 96.dp, top = 30.dp))
+                TodayGroup(home, todayReq, openCalendar, Modifier.padding(start = 28.dp, top = 22.dp).enter(0))
+                WeatherGroup(home, weatherReq, openWeather, Modifier.align(Alignment.TopEnd).padding(end = 96.dp, top = 30.dp).enter(1))
                 // 右上角：網路狀態 + 設定，直向疊放
                 Column(
-                    Modifier.align(Alignment.TopEnd).padding(end = 28.dp, top = 34.dp),
+                    Modifier.align(Alignment.TopEnd).padding(end = 28.dp, top = 34.dp).enter(2),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
@@ -1432,7 +1453,7 @@ fun HomeScreen(
                 }
 
                 // 技術宅模式：常用列下方的系統儀表列（不拿焦點，只是看的）
-                if (settings.geekMode) GeekDashboardLive(geekStats, Modifier.padding(start = 48.dp, end = 48.dp, top = 434.dp))
+                if (settings.geekMode) GeekDashboardLive(geekStats, Modifier.padding(start = 48.dp, end = 48.dp, top = 434.dp).enter(6))
 
                 // 抽屜提示
                 Column(
@@ -1534,6 +1555,9 @@ private fun minimalIdleText(sec: Int) = when {
     sec < 60 -> "閒置 $sec 秒"
     else -> "閒置 ${sec / 60} 分鐘"
 }
+
+/** 冷啟動出場的總時間（毫秒）：7 個順位、每個間隔 90ms、淡入 340ms。 */
+private const val ENTRANCE_MS = 90f * 7 + 340f
 
 /** 常用列第一次出現的總時間（毫秒）：每個間隔 55ms、淡入 280ms。 */
 private const val DOCK_REVEAL_MS = 55f * 12 + 280f
