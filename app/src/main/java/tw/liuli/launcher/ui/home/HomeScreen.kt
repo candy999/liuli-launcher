@@ -133,6 +133,7 @@ fun HomeScreen(
     var dock by remember { mutableStateOf<List<String>>(emptyList()) }
     var hidden by remember { mutableStateOf(hiddenStore.load()) }
     var reloadKey by remember { mutableIntStateOf(0) }
+    var fakeApps by remember { mutableIntStateOf(0) }
     var sheet by remember { mutableStateOf<OpenSheet?>(null) }
     var exitingSheet by remember { mutableStateOf<SheetSpec?>(null) }
     // 返回上一層：從一個面板進到另一個面板時，記下上一層（與當時焦點所在的列）
@@ -1057,6 +1058,7 @@ fun HomeScreen(
                     pickerOrigin = settings.bgHue to settings.bgSat; sheet = null; picking = true
                 }
                 "drawer" -> { sheet = null; exitingSheet = null; drawerOpen = true }
+                "fakeapps" -> fakeApps = (arg.toIntOrNull() ?: 0).coerceIn(0, 200)
                 "probe" -> tw.liuli.launcher.ui.bg.PerfProbe.apply(arg)
                 "clock" -> settings.updateClock(on = arg == "1" || arg == "on")
             }
@@ -1106,7 +1108,12 @@ fun HomeScreen(
         overlaySeen = true
     }
 
-    val visibleApps = remember(apps, hidden) { apps.filter { it.packageName !in hidden } }
+    // 量測用（adb）：ACTION=fakeapps:48 在所有 App 後面接上 48 個假的 App（複製現有的 App、改名），測抽屜捲動；fakeapps:0 拿掉。不存任何設定，重開就沒了
+    val visibleApps = remember(apps, hidden, fakeApps) {
+        val real = apps.filter { it.packageName !in hidden }
+        if (fakeApps <= 0 || real.isEmpty()) real
+        else real + List(fakeApps) { i -> real[i % real.size].let { a -> a.copy(packageName = "fake.$i.${a.packageName}", label = "${a.label} ${i + 1}") } }
+    }
     val dockApps = remember(apps, dock) { dock.mapNotNull { pkg -> apps.firstOrNull { it.packageName == pkg } } }
     val recede = animateFloatAsState(if (drawerOpen || sheet != null || picking) 1f else 0f, tween(380), label = "recede")
 
