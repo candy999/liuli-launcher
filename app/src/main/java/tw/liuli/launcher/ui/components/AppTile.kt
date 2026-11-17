@@ -35,13 +35,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import tw.liuli.launcher.data.AppEntry
 import tw.liuli.launcher.ui.theme.Dimens
+import tw.liuli.launcher.ui.glass.jellyFocus
 import tw.liuli.launcher.ui.theme.GText
 import tw.liuli.launcher.ui.theme.Ink
 
 /**
  * App 圖塊：16:9 橫幅（沒有橫幅的手機版 App 置中顯示圖示）。
  * 焦點效果全部在圖層階段完成（只改圖層屬性，不重畫內容）：微微放大、陰影、左上角一抹受光；
- * 焦點的玻璃外框由外層的 GlassFocusCapsule 畫（一顆外框在磚之間滑動）。
+ * 整塊磚自己像布丁一樣變形（jellyFocus），邊緣亮一圈細玻璃邊。
  */
 @Composable
 fun AppTile(
@@ -56,21 +57,20 @@ fun AppTile(
     extra: Modifier = Modifier,
     /** 出場淡入的透明度（0～1，在繪製階段讀取）。 */
     reveal: () -> Float = { 1f },
-    /** 放在磚最外面（放大的圖層之外）的修飾：玻璃焦點用它量磚原本的位置。 */
-    outer: Modifier = Modifier,
 ) {
     val own = remember { FocusRequester() }
     val req = requester ?: own
     val focus = rememberFocusAnim()
+    val jelly = tw.liuli.launcher.ui.glass.rememberJelly()
     val tileShape = RoundedCornerShape(Dimens.TileRadius)
 
     Column(Modifier.width(width), horizontalAlignment = Alignment.CenterHorizontally) {
         Box(
             Modifier
-                .then(outer)
                 .fillMaxWidth()
                 .aspectRatio(16f / 9f)
-                .focusScale(focus, tw.liuli.launcher.ui.home.TILE_FOCUS_SCALE)
+                // 焦點：整塊磚微微放大、像布丁一樣被帶一下再彈回（只改圖層）
+                .jellyFocus(jelly, focus, tw.liuli.launcher.ui.home.TILE_FOCUS_SCALE)
                 // 焦點陰影：畫在淡入層「外面」（淡入層暫時是一張和磚同大的圖，陰影畫在裡面會被切掉＝破圖）。
                 // 陰影在磚的正下方，磚半透明時會透出底下整片陰影（像一個方框），所以等磚幾乎不透明（90% 以上）才浮現
                 .graphicsLayer {
@@ -86,7 +86,7 @@ fun AppTile(
                     compositingStrategy = if (a < .999f) CompositingStrategy.Offscreen else CompositingStrategy.Auto
                 }
                 .then(extra)
-                .focusTarget(focus, req, onFocused, onClick, onLongClick = { onLongClick(req) })
+                .focusTarget(focus, req, onFocused, { jelly.press(); onClick() }, onLongClick = { onLongClick(req) })
                 .clip(tileShape)
                 .background(Color(0xFF1B1E26)),
         ) {
@@ -115,6 +115,8 @@ fun AppTile(
                         )
                     },
             )
+            // 焦點時磚的邊緣一圈受光的細玻璃邊（靜態內容，只改透明度）
+            tw.liuli.launcher.ui.glass.GlassLit(focus, Dimens.TileRadius, Modifier.fillMaxSize(), fill = false)
             if (!app.isTvApp) {
                 GText(
                     "手機版",

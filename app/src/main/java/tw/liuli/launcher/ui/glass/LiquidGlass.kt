@@ -68,6 +68,8 @@ fun Modifier.liquidGlass(
     slide: () -> Offset = { Offset.Zero },
     /** true＝動畫中，不更新取樣位置（面板同時在縮放時，位置每格都在變；背景很模糊，凍結在停下時的位置看不出差別）。 */
     frozen: () -> Boolean = { false },
+    /** 邊緣的折射與色散（見 [EdgeGlass]）。純資訊用的小面板可以關掉省一點繪圖。 */
+    edge: Boolean = true,
 ): Modifier = composed {
     val backdrop = LocalGlassBackdrop.current
     var origin by remember { mutableStateOf(Offset.Zero) }
@@ -94,6 +96,7 @@ fun Modifier.liquidGlass(
     // 背景＋白霧＋淡光合成一個著色器、一次填色（大面積玻璃如抽屜，弱 GPU 少填一整層）。
     // 只在位置、大小或亮度改變時重建；靜止時不配置任何物件。
     val oneShot = remember(backdrop.image) { OneShotGlass() }
+    val edgeGlass = remember(backdrop.image, edge) { if (edge) EdgeGlass(backdrop.image) else null }
 
     this
         .onGloballyPositioned {
@@ -109,6 +112,7 @@ fun Modifier.liquidGlass(
             val androidPath = path.asAndroidPath()
             val blurred = backdrop.image
             val radiusPx = (shape as? RoundedCornerShape)?.topStart?.toPx(size, this) ?: 0f
+            edgeGlass?.layout(outline, size, density)
 
             onDrawBehind {
                 if (tw.liuli.launcher.ui.bg.PerfProbe.noGlass) return@onDrawBehind
@@ -124,7 +128,10 @@ fun Modifier.liquidGlass(
                         // 貼圖座標＝（玻璃在畫面上的位置＋本地座標）× 小圖縮放；白霧與淡光用 SCREEN 合成進同一個著色器：
                         // 白色 α 疊在 c 上＝1-(1-c)(1-α)＝screen(c, α)，結果和分開畫兩層相同
                         oneShot.prepare(wall, matrix, origin, size, sx, sy, mistTop(tint, hl), mistOf(tint, hl))
-                        drawIntoCanvas { it.nativeCanvas.drawPath(androidPath, wall) }
+                        drawIntoCanvas {
+                            it.nativeCanvas.drawPath(androidPath, wall)
+                            edgeGlass?.draw(it.nativeCanvas, origin, size, sx, sy, refract = true)
+                        }
                         return@onDrawBehind
                     }
                 } else {
@@ -139,6 +146,10 @@ fun Modifier.liquidGlass(
                         0.6f to Color.White.copy(alpha = mistOf(tint, hl)),
                     ),
                 )
+                // 有著色器折射的機器（Android 13+）折射已經在本體裡，這裡只補色散與邊線
+                if (blurred != null && backdrop.screen.width > 0f) drawIntoCanvas {
+                    edgeGlass?.draw(it.nativeCanvas, origin, size, blurred.width / backdrop.screen.width, blurred.height / backdrop.screen.height, refract = lens == null)
+                }
             }
         }
 }
@@ -150,6 +161,94 @@ private fun mistOf(tint: Float, hl: Float) = tint + 0.10f * hl
 private fun mistTop(tint: Float, hl: Float): Float {
     val glow = 0.06f + 0.06f * hl
     return 1f - (1f - mistOf(tint, hl)) * (1f - glow)
+}
+
+/**
+ * 液態玻璃的邊緣（不靠 RuntimeShader，Android 9 的弱 GPU 也畫得動）：
+ * - 折射：沿著邊緣往內一圈，貼的是「往玻璃中心偏移過」的背景（像厚玻璃邊緣把後面的東西彎進來），再亮一點點；
+ *   內側再疊一圈半透明的過渡，不會是一條硬邊。
+ * - 色散：最外緣兩條很細的色邊——偏紅的往左上錯開一點、偏藍的往右下錯開一點（紅藍分離）。
+ * - 最上面一條受光的細白線。
+ * 全部是幾條圓角矩形的描邊，跟著玻璃本體一起畫在同一份顯示清單裡：只有背景小圖更新或大小改變時才重畫，
+ * 焦點動畫（只改圖層屬性）期間不會重畫。
+ */
+private class EdgeGlass(image: ImageBitmap?) {
+    private val band = image?.let { img ->
+        android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG or android.graphics.Paint.FILTER_BITMAP_FLAG).apply {
+            style = android.graphics.Paint.Style.STROKE
+            shader = BitmapShader(img.asAndroidBitmap(), android.graphics.Shader.TileMode.CLAMP, android.graphics.Shader.TileMode.CLAMP)
+        }
+    }
+    private val m = android.graphics.Matrix()
+    private val stroke = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { style = android.graphics.Paint.Style.STROKE }
+    private val gm = android.graphics.Matrix()
+    // 漸層建在 0～1 的單位正方形（左上→右下），用矩陣拉到玻璃大小
+    private fun grad(vararg c: Int) = android.graphics.LinearGradient(
+        0f, 0f, 1f, 1f, c, null, android.graphics.Shader.TileMode.CLAMP,
+    )
+    private val red = grad(0xC0FF5A46.toInt(), 0x30FF8A5A, 0x66FF6A9A)
+    private val blue = grad(0x6652C8FF, 0x303C8CFF, 0xC03C7CFF.toInt())
+    private val white = grad(0xB8FFFFFF.toInt(), 0x24FFFFFF, 0x66FFFFFF)
+    private val glow = grad(0x2EFFFFFF, 0x0CFFFFFF, 0x1EFFFFFF)
+
+    private val pBand = android.graphics.Path(); private val pSoft = android.graphics.Path()
+    private val pRed = android.graphics.Path(); private val pBlue = android.graphics.Path(); private val pHair = android.graphics.Path()
+    private var bw = 0f; private var cw = 0f; private var hw = 0f
+
+    fun layout(outline: androidx.compose.ui.graphics.Outline, size: Size, density: Float) {
+        val rr = when (outline) {
+            is androidx.compose.ui.graphics.Outline.Rounded -> outline.roundRect
+            else -> androidx.compose.ui.geometry.RoundRect(0f, 0f, size.width, size.height, 0f, 0f)
+        }
+        val short = minOf(size.width, size.height)
+        bw = (short * .15f).coerceIn(4.5f * density, 11f * density)
+        cw = 1.5f * density; hw = 1f * density
+        val d = .9f * density
+        fun path(p: android.graphics.Path, inset: Float, dx: Float, dy: Float) {
+            fun r(v: Float) = (v - inset).coerceAtLeast(0f)
+            p.rewind()
+            p.addRoundRect(
+                android.graphics.RectF(inset + dx, inset + dy, size.width - inset + dx, size.height - inset + dy),
+                floatArrayOf(
+                    r(rr.topLeftCornerRadius.x), r(rr.topLeftCornerRadius.y), r(rr.topRightCornerRadius.x), r(rr.topRightCornerRadius.y),
+                    r(rr.bottomRightCornerRadius.x), r(rr.bottomRightCornerRadius.y), r(rr.bottomLeftCornerRadius.x), r(rr.bottomLeftCornerRadius.y),
+                ),
+                android.graphics.Path.Direction.CW,
+            )
+        }
+        path(pBand, bw / 2f, 0f, 0f)
+        path(pSoft, bw * 1.3f, 0f, 0f)
+        path(pRed, cw / 2f, -d, -d)
+        path(pBlue, cw / 2f, d, d)
+        path(pHair, hw / 2f, 0f, 0f)
+    }
+
+    fun draw(c: android.graphics.Canvas, origin: Offset, size: Size, sx: Float, sy: Float, refract: Boolean) {
+        if (bw <= 0f) return
+        gm.setScale(size.width, size.height)
+        if (refract && band != null) {
+            // 邊緣那一圈取樣的位置往中心偏移 shift（越厚的邊偏越多）：等於把背景以玻璃中心為準放大一點再貼上去
+            val shift = bw * 2.6f
+            val kx = 1f / (1f - (shift / (size.width / 2f)).coerceAtMost(.45f))
+            val ky = 1f / (1f - (shift / (size.height / 2f)).coerceAtMost(.45f))
+            m.setScale(1f / sx, 1f / sy)
+            m.postTranslate(-origin.x, -origin.y)
+            m.postScale(kx, ky, size.width / 2f, size.height / 2f)
+            band.shader.setLocalMatrix(m)
+            band.strokeWidth = bw * .6f; band.alpha = 120
+            c.drawPath(pSoft, band)
+            band.strokeWidth = bw; band.alpha = 255
+            c.drawPath(pBand, band)
+            glow.setLocalMatrix(gm); stroke.shader = glow; stroke.strokeWidth = bw
+            c.drawPath(pBand, stroke)
+        }
+        red.setLocalMatrix(gm); stroke.shader = red; stroke.strokeWidth = cw
+        c.drawPath(pRed, stroke)
+        blue.setLocalMatrix(gm); stroke.shader = blue
+        c.drawPath(pBlue, stroke)
+        white.setLocalMatrix(gm); stroke.shader = white; stroke.strokeWidth = hw
+        c.drawPath(pHair, stroke)
+    }
 }
 
 /**

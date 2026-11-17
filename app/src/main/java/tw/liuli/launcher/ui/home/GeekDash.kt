@@ -137,7 +137,7 @@ private fun Modifier.spark(data: List<Float>, lo: Float, hi: Float): Modifier = 
 private fun RowScope.Card(weight: Float, mod: Modifier = Modifier, content: @Composable () -> Unit) {
     val shape = RoundedCornerShape(16.dp)
     Box(
-        Modifier.weight(weight).fillMaxHeight().liquidGlass(shape).clip(shape).then(mod)
+        Modifier.weight(weight).fillMaxHeight().liquidGlass(shape, edge = false).clip(shape).then(mod)
             .padding(start = 10.dp, end = 10.dp, top = 5.dp),
     ) { content() }
 }
@@ -295,7 +295,7 @@ private fun FrameMetricsHook() {
 
 /** 火箭（齒輪正下方）：一鍵清理背景程式。跟齒輪同一種圓鈕，按下不做動畫（結果顯示在畫面中央）。 */
 @Composable
-fun RocketButton(requester: FocusRequester?, onLaunch: suspend () -> Unit, modifier: Modifier = Modifier, glass: tw.liuli.launcher.ui.glass.GlassFocusState? = null) {
+fun RocketButton(requester: FocusRequester?, onLaunch: suspend () -> Unit, modifier: Modifier = Modifier) {
     val scope = rememberCoroutineScope()
     var busy by remember { mutableStateOf(false) }
     RoundIconButton(
@@ -306,7 +306,6 @@ fun RocketButton(requester: FocusRequester?, onLaunch: suspend () -> Unit, modif
             scope.launch { try { onLaunch() } finally { busy = false } }
         },
         modifier = modifier,
-        glass = glass, glassKey = "rocket",
     )
 }
 
