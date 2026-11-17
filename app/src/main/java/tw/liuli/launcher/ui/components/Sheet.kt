@@ -70,6 +70,9 @@ data class SheetItem(
     val onFocus: (() -> Unit)? = null,
     /** 會即時變動的右側數值（在組合時讀取，狀態一變就跟著更新）；有值時取代 [detail]。 */
     val liveDetail: (() -> String)? = null,
+    /** 會即時變動的標題、說明（同 [liveDetail]，有值時取代 [label]／[subtitle]）。 */
+    val liveLabel: (() -> String)? = null,
+    val liveSubtitle: (() -> String)? = null,
     /** 可左右調整的數值列：左鍵 -1、右鍵 +1（按住會連續調整）。 */
     val onAdjust: ((Int) -> Unit)? = null,
     val action: () -> Unit,
@@ -265,23 +268,24 @@ private fun SheetRow(item: SheetItem, requester: FocusRequester?, onFocused: () 
         }
         Column(Modifier.weight(1f)) {
             GText(
-                item.label,
+                item.liveLabel?.invoke() ?: item.label,
                 size = 17.sp,
                 weight = if (item.selected) FontWeight.Medium else FontWeight.Normal,
                 color = if (onLight) Ink.OnLight else Ink.Primary,
             )
             // 長說明放在標題下方一行，不會擠壓標題
-            if (item.subtitle != null) {
+            val subtitle = item.liveSubtitle?.invoke() ?: item.subtitle
+            if (subtitle != null) {
                 Spacer(Modifier.height(2.dp))
                 GText(
-                    item.subtitle,
+                    subtitle,
                     size = 12.sp,
                     maxLines = 2,
                     color = if (onLight) Ink.OnLight.copy(alpha = 0.6f) else Ink.Tertiary,
                 )
             }
         }
-        val detail = item.liveDetail?.invoke() ?: item.detail
+        val detail = (item.liveDetail?.invoke() ?: item.detail)?.takeIf { it.isNotEmpty() }
         if (detail != null) {
             Spacer(Modifier.width(10.dp))
             GText(

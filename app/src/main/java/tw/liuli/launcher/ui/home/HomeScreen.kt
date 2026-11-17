@@ -70,6 +70,7 @@ import kotlinx.coroutines.launch
 import tw.liuli.launcher.adb.SelfAdb
 import tw.liuli.launcher.BuildConfigInfo
 import tw.liuli.launcher.MainActivity
+import tw.liuli.launcher.update.Updater
 import tw.liuli.launcher.context.Cities
 import tw.liuli.launcher.context.HomeContext
 import tw.liuli.launcher.data.AppEntry
@@ -272,6 +273,12 @@ fun HomeScreen(
     LaunchedEffect(Unit) {
         delay(3000)
         if (!initialFocusDone) { initialFocusDone = true; runCatching { firstDock.requestFocus() } }
+    }
+    // 剛從「軟體更新」裝好新版、這是第一次啟動：說一聲（等出場動畫跑完）
+    LaunchedEffect(Unit) {
+        val updated = Updater.consumeJustUpdated(context, BuildConfigInfo.versionName(context)) ?: return@LaunchedEffect
+        delay(1800)
+        android.widget.Toast.makeText(context, "已更新到 $updated", android.widget.Toast.LENGTH_LONG).show()
     }
     // ── 簡潔模式：只留左下角的時間、右下角的天氣，其他介面往下收起 ──
     // 進入：主畫面最上方再按上鍵，或閒置一段時間（設定 → 外觀）；離開：按方向鍵／確定／返回
@@ -1008,32 +1015,18 @@ fun HomeScreen(
         open(SheetSpec(
             "關於琉璃", "琉璃 Launcher：給 Google TV／Android TV 的主畫面。",
             listOf(
-                SheetItem("目前版本", version) { },
+                // 只有一列：檢查、下載進度、有新版、交給系統安裝、失敗重試，全部都在這一列按確定
                 SheetItem(
-                    "檢查更新", subtitle = "只看正式發布的版本；不會自動檢查或安裝",
-                    liveDetail = { tw.liuli.launcher.update.Updater.statusText(version) },
-                ) {
-                    // 只檢查（下載比對版本），安裝要另外按「安裝新版本」
-                    when (tw.liuli.launcher.update.Updater.state) {
-                        tw.liuli.launcher.update.Updater.State.Checking, tw.liuli.launcher.update.Updater.State.Installing -> Unit
-                        else -> scope.launch { tw.liuli.launcher.update.Updater.check(context) }
-                    }
-                },
-                SheetItem("安裝新版本", liveDetail = {
-                    when (val st = tw.liuli.launcher.update.Updater.state) {
-                        is tw.liuli.launcher.update.Updater.State.Available -> "安裝 ${st.versionName}"
-                        else -> "先檢查更新"
-                    }
-                }) {
-                    if (tw.liuli.launcher.update.Updater.state is tw.liuli.launcher.update.Updater.State.Available) {
-                        tw.liuli.launcher.update.Updater.install(context)
-                    } else toast("請先按「檢查更新」，有新的正式版時才能安裝")
-                },
+                    "軟體更新",
+                    liveLabel = { Updater.title() },
+                    liveSubtitle = { Updater.subtitle(context, version) },
+                    liveDetail = { Updater.hint() },
+                ) { Updater.press(context) },
                 SheetItem("專案網址", subtitle = "github.com/candy999/liuli-launcher") { },
                 SheetItem("授權", "MIT・開源") { },
             ),
             key = "about", reopen = { aboutSheet() },
-            header = { AboutHeader(tw.liuli.launcher.update.Updater.PROJECT_URL) },
+            header = { AboutHeader(Updater.PROJECT_URL) },
         ), gearReq)
     }
 
