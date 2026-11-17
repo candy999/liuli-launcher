@@ -86,6 +86,42 @@ object AppRepository {
             compareBy<AppEntry> { !it.isTvApp }.thenComparator { a, b -> collator.compare(a.label, b.label) }
         )
     }
+
+    /**
+     * 系統 App：系統內建、沒有出現在一般清單裡（沒有電視或手機的啟動入口）、但有可以從外面開啟的主畫面的套件——
+     * 例如各種設定頁、原廠工具。[exclude]＝已經在清單裡的套件。按下「顯示系統應用」時才載入。
+     */
+    suspend fun loadSystem(context: Context, exclude: Set<String>): List<AppEntry> = withContext(Dispatchers.IO) {
+        val pm = context.packageManager
+        val result = LinkedHashMap<String, AppEntry>()
+        val found = runCatching { pm.queryIntentActivities(Intent(Intent.ACTION_MAIN), 0) }.getOrDefault(emptyList())
+        for (info in found) {
+            val activity = info.activityInfo ?: continue
+            val pkg = activity.packageName
+            if (pkg == context.packageName || pkg in exclude || result.containsKey(pkg)) continue
+            if (!activity.exported || !activity.enabled) continue
+            val app = activity.applicationInfo ?: continue
+            if (app.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM == 0 || !app.enabled) continue
+            // 要權限才能開的畫面開不起來，不列
+            if (activity.permission != null) continue
+            val intent = Intent(Intent.ACTION_MAIN)
+                .setClassName(pkg, activity.name)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
+            val bannerBmp = runCatching { (activity.loadBanner(pm) ?: app.loadBanner(pm))?.toBitmap(BANNER_W, BANNER_H) }.getOrNull()
+            val iconBmp = if (bannerBmp == null) runCatching { info.loadIcon(pm).toBitmap(ICON_SIZE, ICON_SIZE) }.getOrNull() else null
+            result[pkg] = AppEntry(
+                packageName = pkg,
+                label = runCatching { app.loadLabel(pm).toString() }.getOrDefault(pkg),
+                banner = bannerBmp?.asImageBitmap(),
+                icon = iconBmp?.asImageBitmap(),
+                isTvApp = true,   // 不標「手機版」
+                launchIntent = intent,
+                themeColor = (bannerBmp ?: iconBmp)?.let(::themeColorOf),
+            )
+        }
+        val collator = Collator.getInstance(Locale.TAIWAN)
+        result.values.sortedWith { x, y -> collator.compare(x.label, y.label) }
+    }
 }
 
 /** 常用列（Dock）的順序，存在 SharedPreferences。 */

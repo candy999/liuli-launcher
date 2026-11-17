@@ -150,6 +150,10 @@ fun HomeScreen(
     var lastKeyText by remember { mutableStateOf("（還沒按）") }
     val keyTestTitle = "按鍵測試"
     var drawerOpen by remember { mutableStateOf(false) }
+    // 所有 App 最後一格「顯示系統應用」：展開的狀態只在抽屜開著的這一次有效（收起抽屜就收合），不存設定
+    var systemApps by remember { mutableStateOf<List<AppEntry>?>(null) }
+    var systemLoading by remember { mutableStateOf(false) }
+    LaunchedEffect(drawerOpen) { if (!drawerOpen) { systemApps = null; systemLoading = false } }
     var pendingFocus by remember { mutableStateOf<FocusRequester?>(null) }
     var dockLabel by remember { mutableStateOf("") }
     var labelX by remember { mutableFloatStateOf(0f) }
@@ -1471,6 +1475,24 @@ fun HomeScreen(
                     onClose = ::closeDrawer,
                     onLaunch = ::launchApp,
                     onLongClick = { app, fr -> appSheet(app, fr, fromDrawer = true) },
+                    systemApps = systemApps,
+                    systemLoading = systemLoading,
+                    onToggleSystem = {
+                        if (systemApps != null) systemApps = null
+                        else if (!systemLoading) scope.launch {
+                            systemLoading = true
+                            val list = runCatching { AppRepository.loadSystem(context, apps.map { it.packageName }.toSet()) }.getOrDefault(emptyList())
+                            systemLoading = false
+                            if (drawerOpen) { systemApps = list; if (list.isEmpty()) toast("沒有其他系統應用") }
+                        }
+                    },
+                    // 系統 App 不在一般清單裡（重開就不見），所以不提供加入常用／隱藏，只有開啟與應用程式資訊
+                    onSystemLongClick = { app, fr ->
+                        open(SheetSpec(app.label, "系統應用", listOf(
+                            SheetItem("開啟") { closeAll(); launchApp(app) },
+                            SheetItem("應用程式資訊", "強制停止、清除快取") { closeAll(); SystemActions.appInfo(context, app.packageName) },
+                        )), fr)
+                    },
                 )
             }
 

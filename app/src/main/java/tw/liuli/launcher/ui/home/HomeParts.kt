@@ -433,6 +433,12 @@ fun AppDrawer(
     onClose: () -> Unit,
     onLaunch: (AppEntry) -> Unit,
     onLongClick: (AppEntry, FocusRequester) -> Unit,
+    /** 系統 App（按了「顯示系統應用」才有；null＝還沒載入或沒展開）。接在一般 App 後面、同一個格子區裡。 */
+    systemApps: List<AppEntry>? = null,
+    /** 載入中（按下之後、清單回來之前）。 */
+    systemLoading: Boolean = false,
+    onToggleSystem: () -> Unit = {},
+    onSystemLongClick: (AppEntry, FocusRequester) -> Unit = { _, _ -> },
 ) {
     // 收尾門檻要很小（0.05%，不到半個像素）：預設 1% 對 440dp 的抽屜是 9 個像素，彈簧最後會「喀」地跳到終點
     val slide = remember { Animatable(1f, visibilityThreshold = SLIDE_THRESHOLD) }
@@ -457,8 +463,7 @@ fun AppDrawer(
     }
     val gridState = androidx.compose.foundation.lazy.grid.rememberLazyGridState()
     val lightX = remember { Animatable(.1f) }
-    // 量化成 240 格（每格約 8 個像素，看不出階梯）：光移動的那半秒面板跟著每一格重烘，停下來就不動
-    val lightStep by remember { androidx.compose.runtime.derivedStateOf { (lightX.value * 240f).roundToInt() } }
+    val toggleReq = remember { FocusRequester() }
     var focused by remember { mutableIntStateOf(0) }
     // ── 整排對齊：格子區剛好放得下幾整排，捲動一次捲一整排，上下都不會切到半排 ──
     val scope = androidx.compose.runtime.rememberCoroutineScope()
@@ -481,6 +486,25 @@ fun AppDrawer(
     // 每個 App 磚一個 FocusRequester（依套件名稱）：解除安裝後焦點要能移到原本位置上的下一個 App
     val requesters = remember { HashMap<String, FocusRequester>() }
     var focusedPkg by remember { mutableStateOf<String?>(null) }
+    // 展開系統 App：清單一到，捲到第一個系統 App 那一排、焦點移過去；收合：焦點留在最後那一格
+    val sysCount = systemApps?.size ?: -1
+    LaunchedEffect(sysCount) {
+        if (!open) return@LaunchedEffect
+        if (sysCount > 0) {
+            val first = systemApps!!.first().packageName
+            showRow(apps.size / DRAWER_COLS, animate = true)
+            repeat(12) {
+                delay(40)
+                val r = requesters["sys:$first"]
+                if (r != null && runCatching { r.requestFocus() }.isSuccess) return@LaunchedEffect
+            }
+        } else if (sysCount == -1) {
+            showRow(apps.size / DRAWER_COLS, animate = false)
+            repeat(8) { delay(40); if (runCatching { toggleReq.requestFocus() }.isSuccess) return@LaunchedEffect }
+        }
+    }
+    // 量化成 240 格（每格約 8 個像素，看不出階梯）：光移動的那半秒面板跟著每一格重烘，停下來就不動
+    val lightStep by remember { androidx.compose.runtime.derivedStateOf { (lightX.value * 240f).roundToInt() } }
     // App 清單更新時（例如在抽屜裡解除安裝了一個 App）：原本有焦點的那一格不見了，焦點會掉到抽屜後面的主畫面，
     // 抽屜還開著卻沒辦法操作。改成把焦點交給同一個位置上的下一個 App（刪的是最後一個就交給前一個）
     LaunchedEffect(apps) {
@@ -614,26 +638,10 @@ fun AppDrawer(
                 horizontalArrangement = Arrangement.spacedBy(22.dp),
                 verticalArrangement = Arrangement.spacedBy(gap),
             ) {
-                itemsIndexed(if (tw.liuli.launcher.ui.bg.PerfProbe.noTiles) emptyList() else apps, key = { _, a -> a.packageName }) { i, app ->
-                    // 出場順序：以畫面上的第幾排決定（一排 6 個），同一排左到右再錯開一點點
-                    val pos = { (i - gridState.firstVisibleItemIndex).coerceAtLeast(0) }
-                    val revealOf = { tw.liuli.launcher.ui.components.rowReveal(reveal.value, pos() / 6 * 3 + pos() % 6 / 2, stagger = 30f, fade = 200f) }
-                    Box(
-                        Modifier
-                            .onSizeChanged { if (it.height > cellPx) cellPx = it.height }
-                            .graphicsLayer {
-                                translationY = (1f - revealOf()) * 14.dp.toPx()
-                                // 捲動中往上離開的那一排：越過上緣多少就淡掉多少，不會被切一半（只改這幾格的圖層透明度）
-                                val firstRow = gridState.firstVisibleItemIndex / DRAWER_COLS
-                                val off = gridState.firstVisibleItemScrollOffset
-                                val row = i / DRAWER_COLS
-                                alpha = when {
-                                    row < firstRow -> 0f
-                                    row == firstRow && off > 0 -> (1f - off / (cellPx.coerceAtLeast(1) * .5f)).coerceIn(0f, 1f)
-                                    else -> 1f
-                                }
-                            },
-                    ) {
+                val shownApps = if (tw.liuli.launcher.ui.bg.PerfProbe.noTiles) emptyList() else apps
+                val sys = systemApps.orEmpty()
+                itemsIndexed(shownApps, key = { _, a -> a.packageName }) { i, app ->
+                    DrawerCell(i, gridState, { reveal.value }, cellPx, { if (it > cellPx) cellPx = it }) { revealOf ->
                     AppTile(
                         app = app,
                         width = 124.dp,
@@ -651,6 +659,42 @@ fun AppDrawer(
                     )
                     }
                 }
+                // 系統 App：接在後面，操作和一般 App 一樣（開啟、長按、捲動、上緣淡出）
+                itemsIndexed(sys, key = { _, a -> "sys:" + a.packageName }) { j, app ->
+                    val i = shownApps.size + j
+                    DrawerCell(i, gridState, { reveal.value }, cellPx, { if (it > cellPx) cellPx = it }) { revealOf ->
+                    AppTile(
+                        app = app,
+                        width = 124.dp,
+                        showLabel = true,
+                        requester = requesters.getOrPut("sys:" + app.packageName) { FocusRequester() },
+                        onFocused = {
+                            focused = i; focusedPkg = null; showRow(i / DRAWER_COLS)
+                            scope.launch { lightX.animateTo((i % DRAWER_COLS + .5f) / DRAWER_COLS, androidx.compose.animation.core.tween(520)) }
+                        },
+                        onClick = { onLaunch(app) },
+                        onLongClick = { fr -> onSystemLongClick(app, fr) },
+                        extra = Modifier.bgTarget(app.themeColor, isApp = true),
+                        reveal = revealOf,
+                    )
+                    }
+                }
+                // 最後一格：顯示／隱藏系統應用
+                item(key = "sys-toggle") {
+                    val i = shownApps.size + sys.size
+                    DrawerCell(i, gridState, { reveal.value }, cellPx, { if (it > cellPx) cellPx = it }) { revealOf ->
+                        SystemToggleTile(
+                            expanded = systemApps != null, loading = systemLoading, count = sys.size,
+                            requester = toggleReq,
+                            onFocused = {
+                                focused = i; focusedPkg = null; showRow(i / DRAWER_COLS)
+                                scope.launch { lightX.animateTo((i % DRAWER_COLS + .5f) / DRAWER_COLS, androidx.compose.animation.core.tween(520)) }
+                            },
+                            onClick = onToggleSystem,
+                            reveal = revealOf,
+                        )
+                    }
+                }
             }
                 }
             }
@@ -659,6 +703,72 @@ fun AppDrawer(
     }
 }
 
+
+/**
+ * 抽屜裡的一格：逐排出場時浮上來；捲動中往上離開的那一排越過上緣多少就淡掉多少（不被切一半）。只改這一格的圖層。
+ */
+@Composable
+private fun DrawerCell(
+    i: Int,
+    gridState: androidx.compose.foundation.lazy.grid.LazyGridState,
+    revealMs: () -> Float,
+    cellPx: Int,
+    onHeight: (Int) -> Unit,
+    content: @Composable (reveal: () -> Float) -> Unit,
+) {
+    val pos = { (i - gridState.firstVisibleItemIndex).coerceAtLeast(0) }
+    val revealOf = { tw.liuli.launcher.ui.components.rowReveal(revealMs(), pos() / 6 * 3 + pos() % 6 / 2, stagger = 30f, fade = 200f) }
+    val cell = androidx.compose.runtime.rememberUpdatedState(cellPx)
+    Box(
+        Modifier
+            .onSizeChanged { onHeight(it.height) }
+            .graphicsLayer {
+                translationY = (1f - revealOf()) * 14.dp.toPx()
+                val firstRow = gridState.firstVisibleItemIndex / DRAWER_COLS
+                val off = gridState.firstVisibleItemScrollOffset
+                val row = i / DRAWER_COLS
+                alpha = when {
+                    row < firstRow -> 0f
+                    row == firstRow && off > 0 -> (1f - off / (cell.value.coerceAtLeast(1) * .5f)).coerceIn(0f, 1f)
+                    else -> 1f
+                }
+            },
+    ) { content(revealOf) }
+}
+
+/** 抽屜最後一格：「顯示系統應用」／「隱藏系統應用」。和 App 磚一樣大、同一種霧玻璃與布丁。 */
+@Composable
+private fun SystemToggleTile(
+    expanded: Boolean, loading: Boolean, count: Int,
+    requester: FocusRequester, onFocused: () -> Unit, onClick: () -> Unit, reveal: () -> Float,
+) {
+    val focus = rememberFocusAnim()
+    val jelly = rememberJelly()
+    Column(Modifier.width(124.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .aspectRatio(16f / 9f)
+                .jellyFocus(jelly, focus, TILE_FOCUS_SCALE)
+                .graphicsLayer { alpha = reveal() }
+                .focusTarget(focus, requester, onFocused = onFocused, onClick = { jelly.press(); onClick() })
+                .liquidGlass(RoundedCornerShape(Dimens.TileRadius), tint = 0.06f),
+            contentAlignment = Alignment.Center,
+        ) {
+            GlassLit(focus, Dimens.TileRadius, Modifier.matchParentSize(), haze = .12f)
+            GText(if (loading) "…" else if (expanded) "－" else "＋", size = 28.sp, weight = FontWeight.Light)
+        }
+        Spacer(Modifier.height(10.dp))
+        GText(
+            if (loading) "載入中…" else if (expanded) "隱藏系統應用（$count）" else "顯示系統應用",
+            Modifier.fillMaxWidth().graphicsLayer { alpha = reveal() },
+            size = 14.sp,
+            weight = if (focus.focused) FontWeight.Medium else FontWeight.Normal,
+            color = if (focus.focused) Ink.Primary else Ink.Tertiary,
+            align = androidx.compose.ui.text.style.TextAlign.Center,
+        )
+    }
+}
 
 private fun drawerSlideOffset(slide: Float, heightPx: Float) = androidx.compose.ui.geometry.Offset(0f, slide * heightPx)
 

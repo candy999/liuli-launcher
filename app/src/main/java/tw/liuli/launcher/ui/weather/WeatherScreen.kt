@@ -41,6 +41,12 @@ import tw.liuli.launcher.context.Weather
 import tw.liuli.launcher.context.uvLevel
 import tw.liuli.launcher.context.windName
 import tw.liuli.launcher.ui.theme.Dimens
+import tw.liuli.launcher.ui.glass.GlassLit
+import tw.liuli.launcher.ui.glass.jellyLayer
+import tw.liuli.launcher.ui.glass.rememberJelly
+import androidx.compose.ui.zIndex
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import tw.liuli.launcher.ui.theme.GText
 import tw.liuli.launcher.ui.theme.Ink
 import tw.liuli.launcher.ui.theme.LIcon
@@ -69,6 +75,9 @@ fun WeatherScreen(home: HomeContext, active: Boolean = true) {
     val nowSlot = LocalDateTime.now().hour / 3
     var day by remember { mutableIntStateOf(0) }
     var slot by remember { mutableIntStateOf(nowSlot) }
+    // 撞牆：（第幾次, 方向）——選中的那一個看到次數變了就彈一下
+    var dayBump by remember { androidx.compose.runtime.mutableStateOf(0 to 0) }
+    var slotBump by remember { androidx.compose.runtime.mutableStateOf(0 to 0) }
     // 頁面是預先組合好的：每次打開都回到「今天、現在」，再拿焦點
     LaunchedEffect(active) {
         if (active) {
@@ -84,11 +93,23 @@ fun WeatherScreen(home: HomeContext, active: Boolean = true) {
             .onPreviewKeyEvent { e ->
                 if (w == null || e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                 val last = (w.days.size - 1).coerceAtLeast(0)
+                // 布丁：記下方向（新選到的那一個從那邊被帶過來）；已經在最邊邊還按＝撞牆（只在第一下，按住不連續撞）
+                fun move(dx: Int, dy: Int) {
+                    tw.liuli.launcher.ui.glass.JellyInput.note(dx, dy)
+                    val first = e.nativeKeyEvent.repeatCount == 0
+                    if (dy != 0) {
+                        val n = (day + dy).coerceIn(0, last)
+                        if (n != day) day = n else if (first) dayBump = (dayBump.first + 1) to dy
+                    } else {
+                        val n = (slot + dx).coerceIn(0, 7)
+                        if (n != slot) slot = n else if (first) slotBump = (slotBump.first + 1) to dx
+                    }
+                }
                 when (e.nativeKeyEvent.keyCode) {
-                    KeyEvent.KEYCODE_DPAD_UP -> { day = (day - 1).coerceAtLeast(0); true }
-                    KeyEvent.KEYCODE_DPAD_DOWN -> { day = (day + 1).coerceAtMost(last); true }
-                    KeyEvent.KEYCODE_DPAD_LEFT -> { slot = (slot - 1).coerceAtLeast(0); true }
-                    KeyEvent.KEYCODE_DPAD_RIGHT -> { slot = (slot + 1).coerceAtMost(7); true }
+                    KeyEvent.KEYCODE_DPAD_UP -> { move(0, -1); true }
+                    KeyEvent.KEYCODE_DPAD_DOWN -> { move(0, 1); true }
+                    KeyEvent.KEYCODE_DPAD_LEFT -> { move(-1, 0); true }
+                    KeyEvent.KEYCODE_DPAD_RIGHT -> { move(1, 0); true }
                     else -> false
                 }
             }
@@ -111,9 +132,9 @@ fun WeatherScreen(home: HomeContext, active: Boolean = true) {
         Column(Modifier.align(Alignment.TopStart).width(500.dp)) {
             Detail(w, d, day, sel, isNow = day == 0 && slot == nowSlot, cityName = home.city.name)
             Spacer(Modifier.height(26.dp))
-            Slots(slots, slot, if (day == 0) nowSlot else -1)
+            Slots(slots, slot, if (day == 0) nowSlot else -1, slotBump)
         }
-        Daily(w.days, day, Modifier.align(Alignment.TopEnd).width(330.dp))
+        Daily(w.days, day, Modifier.align(Alignment.TopEnd).width(330.dp), dayBump)
         GText("↑↓ 切換日期　←→ 選擇時段　返回鍵回主畫面", Modifier.align(Alignment.BottomStart), size = 12.sp, color = Ink.Faint)
     }
 }
@@ -186,9 +207,20 @@ private fun Stat(label: String, value: String) {
     }
 }
 
-/** 這一天的 8 個時段；選中的那一段是白色圓角底（和設定面板的焦點一樣），今天已經過去的時段變淡。 */
+/** 選取用的布丁：選到的時候從移動的方向被帶過來，[bump] 的次數變了（已經到底還按）就撞牆彈一下。 */
 @Composable
-private fun Slots(slots: List<Slot>, selected: Int, nowSlot: Int) {
+private fun rememberSelJelly(on: Boolean, bump: Pair<Int, Int>, vertical: Boolean): tw.liuli.launcher.ui.glass.JellyState {
+    val j = rememberJelly()
+    LaunchedEffect(on) { if (on) j.arrive() }
+    LaunchedEffect(bump) {
+        if (on && bump.first > 0) { if (vertical) j.bump(0, bump.second) else j.bump(bump.second, 0) }
+    }
+    return j
+}
+
+/** 這一天的 8 個時段；選中的那一段亮一層玻璃、像布丁一樣彈（和主畫面、設定面板的焦點同一套），今天已經過去的時段變淡。 */
+@Composable
+private fun Slots(slots: List<Slot>, selected: Int, nowSlot: Int, bump: Pair<Int, Int>) {
     Column(Modifier.fillMaxWidth()) {
         Box(Modifier.fillMaxWidth().height(1.dp).drawBehind { drawRect(Color.White.copy(alpha = 0.14f)) })
         Spacer(Modifier.height(14.dp))
@@ -197,26 +229,23 @@ private fun Slots(slots: List<Slot>, selected: Int, nowSlot: Int) {
                 val s = slots.firstOrNull { it.start.time.hour / 3 == k }
                 val on = k == selected
                 val past = nowSlot >= 0 && k < nowSlot
-                val ink = if (on) Ink.OnLight else if (past) Ink.Faint else Ink.Primary
-                val sub = if (on) Ink.OnLight.copy(alpha = 0.6f) else Ink.Tertiary
-                Column(
-                    Modifier
-                        .width(58.dp)
-                        .drawBehind {
-                            if (on) drawRoundRect(Color.White.copy(alpha = 0.94f), cornerRadius = CornerRadius(14.dp.toPx()))
-                        }
-                        .padding(vertical = 10.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    GText(if (k == nowSlot) "現在" else "${k * 3}時", size = 12.sp, color = sub)
-                    Spacer(Modifier.height(6.dp))
-                    if (s != null) {
-                        LIcon(LIcons.weather(s.start.kind, s.start.isDay), 24.dp, tint = if (on) Ink.OnLight else Color.White.copy(alpha = if (past) 0.45f else 1f))
+                val ink = if (past && !on) Ink.Faint else Ink.Primary
+                val sub = if (on) Ink.Secondary else Ink.Tertiary
+                val v by animateFloatAsState(if (on) 1f else 0f, tween(160), label = "slot")
+                val jelly = rememberSelJelly(on, bump, vertical = false)
+                Box(Modifier.width(58.dp).zIndex(if (on) 1f else 0f).jellyLayer(jelly) { 1f + .06f * v }) {
+                    GlassLit({ v }, 14.dp, Modifier.matchParentSize(), haze = .18f)
+                    Column(Modifier.fillMaxWidth().padding(vertical = 10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        GText(if (k == nowSlot) "現在" else "${k * 3}時", size = 12.sp, color = sub)
                         Spacer(Modifier.height(6.dp))
-                        GText("${s.start.temp.roundToInt()}°", size = 15.sp, color = ink)
-                        GText(if (s.rainChance >= 20) "${s.rainChance}%" else " ", size = 11.sp, color = if (on) Ink.OnLight else Rain)
-                    } else {
-                        GText("—", size = 15.sp, color = sub)
+                        if (s != null) {
+                            LIcon(LIcons.weather(s.start.kind, s.start.isDay), 24.dp, tint = Color.White.copy(alpha = if (past && !on) 0.45f else 1f))
+                            Spacer(Modifier.height(6.dp))
+                            GText("${s.start.temp.roundToInt()}°", size = 15.sp, color = ink)
+                            GText(if (s.rainChance >= 20) "${s.rainChance}%" else " ", size = 11.sp, color = Rain)
+                        } else {
+                            GText("—", size = 15.sp, color = sub)
+                        }
                     }
                 }
             }
@@ -224,9 +253,9 @@ private fun Slots(slots: List<Slot>, selected: Int, nowSlot: Int) {
     }
 }
 
-/** 右邊 8 日預報（今天＋往後 7 天）；選中的那一天有淡白底與左側小標記。 */
+/** 右邊 8 日預報（今天＋往後 7 天）；選中的那一天亮一層玻璃、像布丁一樣彈。 */
 @Composable
-private fun Daily(days: List<DayForecast>, selected: Int, modifier: Modifier) {
+private fun Daily(days: List<DayForecast>, selected: Int, modifier: Modifier, bump: Pair<Int, Int>) {
     val lo = days.minOfOrNull { it.min } ?: 0.0
     val hi = days.maxOfOrNull { it.max } ?: 1.0
     Column(modifier) {
@@ -234,19 +263,12 @@ private fun Daily(days: List<DayForecast>, selected: Int, modifier: Modifier) {
         Spacer(Modifier.height(8.dp))
         days.forEachIndexed { i, d ->
             val on = i == selected
+            val v by animateFloatAsState(if (on) 1f else 0f, tween(160), label = "day")
+            val jelly = rememberSelJelly(on, bump, vertical = true)
+            Box(Modifier.height(48.dp).zIndex(if (on) 1f else 0f).jellyLayer(jelly) { 1f + .02f * v }) {
+            GlassLit({ v }, 14.dp, Modifier.matchParentSize(), haze = .16f)
             Row(
-                Modifier
-                    .height(48.dp)
-                    .drawBehind {
-                        if (on) {
-                            drawRoundRect(Color.White.copy(alpha = 0.16f), cornerRadius = CornerRadius(12.dp.toPx()))
-                            drawRoundRect(
-                                Color.White, topLeft = Offset(0f, size.height * 0.3f),
-                                size = Size(3.dp.toPx(), size.height * 0.4f), cornerRadius = CornerRadius(2.dp.toPx()),
-                            )
-                        }
-                    }
-                    .padding(horizontal = 10.dp),
+                Modifier.fillMaxSize().padding(horizontal = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(Modifier.width(58.dp)) {
@@ -261,6 +283,7 @@ private fun Daily(days: List<DayForecast>, selected: Int, modifier: Modifier) {
                 GText("${d.min.roundToInt()}°", Modifier.width(34.dp), size = 15.sp, color = Ink.Tertiary)
                 RangeBar(d.min, d.max, lo, hi, Modifier.weight(1f).height(6.dp))
                 GText("${d.max.roundToInt()}°", Modifier.padding(start = 10.dp).width(34.dp), size = 15.sp)
+            }
             }
         }
     }

@@ -78,7 +78,7 @@ class JellyState internal constructor(private val gain: Float) {
     private fun ref() = max(refMax * .64f, min(if (axisY) h else w, refMax))
 
     /** 拿到焦點：依最後一次方向鍵的方向被帶一下。 */
-    internal fun arrive() {
+    fun arrive() {
         JellyInput.current = this; JellyInput.gen++
         if (snap()) return
         if (JellyInput.recent() && (JellyInput.dx != 0 || JellyInput.dy != 0)) {
@@ -177,26 +177,37 @@ fun rememberJelly(gain: Float = 1f): JellyState {
 fun Modifier.jellyFocus(j: JellyState, focus: FocusAnim, scale: Float = 1.06f): Modifier = this
     .zIndex(if (focus.focused) 1f else 0f)
     .onFocusChanged { if (it.isFocused) j.arrive() else j.gone() }
-    .graphicsLayer {
-        @Suppress("UNUSED_VARIABLE") val f = j.frame
-        j.w = size.width; j.h = size.height
-        val base = (1f + (scale - 1f) * focus.raw()) * (1f + j.z)
-        val along = 1f + j.s; val cross = 1f / (1f + .5f * j.s)
-        if (j.axisY) { translationY = j.o; scaleX = base * cross; scaleY = base * along }
-        else { translationX = j.o; scaleX = base * along; scaleY = base * cross }
-    }
+    .jellyLayer(j) { 1f + (scale - 1f) * focus.raw() }
+
+/**
+ * 布丁變形的圖層（位移＋非等比縮放）；[scale] 是另外乘上的整體放大（在圖層階段讀取）。
+ * 不靠焦點系統的地方用這個（月曆的日期格、天氣頁的時段與日期——那些是「選取」不是焦點），自己呼叫 arrive／bump。
+ */
+fun Modifier.jellyLayer(j: JellyState, scale: () -> Float = { 1f }): Modifier = graphicsLayer {
+    @Suppress("UNUSED_VARIABLE") val f = j.frame
+    j.w = size.width; j.h = size.height
+    val base = scale() * (1f + j.z)
+    val along = 1f + j.s; val cross = 1f / (1f + .5f * j.s)
+    if (j.axisY) { translationY = j.o; scaleX = base * cross; scaleY = base * along }
+    else { translationX = j.o; scaleX = base * along; scaleY = base * cross }
+}
 
 /**
  * 焦點時亮起來的那一層（一點白霧＋受光的細邊線）：內容是靜態的，只有這一層的透明度跟著焦點變。
  * 放在按鈕裡面、內容之後（matchParentSize）。[fill]＝false 只有邊線（App 磚：圖片不能被白霧蓋住）。
  */
 @Composable
-fun GlassLit(focus: FocusAnim, corner: Dp, modifier: Modifier = Modifier, haze: Float = .16f, fill: Boolean = true) {
+fun GlassLit(focus: FocusAnim, corner: Dp, modifier: Modifier = Modifier, haze: Float = .16f, fill: Boolean = true) =
+    GlassLit(focus.value, corner, modifier, haze, fill)
+
+/** 同上，亮的程度（0～1）由呼叫端給（在圖層階段讀取）。 */
+@Composable
+fun GlassLit(lit: () -> Float, corner: Dp, modifier: Modifier = Modifier, haze: Float = .16f, fill: Boolean = true) {
     Box(
         modifier
             .graphicsLayer {
                 compositingStrategy = CompositingStrategy.ModulateAlpha
-                alpha = focus.value()
+                alpha = lit().coerceIn(0f, 1f)
             }
             .drawWithCache {
                 val sw = 1.5.dp.toPx()

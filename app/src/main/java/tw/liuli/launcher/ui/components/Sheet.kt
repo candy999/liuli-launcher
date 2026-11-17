@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -141,6 +142,22 @@ fun GlassSheet(
     val focusAt = spec.focusIndex.coerceIn(0, (spec.items.size - 1).coerceAtLeast(0))
     // 讓目標列一開始就被組合（遠一點的項目才不會因還沒放好而拿不到焦點）
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = focusAt)
+    // 焦點到第一列／最後一列時，把清單捲到最頭／最尾（連上下留白一起露出來）：
+    // 清單預設只捲到「剛好看得見那一列」，那一列會貼著清單的邊，撞牆彈出去的部分就被裁掉
+    val edgeScope = androidx.compose.runtime.rememberCoroutineScope()
+    val edgeScroll: (Int) -> Unit = { index ->
+        if (index == 0 || index == spec.items.lastIndex) edgeScope.launch {
+            androidx.compose.runtime.withFrameNanos { }
+            if (index == 0) {
+                if (listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 0) runCatching { listState.animateScrollToItem(0) }
+            } else {
+                val info = listState.layoutInfo
+                val row = info.visibleItemsInfo.lastOrNull { it.index == index } ?: return@launch
+                val d = row.offset + row.size + info.afterContentPadding - info.viewportEndOffset
+                if (d > 0) runCatching { listState.animateScrollBy(d.toFloat()) }
+            }
+        }
+    }
     // 延遲並重試幾次：面板比較重時，requestFocus 搶太早會落空（例如從 App 抽屜長按開啟時）
     LaunchedEffect(spec) {
         if (exiting) return@LaunchedEffect
@@ -195,10 +212,14 @@ fun GlassSheet(
                 Spacer(Modifier.height(14.dp))
                 spec.header.invoke()
             }
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(4.dp))
             // 焦點列：和主畫面的按鈕同一套——有焦點的那一列自己像布丁一樣被帶一下、彈回來，上面亮一層玻璃
             Box(Modifier.weight(1f)) {
-            LazyColumn(Modifier.fillMaxSize(), state = listState, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            // 上下各留 12dp：清單會裁切超出範圍的內容，第一列往上撞牆、最後一列往下撞牆時整列（含亮起來的邊線）要完整看得到
+            LazyColumn(
+                Modifier.fillMaxSize(), state = listState, verticalArrangement = Arrangement.spacedBy(4.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 12.dp),
+            ) {
                 itemsIndexed(spec.items) { index, item ->
                     Box(
                         Modifier.graphicsLayer {
@@ -212,7 +233,7 @@ fun GlassSheet(
                             translationY = (1f - a) * 10.dp.toPx()
                         },
                     ) {
-                        SheetRow(item, if (index == focusAt) first else null) { onFocusIndex(index) }
+                        SheetRow(item, if (index == focusAt) first else null) { onFocusIndex(index); edgeScroll(index) }
                     }
                 }
             }

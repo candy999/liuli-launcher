@@ -59,6 +59,10 @@ import tw.liuli.launcher.context.Festivals
 import tw.liuli.launcher.context.LunarCalc
 import tw.liuli.launcher.context.LunarInfo
 import tw.liuli.launcher.ui.theme.Dimens
+import tw.liuli.launcher.ui.glass.GlassLit
+import tw.liuli.launcher.ui.glass.jellyLayer
+import tw.liuli.launcher.ui.glass.rememberJelly
+import androidx.compose.ui.zIndex
 import tw.liuli.launcher.ui.theme.GText
 import tw.liuli.launcher.ui.theme.Ink
 import java.time.DayOfWeek
@@ -115,6 +119,13 @@ fun CalendarScreen(now: java.time.LocalDateTime, initial: LocalDate = now.toLoca
             .focusRequester(root)
             .onPreviewKeyEvent { e ->
                 if (e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                // 布丁：記下方向，新選到的那一格知道是從哪邊過來的
+                when (e.nativeKeyEvent.keyCode) {
+                    KeyEvent.KEYCODE_DPAD_LEFT -> tw.liuli.launcher.ui.glass.JellyInput.note(-1, 0)
+                    KeyEvent.KEYCODE_DPAD_RIGHT -> tw.liuli.launcher.ui.glass.JellyInput.note(1, 0)
+                    KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_CHANNEL_UP, KeyEvent.KEYCODE_PAGE_UP -> tw.liuli.launcher.ui.glass.JellyInput.note(0, -1)
+                    KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_CHANNEL_DOWN, KeyEvent.KEYCODE_PAGE_DOWN -> tw.liuli.launcher.ui.glass.JellyInput.note(0, 1)
+                }
                 val next = when (e.nativeKeyEvent.keyCode) {
                     KeyEvent.KEYCODE_DPAD_LEFT -> sel.minusDays(1)
                     KeyEvent.KEYCODE_DPAD_RIGHT -> sel.plusDays(1)
@@ -135,7 +146,10 @@ fun CalendarScreen(now: java.time.LocalDateTime, initial: LocalDate = now.toLoca
                 targetState = month,
                 transitionSpec = {
                     val down = targetState > initialState
-                    (slideInVertically(tween(380)) { h -> if (down) h / 14 else -h / 14 } + fadeIn(tween(300))) togetherWith fadeOut(tween(150))
+                    // 不裁切：選中的那一格會放大、布丁變形會超出格子，裁切的話最邊邊那幾格（週日、週六那兩欄與最上最下那兩列）
+                    // 的外框在翻月的過場中會被切掉
+                    ((slideInVertically(tween(380)) { h -> if (down) h / 14 else -h / 14 } + fadeIn(tween(300))) togetherWith fadeOut(tween(150)))
+                        .using(androidx.compose.animation.SizeTransform(clip = false))
                 },
                 label = "month",
             ) { m ->
@@ -180,9 +194,13 @@ private fun MonthGrid(month: YearMonth, sel: LocalDate, today: LocalDate, cache:
         val cells: List<LocalDate?> = List(lead) { null } + (1..month.lengthOfMonth()).map { month.atDay(it) }
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             cells.chunked(7).forEach { week ->
-                Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                // 選中的那一格（與它所在的那一列）畫在最上面：放大、變形時蓋過鄰居，不會被鄰居蓋住一角
+                Row(
+                    Modifier.weight(1f).fillMaxWidth().zIndex(if (week.contains(sel)) 1f else 0f),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
                     for (i in 0 until 7) {
-                        Box(Modifier.weight(1f).fillMaxHeight()) {
+                        Box(Modifier.weight(1f).fillMaxHeight().zIndex(if (week.getOrNull(i) == sel) 1f else 0f)) {
                             val date = week.getOrNull(i)
                             if (date != null) DayCell(date, cache[date], date == sel, date == today)
                         }
@@ -198,18 +216,24 @@ private fun DayCell(date: LocalDate, info: DayInfo?, selected: Boolean, isToday:
     val v by animateFloatAsState(if (selected) 1f else 0f, tween(160), label = "cell")
     val labelAlpha by animateFloatAsState(if (info != null) 1f else 0f, tween(220), label = "lunar")
     val weekend = date.dayOfWeek == DayOfWeek.SATURDAY || date.dayOfWeek == DayOfWeek.SUNDAY
-    Column(
+    // 和主畫面的按鈕同一套：選中的那一格亮一層玻璃、整格像布丁一樣從移動的方向被帶一下再彈回（只改圖層）
+    val jelly = rememberJelly()
+    LaunchedEffect(selected) { if (selected) jelly.arrive() }
+    Box(
         Modifier
             .fillMaxSize()
-            .graphicsLayer { scaleX = 1f + 0.08f * v; scaleY = 1f + 0.08f * v }
+            .jellyLayer(jelly) { 1f + 0.06f * v }
             .drawBehind {
-                val r = CornerRadius(14.dp.toPx())
-                if (v > 0.01f) drawRoundRect(Color.White.copy(alpha = 0.94f * v), cornerRadius = r)
                 if (isToday) {
+                    val r = CornerRadius(14.dp.toPx())
                     val w = 1.5.dp.toPx()
                     drawRoundRect(Ink.Gold, Offset(w / 2, w / 2), Size(size.width - w, size.height - w), r, style = Stroke(w))
                 }
             },
+    ) {
+    GlassLit({ v }, 14.dp, Modifier.matchParentSize(), haze = .18f)
+    Column(
+        Modifier.fillMaxSize(),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
@@ -218,7 +242,7 @@ private fun DayCell(date: LocalDate, info: DayInfo?, selected: Boolean, isToday:
             size = 20.sp,
             weight = if (isToday) FontWeight.Medium else FontWeight.Normal,
             color = when {
-                selected -> Ink.OnLight
+                selected -> Ink.Primary
                 weekend -> Ink.Secondary
                 else -> Ink.Primary
             },
@@ -230,18 +254,19 @@ private fun DayCell(date: LocalDate, info: DayInfo?, selected: Boolean, isToday:
                 return@Row
             }
             if (info.lunar.isBaiBai) {
-                Box(Modifier.padding(end = 3.dp).size(4.dp).background(if (selected) Ink.OnLight else Ink.Gold, CircleShape))
+                Box(Modifier.padding(end = 3.dp).size(4.dp).background(Ink.Gold, CircleShape))
             }
             GText(
                 info.cellLabel,
                 size = 11.sp,
                 color = when {
-                    selected -> Ink.OnLight.copy(alpha = 0.7f)
                     info.isSpecial -> Ink.Gold
+                    selected -> Ink.Secondary
                     else -> Ink.Tertiary
                 },
             )
         }
+    }
     }
 }
 
