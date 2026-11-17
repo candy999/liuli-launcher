@@ -56,10 +56,11 @@ val LocalGlassBackdrop = staticCompositionLocalOf { GlassBackdrop(null, { 0L }, 
  * 沒有即時模糊、沒有著色器折射，Android 9 的 Mali-470 也畫得動。
  * 烘出來的內容（全部在玻璃「裡面」，外框是乾淨的圓角，不往外暈）：
  * - 中間：霧化的背景（引擎給的 120×68 小圖放大）＋很淡的白霧與由上往下的淡光。
- * - 邊緣往內一圈是厚玻璃的折射帶：越靠近邊緣，取樣的位置越往玻璃「外面」偏——周圍的顏色被彎進來、沿著邊緣繞；
- *   底部的折射帶最厚，上緣次之，兩側最薄（像一顆上凸下厚的透鏡）。
- * - 折射帶裡紅、藍兩個通道偏移的量不一樣（色散）：有明暗、顏色變化的地方會分出很細的粉紅／青色邊。
- * - 最外緣一條受光的細亮線（左上、右下較亮）。
+ * - 邊緣照物理算，沒有任何「畫上去」的顏色：邊緣是一圈圓弧形的斜面（磨圓的玻璃邊，底部最寬），
+ *   每個像素依斜面的斜率用 Snell 定律（折射率 1.5）算視線偏折了多少，到那個位置去取背景——越靠邊越陡、偏得越多，中間是平的不偏。
+ * - 色散＝同一個折射對紅、綠、藍用各自的折射率（阿貝數約 40）各算一次：偏移只差百分之幾，
+ *   只有被折射的背景本身有明暗、顏色變化的地方才會分出一點點色邊；暗的、平的背景上邊緣就是暗的、安靜的。
+ * - 邊緣的亮線是反射（Fresnel）：越斜的地方反射越多，反射的是左上方一盞柔和的白光，所以左上亮、右下暗；反射掉的光不再透過來。
  * 只有背景小圖更新、玻璃的位置或大小改變時才重烘（背景在動時每秒最多十幾次，在背景執行緒）；
  * 焦點動畫只改圖層屬性，不會重烘、也不會重畫。
  */
@@ -225,17 +226,36 @@ private class GlassBake(private val backdrop: GlassBackdrop, private val edge: B
     }
 
     private companion object {
+        // 玻璃的折射率（冕牌玻璃，阿貝數約 40）：紅光折得少、藍光折得多——色散就只是這三個數字的差別
+        const val N_R = 1.4963f
+        const val N_G = 1.5000f
+        const val N_B = 1.5088f
+
+        /** 垂直入射的視線穿過斜率為 [slope] 的玻璃表面後，水平方向的偏移量（每單位厚度；正值＝往斜面升高的方向，也就是往玻璃裡面）。 */
+        private fun refract(slope: Float, n: Float): Float {
+            // 表面法線 N＝(-slope, 1)／len（朝外、朝觀看者），入射 I＝(0, -1)。Snell：T＝ηI＋(η·cosi − √(1 − η²(1 − cos²i)))·N
+            val inv = 1f / sqrt(1f + slope * slope)
+            val cosi = inv
+            val eta = 1f / n
+            val k = 1f - eta * eta * (1f - cosi * cosi)
+            val coef = eta * cosi - sqrt(k)
+            val tx = coef * (-slope * inv)
+            val tz = -eta + coef * inv
+            return tx / -tz
+        }
+
         fun bake(out: IntArray, bw: Int, bh: Int, q: Int, r: Req, sx: Float, sy: Float, edge: Boolean) {
             val src = BackdropPixels.px; val sw = BackdropPixels.w; val sh = BackdropPixels.h
             if (src.isEmpty() || sw < 2 || sh < 2) return
             val hw = r.w / 2f; val hh = r.h / 2f
             val short = min(r.w, r.h)
-            // 折射帶的基本厚度：短邊的 17%，夾在 5～16dp
-            val band0 = if (edge) (short * .17f).coerceIn(5f * r.density, 16f * r.density) else 0f
-            val lineW = 1.3f * r.density
+            // 邊緣是一圈圓弧形的斜面（像磨圓的玻璃邊）：斜面的寬度＝短邊的 17%，夾在 5～16dp；中間是平的
+            val bevel0 = if (edge) (short * .17f).coerceIn(5f * r.density, 16f * r.density) else 0f
             val mid = r.tint + .10f * r.hl
             val top = 1f - (1f - mid) * (1f - (.06f + .06f * r.hl))
             val maxX = sw - 1.001f; val maxY = sh - 1.001f
+            // 一盞柔和的主光，在左上方、朝向觀看者
+            val lxk = -.50f; val lyk = -.68f; val lzk = .54f
             for (y in 0 until bh) {
                 val py = (y + .5f) * q
                 val cy = py - hh
@@ -245,36 +265,55 @@ private class GlassBake(private val backdrop: GlassBackdrop, private val edge: B
                 for (x in 0 until bw) {
                     val px = (x + .5f) * q
                     val cx = px - hw
-                    var u = (r.ox + px) * sx - .5f
-                    var v = (r.oy + py) * sy - .5f
-                    var du = 0f; var dv = 0f
-                    var e = 0f; var nx = 0f; var ny = 0f; var d = -1e9f
+                    val u = (r.ox + px) * sx - .5f
+                    val v = (r.oy + py) * sy - .5f
+                    var dR = 0f; var dG = 0f; var dB = 0f     // 三個波長各自的取樣偏移（像素，沿著往外的法線；負的＝往裡面）
+                    var nx = 0f; var ny = 0f
+                    var fres = 0f; var env = 0f
                     if (edge) {
                         // 到圓角矩形邊緣的距離（裡面是負的）與往外的法線
                         val rad = if (cy < 0f) (if (cx < 0f) r.radii[0] else r.radii[1]) else (if (cx < 0f) r.radii[3] else r.radii[2])
                         val rc = min(rad, min(hw, hh))
                         val qx = abs(cx) - hw + rc; val qy = abs(cy) - hh + rc
+                        val d: Float
                         if (qx > 0f && qy > 0f) {
                             val l = sqrt(qx * qx + qy * qy)
                             d = l - rc
                             nx = qx / l * (if (cx < 0f) -1f else 1f); ny = qy / l * (if (cy < 0f) -1f else 1f)
                         } else if (qx > qy) { d = qx - rc; nx = if (cx < 0f) -1f else 1f } else { d = qy - rc; ny = if (cy < 0f) -1f else 1f }
-                        // 底部最厚、上緣次之、兩側最薄
-                        val band = band0 * (.62f + 1.05f * max(ny, 0f) + .38f * max(-ny, 0f))
-                        if (d > -band) {
-                            e = 1f + d / band
-                            if (e > 1f) e = 1f
-                            e *= e
-                            // 取樣位置往玻璃外面偏：周圍的顏色被彎進來
-                            val shift = e * band * 5.5f
-                            du = nx * shift * sx; dv = ny * shift * sy
-                            u += du; v += dv
+                        // 斜面的寬度：底部最寬、上緣次之、兩側最窄（玻璃的形狀本身下厚上薄）
+                        val bevel = bevel0 * (.75f + .60f * max(ny, 0f) + .15f * max(-ny, 0f))
+                        if (d > -bevel) {
+                            // 斜面的剖面是四分之一圓：高度 h＝B·√(1−(1−t)²)，t＝離邊緣的距離／斜面寬度。越靠邊越陡
+                            var t = -d / bevel
+                            if (t < .04f) t = .04f
+                            val w1 = 1f - t
+                            val root = sqrt(1f - w1 * w1)
+                            val slope = w1 / root
+                            // 光線在玻璃裡走的厚度＝這一點的高度＋底下那一層平的玻璃
+                            val thick = bevel * (root + 1.2f)
+                            // 折射（Snell）：三個波長各算一次，偏移的方向是往玻璃裡面
+                            dR = -refract(slope, N_R) * thick
+                            dG = -refract(slope, N_G) * thick
+                            dB = -refract(slope, N_B) * thick
+                            // 反射（Fresnel，Schlick 近似）：越斜的地方反射越多；反射進眼睛的是那盞主光加一點環境光
+                            val inv = 1f / sqrt(1f + slope * slope)
+                            val cosi = inv
+                            val om = 1f - cosi
+                            fres = .04f + .96f * om * om * om * om * om
+                            // 反射方向 R＝I＋2cosi·N，N＝(往外的法線·slope, 1)·inv
+                            val k2 = 2f * cosi * inv
+                            val rx = k2 * slope * nx; val ry = k2 * slope * ny; val rz = -1f + k2
+                            var sp = rx * lxk + ry * lyk + rz * lzk
+                            if (sp < 0f) sp = 0f
+                            env = .16f + .84f * sp * sp * sp
                         }
                     }
                     var cr: Int; var cg: Int; var cb: Int
                     run {
-                        val uu = if (u < 0f) 0f else if (u > maxX) maxX else u
-                        val vv = if (v < 0f) 0f else if (v > maxY) maxY else v
+                        val u1 = u + nx * dG * sx; val v1 = v + ny * dG * sy
+                        val uu = if (u1 < 0f) 0f else if (u1 > maxX) maxX else u1
+                        val vv = if (v1 < 0f) 0f else if (v1 > maxY) maxY else v1
                         val x0 = uu.toInt(); val y0 = vv.toInt(); val fx = uu - x0; val fy = vv - y0
                         val i = y0 * sw + x0
                         val a = src[i]; val b = src[i + 1]; val c = src[i + sw]; val dd = src[i + sw + 1]
@@ -283,9 +322,29 @@ private class GlassBake(private val backdrop: GlassBackdrop, private val edge: B
                         cg = (((a shr 8) and 255) * w00 + ((b shr 8) and 255) * w10 + ((c shr 8) and 255) * w01 + ((dd shr 8) and 255) * w11).toInt()
                         cb = ((a and 255) * w00 + (b and 255) * w10 + (c and 255) * w01 + (dd and 255) * w11).toInt()
                     }
-                    // 背景越亮，白霧越少（亮背景上不會整片發白）；越暗，邊緣補的光越多（暗背景上折射帶才看得見）
+                    if (dG != 0f) {
+                        // 色散：紅、藍用各自的偏移量再取樣一次（和綠色只差百分之幾，背景有明暗變化的地方才分得出顏色）
+                        run {
+                            val u1 = u + nx * dR * sx; val v1 = v + ny * dR * sy
+                            val uu = if (u1 < 0f) 0f else if (u1 > maxX) maxX else u1
+                            val vv = if (v1 < 0f) 0f else if (v1 > maxY) maxY else v1
+                            val x0 = uu.toInt(); val y0 = vv.toInt(); val fx = uu - x0; val fy = vv - y0
+                            val i = y0 * sw + x0
+                            cr = (((src[i] shr 16) and 255) * (1f - fx) * (1f - fy) + ((src[i + 1] shr 16) and 255) * fx * (1f - fy) +
+                                ((src[i + sw] shr 16) and 255) * (1f - fx) * fy + ((src[i + sw + 1] shr 16) and 255) * fx * fy).toInt()
+                        }
+                        run {
+                            val u1 = u + nx * dB * sx; val v1 = v + ny * dB * sy
+                            val uu = if (u1 < 0f) 0f else if (u1 > maxX) maxX else u1
+                            val vv = if (v1 < 0f) 0f else if (v1 > maxY) maxY else v1
+                            val x0 = uu.toInt(); val y0 = vv.toInt(); val fx = uu - x0; val fy = vv - y0
+                            val i = y0 * sw + x0
+                            cb = ((src[i] and 255) * (1f - fx) * (1f - fy) + (src[i + 1] and 255) * fx * (1f - fy) +
+                                (src[i + sw] and 255) * (1f - fx) * fy + (src[i + sw + 1] and 255) * fx * fy).toInt()
+                        }
+                    }
+                    // 玻璃本身的一點白霧：背景越亮加得越少（亮背景上不會整片發白）
                     val lum = (cr * 3 + cg * 6 + cb) / 2550f
-                    val dark = 1f - lum
                     var white = g * (1f - .5f * lum)
                     if (r.lx >= 0f) {
                         // 大片面板的受光：上緣一道光、一片柔光（跟著焦點那一欄）、往下漸暗
@@ -298,53 +357,19 @@ private class GlassBake(private val backdrop: GlassBackdrop, private val edge: B
                         val shade = 1f - .22f * ty * sqrt(ty)
                         cr = (cr * shade).toInt(); cg = (cg * shade).toInt(); cb = (cb * shade).toInt()
                     }
-                    if (e > 0f) {
-                        // 色散：紅色偏得更遠、藍色偏得少一點
-                        val ur = u + du * .9f; val vr = v + dv * .9f
-                        val ub = u - du * .9f; val vb = v - dv * .9f
-                        run {
-                            val uu = if (ur < 0f) 0f else if (ur > maxX) maxX else ur
-                            val vv = if (vr < 0f) 0f else if (vr > maxY) maxY else vr
-                            val x0 = uu.toInt(); val y0 = vv.toInt(); val fx = uu - x0; val fy = vv - y0
-                            val i = y0 * sw + x0
-                            cr = (((src[i] shr 16) and 255) * (1f - fx) * (1f - fy) + ((src[i + 1] shr 16) and 255) * fx * (1f - fy) +
-                                ((src[i + sw] shr 16) and 255) * (1f - fx) * fy + ((src[i + sw + 1] shr 16) and 255) * fx * fy).toInt()
-                        }
-                        run {
-                            val uu = if (ub < 0f) 0f else if (ub > maxX) maxX else ub
-                            val vv = if (vb < 0f) 0f else if (vb > maxY) maxY else vb
-                            val x0 = uu.toInt(); val y0 = vv.toInt(); val fx = uu - x0; val fy = vv - y0
-                            val i = y0 * sw + x0
-                            cb = ((src[i] and 255) * (1f - fx) * (1f - fy) + (src[i + 1] and 255) * fx * (1f - fy) +
-                                (src[i + sw] and 255) * (1f - fx) * fy + (src[i + sw + 1] and 255) * fx * fy).toInt()
-                        }
-                        // 折射帶比中間亮一點、顏色濃一點（厚玻璃邊緣把光聚起來）
-                        val gray = (cr * 3 + cg * 6 + cb) / 10
-                        val el = sqrt(e)   // 線性的邊緣程度：顏色、亮度的變化比位移寬一點，折射帶看得出是一整圈
-                        val sat = 1f + 1.0f * el
-                        cr = (gray + (cr - gray) * sat).toInt(); cg = (gray + (cg - gray) * sat).toInt(); cb = (gray + (cb - gray) * sat).toInt()
-                        white += el * (.03f + .12f * dark)
-                        // 暗、平的背景上沒有東西可以分色：補兩道很細的色邊（靠外偏紅、靠內偏青），越暗補越多
-                        val k1 = 1f - (el - .84f) * (el - .84f) / .03f
-                        val k2 = 1f - (el - .52f) * (el - .52f) / .05f
-                        val amt = .3f + .7f * dark
-                        if (k1 > 0f) { cr += (46f * k1 * amt).toInt(); cb += (12f * k1 * amt).toInt() }
-                        if (k2 > 0f) { cb += (44f * k2 * amt).toInt(); cg += (22f * k2 * amt).toInt() }
-                        // 最外緣的受光亮線：左上最亮、右下次之
-                        if (d > -lineW * 1.6f) {
-                            val k = (1f + d / (lineW * 1.6f)).coerceIn(0f, 1f)
-                            val lit = max(0f, -(nx * .55f + ny * .83f)); val lit2 = max(0f, nx * .55f + ny * .83f)
-                            white += k * k * (.16f + .50f * lit * lit + .26f * lit2 * lit2 * lit2)
-                        }
-                    }
                     if (white > 1f) white = 1f
                     // 白霧用 screen 疊上去：1-(1-c)(1-white)
                     val inv = 1f - white
-                    var rr = 255 - ((255 - cr) * inv).toInt(); var gg = 255 - ((255 - cg) * inv).toInt(); var bb = 255 - ((255 - cb) * inv).toInt()
-                    if (rr < 0) rr = 0 else if (rr > 255) rr = 255
-                    if (gg < 0) gg = 0 else if (gg > 255) gg = 255
-                    if (bb < 0) bb = 0 else if (bb > 255) bb = 255
-                    out[row + x] = (255 shl 24) or (rr shl 16) or (gg shl 8) or bb
+                    var rr = 255f - (255 - cr) * inv; var gg = 255f - (255 - cg) * inv; var bb = 255f - (255 - cb) * inv
+                    if (fres > 0f) {
+                        // 能量守恆：反射掉的部分不再透過來；反射進來的是白光（沒有顏色）
+                        val refl = 255f * fres * env; val tr = 1f - fres
+                        rr = rr * tr + refl; gg = gg * tr + refl; bb = bb * tr + refl
+                    }
+                    val ri = if (rr < 0f) 0 else if (rr > 255f) 255 else rr.toInt()
+                    val gi = if (gg < 0f) 0 else if (gg > 255f) 255 else gg.toInt()
+                    val bi = if (bb < 0f) 0 else if (bb > 255f) 255 else bb.toInt()
+                    out[row + x] = (255 shl 24) or (ri shl 16) or (gi shl 8) or bi
                 }
             }
         }
