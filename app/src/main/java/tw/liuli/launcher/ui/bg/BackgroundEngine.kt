@@ -1050,7 +1050,7 @@ class BackgroundEngine {
         private val INTERVALS = floatArrayOf(33.3f, 50f, 66.7f)
         /** 每秒 60 格的間隔，以及升到 60 格的門檻：30 格時量到的一幀總耗時要在這個數以內（毫秒）。 */
         private const val FAST_INTERVAL = 16.7f
-        private const val FAST_AFFORD = 13.5f
+        private const val FAST_AFFORD = 11f
         /** 量測用：不升到每秒 60 格。 */
         @Volatile var debugNoFast = false
         /** 目前背景的更新率（fps，自動在 30／20／15 之間調整）；技術宅模式的儀表列會顯示。 */
