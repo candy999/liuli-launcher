@@ -1188,7 +1188,6 @@ fun HomeScreen(
     LaunchedEffect(drawerOpen, sheet?.spec, picking) {
         engine.covered = overlay
         tw.liuli.launcher.geek.WeakGpu.init()
-        engine.ambientPaused = drawerOpen && tw.liuli.launcher.geek.WeakGpu.value && !tw.liuli.launcher.ui.bg.PerfProbe.noFreeze
         // 設定面板開著：背景壓暗（以前是全螢幕疊一層半透明黑，每格多混一整個螢幕）
         engine.dim = if (sheet != null) 0.22f else 0f
         if (overlaySeen || overlay) engine.holdForUi(UI_SLIDE_HOLD_MS)
