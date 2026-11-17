@@ -48,6 +48,7 @@ import androidx.compose.ui.unit.sp
 import tw.liuli.launcher.ui.glass.liquidGlass
 import tw.liuli.launcher.ui.glass.GlassFocusState
 import tw.liuli.launcher.ui.glass.glassFocusHost
+import tw.liuli.launcher.ui.glass.GlassFocusCapsule
 import tw.liuli.launcher.ui.glass.glassFocusItem
 import tw.liuli.launcher.ui.glass.rememberGlassFocus
 import tw.liuli.launcher.ui.theme.SLIDE_THRESHOLD
@@ -193,12 +194,8 @@ fun GlassSheet(
             }
             Spacer(Modifier.height(16.dp))
             // 焦點列：一顆比面板亮一點的玻璃在列之間上下滑動（取代以前的白底）
-            val glass = rememberGlassFocus(vertical = true)
-            Box(
-                Modifier
-                    .weight(1f)
-                    .glassFocusHost(glass, { spec.items.size }, slide = { Offset(slide.value * (sheetWidthPx + gapPx), 0f) }),
-            ) {
+            val glass = rememberGlassFocus()
+            Box(Modifier.weight(1f).glassFocusHost(glass, bumpY = { true })) {
             LazyColumn(Modifier.fillMaxSize(), state = listState, verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 itemsIndexed(spec.items) { index, item ->
                     Box(
@@ -217,6 +214,11 @@ fun GlassSheet(
                     }
                 }
             }
+                // 面板本身已經霧了一層，焦點要再白一點才分得出來；清單還在逐列出現時玻璃跟著淡入
+                GlassFocusCapsule(
+                    glass, corner = 18.dp, haze = .17f,
+                    gate = { (reveal.value / REVEAL_FADE_MS).coerceIn(0f, 1f) }, watch = { reveal.value },
+                )
             }
         }
     }
@@ -228,6 +230,7 @@ private fun SheetRow(item: SheetItem, index: Int, glass: GlassFocusState, reques
     val focus = rememberFocusAnim()
     Row(
         Modifier
+            .glassFocusItem(glass, index)
             .fillMaxWidth()
             .let { m ->
                 val adjust = item.onAdjust ?: return@let m
@@ -241,7 +244,6 @@ private fun SheetRow(item: SheetItem, index: Int, glass: GlassFocusState, reques
                 }
             }
             // 統一操作：有「‹ 值 ›」的列，確定鍵＝換到下一個值（選單不關）；其他列執行動作
-            .glassFocusItem(glass, index)
             .focusTarget(
                 focus, requester,
                 onFocused = { onFocused(); item.onFocus?.invoke() },

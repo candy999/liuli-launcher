@@ -74,6 +74,11 @@ import tw.liuli.launcher.ui.components.rememberFocusAnim
 import tw.liuli.launcher.ui.glass.liquidGlass
 import tw.liuli.launcher.ui.glass.glassFocusHost
 import tw.liuli.launcher.ui.glass.glassFocusItem
+import tw.liuli.launcher.ui.glass.glassFocusFollow
+import tw.liuli.launcher.ui.glass.GlassFocusCapsule
+import tw.liuli.launcher.ui.glass.GlassFocusState
+import tw.liuli.launcher.ui.glass.GlassKind
+import tw.liuli.launcher.ui.glass.rememberGlassFocus
 import tw.liuli.launcher.ui.glass.glassHairline
 import tw.liuli.launcher.ui.theme.GText
 import tw.liuli.launcher.ui.theme.Ink
@@ -113,17 +118,18 @@ fun GlassOnFocus(
     content: @Composable () -> Unit,
 ) {
     val focus = rememberFocusAnim()
-    // 和訊號源、側邊欄同一種玻璃：焦點時背後凝結出一塊透明玻璃（帶一點霧、一條細邊線），不是乳白色的板子
-    val glass = tw.liuli.launcher.ui.glass.rememberGlassFocus()
-    val corner = 28.dp
+    // 和訊號源、側邊欄同一種玻璃：焦點時凝結出一塊透明玻璃——背後是霧化的背景（跟著玻璃一起出現），上面一點白霧與一條細邊線
+    val glass = rememberGlassFocus()
     Box(
         modifier
-            .glassFocusHost(glass, { 1 }, corner = corner, bumps = false)
+            .glassFocusHost(glass)
             .glassFocusItem(glass, 0)
             .bgTarget(color)
-            .focusTarget(focus, requester, onClick = onClick),
+            .focusTarget(focus, requester, onClick = { glass.press(); onClick() }),
     ) {
+        Box(Modifier.matchParentSize().glassFocusFollow(glass).liquidGlass(shape, tint = 0.02f))
         content()
+        GlassFocusCapsule(glass, corner = 28.dp, haze = .07f)
     }
 }
 
@@ -284,13 +290,16 @@ fun DrawerStatusBar(home: HomeContext, visible: () -> Float, modifier: Modifier 
     }
 }
 
-/** 設定按鈕：平常是一個圖示，焦點時變成亮白圓鈕。 */
+/** 設定按鈕。 */
 @Composable
-fun GearButton(requester: FocusRequester, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    RoundIconButton(LIcons.Settings, BgColors.GEAR, requester, onClick, modifier)
+fun GearButton(requester: FocusRequester, onClick: () -> Unit, modifier: Modifier = Modifier, glass: GlassFocusState? = null) {
+    RoundIconButton(LIcons.Settings, BgColors.GEAR, requester, onClick, modifier, glass = glass, glassKey = "gear")
 }
 
-/** 右上角圓形圖示按鈕：平常是圖示，焦點時變亮白圓鈕。 */
+/**
+ * 右上角圓形圖示按鈕：平常是一小片霧玻璃上的圖示；焦點時那一顆玻璃滑過來（圖示維持白色、微微放大）。
+ * [glass]：同一欄的圓鈕共用一顆玻璃（由外層的容器提供）；沒給就自己一顆。
+ */
 @Composable
 fun RoundIconButton(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
@@ -300,21 +309,25 @@ fun RoundIconButton(
     modifier: Modifier = Modifier,
     tint: Color = Color.White.copy(alpha = 0.85f),
     iconModifier: Modifier = Modifier,
+    glass: GlassFocusState? = null,
+    glassKey: Any = icon,
 ) {
     val focus = rememberFocusAnim()
+    val own = rememberGlassFocus()
+    val g = glass ?: own
     Box(
         modifier
+            .then(if (glass == null) Modifier.glassFocusHost(own) else Modifier)
+            .glassFocusItem(g, glassKey)
             .size(44.dp)
-            .focusScale(focus, 1.15f)
             .bgTarget(color)
-            .focusTarget(focus, requester, onClick = onClick)
-            .drawBehind {
-                val v = focus.value()
-                if (v > 0.01f) drawCircle(Color.White.copy(alpha = 0.95f * v))
-            },
+            .focusTarget(focus, requester, onClick = { g.press(); onClick() })
+            .liquidGlass(CircleShape, tint = 0.04f)
+            .glassHairline(22.dp),
         contentAlignment = Alignment.Center,
     ) {
-        LIcon(icon, 22.dp, if (focus.focused) Ink.OnLight else tint, iconModifier)
+        LIcon(icon, 22.dp, if (focus.focused) Color.White else tint, iconModifier.focusScale(focus, 1.12f))
+        if (glass == null) GlassFocusCapsule(own, pad = 3.dp, haze = .12f)
     }
 }
 
@@ -323,40 +336,36 @@ fun RoundIconButton(
  * 確定（或下鍵）打開所有 App；在所有 App 裡長按就能加入常用。
  */
 @Composable
-fun AddToDockTile(requester: FocusRequester, onFocused: () -> Unit, onClick: () -> Unit) {
+fun AddToDockTile(requester: FocusRequester, onFocused: () -> Unit, onClick: () -> Unit, outer: Modifier = Modifier) {
     val focus = rememberFocusAnim()
     Box(
         Modifier
+            .then(outer)
             .width(150.dp)
             .aspectRatio(16f / 9f)
-            .focusScale(focus, 1.10f)
+            .focusScale(focus, TILE_FOCUS_SCALE)
             .focusTarget(focus, requester, onFocused = onFocused, onClick = onClick)
-            .drawBehind {
-                val v = focus.value()
-                drawRoundRect(
-                    Color.White.copy(alpha = 0.10f + 0.84f * v),
-                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(Dimens.TileRadius.toPx()),
-                )
-            },
+            .liquidGlass(RoundedCornerShape(Dimens.TileRadius), tint = 0.06f)
+            .glassHairline(Dimens.TileRadius),
         contentAlignment = Alignment.Center,
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            GText("＋", size = 26.sp, weight = FontWeight.Light, color = if (focus.focused) Ink.OnLight else Ink.Primary)
-            GText("加入常用", size = 13.sp, color = if (focus.focused) Ink.OnLight else Ink.Secondary)
+            GText("＋", size = 26.sp, weight = FontWeight.Light, color = Ink.Primary)
+            GText("加入常用", size = 13.sp, color = if (focus.focused) Ink.Primary else Ink.Secondary)
         }
     }
 }
 
 /** 網路狀態按鈕：顯示無線／有線／斷線，按下開啟網路設定。 */
 @Composable
-fun NetworkButton(status: tw.liuli.launcher.context.NetworkStatus, requester: FocusRequester?, onClick: () -> Unit, modifier: Modifier = Modifier) {
+fun NetworkButton(status: tw.liuli.launcher.context.NetworkStatus, requester: FocusRequester?, onClick: () -> Unit, modifier: Modifier = Modifier, glass: GlassFocusState? = null) {
     val icon = when (status) {
         tw.liuli.launcher.context.NetworkStatus.WIFI -> LIcons.Wifi
         tw.liuli.launcher.context.NetworkStatus.ETHERNET -> LIcons.Ethernet
         tw.liuli.launcher.context.NetworkStatus.NONE -> LIcons.NoNet
     }
     val tint = if (status == tw.liuli.launcher.context.NetworkStatus.NONE) Ink.Tertiary else Color.White.copy(alpha = 0.85f)
-    RoundIconButton(icon, BgColors.GEAR, requester, onClick, modifier, tint)
+    RoundIconButton(icon, BgColors.GEAR, requester, onClick, modifier, tint, glass = glass, glassKey = "net")
 }
 
 /** 訊號源一列玻璃膠囊（電視機才有）。 */
@@ -368,49 +377,53 @@ fun InputsRow(
     modifier: Modifier = Modifier,
 ) {
     // 一顆玻璃焦點在膠囊之間滑動（不是每顆膠囊各自亮起來）
-    val glass = tw.liuli.launcher.ui.glass.rememberGlassFocus()
-    Row(
-        modifier.focusRow().glassFocusHost(glass, { sources.size }),
-        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        GText("訊號源", Modifier.padding(end = 4.dp), size = 13.sp, color = Ink.Tertiary, shadow = true)
-        sources.forEachIndexed { i, src ->
-            InputChip(src, i, glass, if (i == 0) firstRequester else null) { glass.press(); onSwitch(src) }
+    val glass = rememberGlassFocus()
+    Box(modifier.focusRow().glassFocusHost(glass, bumpX = { true })) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            GText("訊號源", Modifier.padding(end = 4.dp), size = 13.sp, color = Ink.Tertiary, shadow = true)
+            sources.forEachIndexed { i, src ->
+                InputChip(src, glass, if (i == 0) firstRequester else null) { glass.press(); onSwitch(src) }
+            }
         }
+        // 玻璃比膠囊大一點點（像一片透鏡蓋上去）
+        GlassFocusCapsule(glass, pad = 2.dp, haze = .12f)
     }
 }
 
 @Composable
-private fun InputChip(src: TvSource, index: Int, glass: tw.liuli.launcher.ui.glass.GlassFocusState, requester: FocusRequester?, onClick: () -> Unit) {
+private fun InputChip(src: TvSource, glass: GlassFocusState, requester: FocusRequester?, onClick: () -> Unit) {
     val focus = rememberFocusAnim()
     val color = when (src.type) {
         TvInputInfo.TYPE_TUNER -> BgColors.TV
         TvInputInfo.TYPE_HDMI -> BgColors.HDMI
         else -> BgColors.OTHER_INPUT
     }
-    // 文字一律白色：焦點是背後那一顆透明玻璃，不是白底
-    val dark = false
+    // 沒選中：一小片霧玻璃（背後的背景霧化、一點白、一圈淡細線）——靜態的，焦點動畫期間不重畫。
+    // 選中：那一顆玻璃滑過來蓋在上面。文字一律白色
     Row(
         Modifier
+            .glassFocusItem(glass, src.id)
             .height(40.dp)
             .bgTarget(color)
-            .glassFocusItem(glass, index)
             .focusTarget(focus, requester, onClick = onClick)
-            // 沒選中：只有一圈很淡的細線；玻璃滑過來時細線讓位
-            .glassHairline(20.dp) { 1f - focus.value() }
+            .liquidGlass(RoundedCornerShape(20.dp), tint = 0.05f)
+            .glassHairline(20.dp)
             .padding(start = 12.dp, end = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        LIcon(if (src.type == TvInputInfo.TYPE_TUNER) LIcons.Input else LIcons.Hdmi, 20.dp, if (dark) Ink.OnLight else Color.White)
+        LIcon(if (src.type == TvInputInfo.TYPE_TUNER) LIcons.Input else LIcons.Hdmi, 20.dp, Color.White)
         Spacer(Modifier.width(8.dp))
-        GText(src.label, size = 15.sp, color = if (dark) Ink.OnLight else Ink.Primary)
+        GText(src.label, size = 15.sp, color = Ink.Primary)
         // 名稱已經包含類型（HDMI1、AV）時不再重複顯示
         if (!src.label.replace(" ", "").contains(src.typeTag, ignoreCase = true)) {
             Spacer(Modifier.width(6.dp))
-            GText(src.typeTag, size = 12.sp, color = if (dark) Ink.OnLight.copy(alpha = 0.55f) else Ink.Tertiary)
+            GText(src.typeTag, size = 12.sp, color = Ink.Tertiary)
         }
     }
 }
+
+/** App 磚焦點時放大的倍率（玻璃外框依這個倍率包住放大後的磚）。 */
+const val TILE_FOCUS_SCALE = 1.07f
 
 /**
  * 所有 App 抽屜：從下方滑上來的玻璃面板。第一列按上鍵、或按返回鍵收合。
@@ -592,10 +605,12 @@ fun AppDrawer(
                     }
                 }
                 androidx.compose.runtime.CompositionLocalProvider(androidx.compose.foundation.gestures.LocalBringIntoViewSpec provides noAutoScroll) {
+                val tileGlass = rememberGlassFocus()
+                Box(Modifier.fillMaxWidth().height(gridH).glassFocusHost(tileGlass, bumpX = { true }, bumpY = { true })) {
             LazyVerticalGrid(
                 state = gridState,
                 columns = GridCells.Fixed(DRAWER_COLS),
-                modifier = Modifier.fillMaxWidth().height(gridH),
+                modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(start = 4.dp, end = 4.dp, top = padTop, bottom = padBottom),
                 horizontalArrangement = Arrangement.spacedBy(22.dp),
                 verticalArrangement = Arrangement.spacedBy(gap),
@@ -619,10 +634,17 @@ fun AppDrawer(
                         onLongClick = { fr -> onLongClick(app, fr) },
                         extra = Modifier.bgTarget(app.themeColor, isApp = true),
                         reveal = revealOf,
+                        outer = Modifier.glassFocusItem(tileGlass, app.packageName),
                     )
                     }
                 }
             }
+                    // 玻璃外框在磚之間滑動（磚還在逐排出現時跟著淡入）
+                    GlassFocusCapsule(
+                        tileGlass, GlassKind.Frame, corner = Dimens.TileRadius, pad = 3.dp, grow = TILE_FOCUS_SCALE - 1f, haze = .16f,
+                        gate = { (reveal.value / 200f).coerceIn(0f, 1f) }, watch = { reveal.value },
+                    )
+                }
                 }
             }
         }

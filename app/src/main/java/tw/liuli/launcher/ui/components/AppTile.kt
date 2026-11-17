@@ -18,7 +18,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -40,7 +40,8 @@ import tw.liuli.launcher.ui.theme.Ink
 
 /**
  * App 圖塊：16:9 橫幅（沒有橫幅的手機版 App 置中顯示圖示）。
- * 焦點效果全部在繪製／圖層階段完成：放大、白色描邊、斜向光澤、陰影。
+ * 焦點效果全部在圖層階段完成（只改圖層屬性，不重畫內容）：微微放大、陰影、左上角一抹受光；
+ * 焦點的玻璃外框由外層的 GlassFocusCapsule 畫（一顆外框在磚之間滑動）。
  */
 @Composable
 fun AppTile(
@@ -55,6 +56,8 @@ fun AppTile(
     extra: Modifier = Modifier,
     /** 出場淡入的透明度（0～1，在繪製階段讀取）。 */
     reveal: () -> Float = { 1f },
+    /** 放在磚最外面（放大的圖層之外）的修飾：玻璃焦點用它量磚原本的位置。 */
+    outer: Modifier = Modifier,
 ) {
     val own = remember { FocusRequester() }
     val req = requester ?: own
@@ -64,13 +67,14 @@ fun AppTile(
     Column(Modifier.width(width), horizontalAlignment = Alignment.CenterHorizontally) {
         Box(
             Modifier
+                .then(outer)
                 .fillMaxWidth()
                 .aspectRatio(16f / 9f)
-                .focusScale(focus, 1.10f)
+                .focusScale(focus, tw.liuli.launcher.ui.home.TILE_FOCUS_SCALE)
                 // 焦點陰影：畫在淡入層「外面」（淡入層暫時是一張和磚同大的圖，陰影畫在裡面會被切掉＝破圖）。
                 // 陰影在磚的正下方，磚半透明時會透出底下整片陰影（像一個方框），所以等磚幾乎不透明（90% 以上）才浮現
                 .graphicsLayer {
-                    shadowElevation = 8.dp.toPx() * focus.value() * ((reveal() - .9f) / .1f).coerceIn(0f, 1f)
+                    shadowElevation = 6.dp.toPx() * focus.value() * ((reveal() - .9f) / .1f).coerceIn(0f, 1f)
                     shape = tileShape
                     clip = false
                 }
@@ -84,22 +88,7 @@ fun AppTile(
                 .then(extra)
                 .focusTarget(focus, req, onFocused, onClick, onLongClick = { onLongClick(req) })
                 .clip(tileShape)
-                .background(Color(0xFF1B1E26))
-                .drawWithContent {
-                    drawContent()
-                    // tvOS 式焦點：放大＋陰影＋斜向光澤，不畫任何框線
-                    val v = focus.value()
-                    if (v > 0.01f) {
-                        drawRect(
-                            Brush.linearGradient(
-                                0f to Color.White.copy(alpha = 0.24f * v),
-                                0.4f to Color.Transparent,
-                                start = Offset.Zero,
-                                end = Offset(size.width, size.height),
-                            ),
-                        )
-                    }
-                },
+                .background(Color(0xFF1B1E26)),
         ) {
             val banner = app.banner
             val icon = app.icon
@@ -107,6 +96,25 @@ fun AppTile(
                 banner != null -> Image(banner, app.label, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
                 icon != null -> Image(icon, app.label, Modifier.align(Alignment.Center).size(width * 0.28f))
             }
+            // 焦點時左上角一抹很淡的受光（玻璃外框的光落在磚上）。獨立一層、只改透明度：焦點動畫期間磚的內容不重畫
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        compositingStrategy = CompositingStrategy.ModulateAlpha
+                        alpha = focus.value()
+                    }
+                    .drawBehind {
+                        drawRect(
+                            Brush.linearGradient(
+                                0f to Color.White.copy(alpha = 0.16f),
+                                0.38f to Color.Transparent,
+                                start = Offset.Zero,
+                                end = Offset(size.width, size.height),
+                            ),
+                        )
+                    },
+            )
             if (!app.isTvApp) {
                 GText(
                     "手機版",

@@ -92,6 +92,10 @@ import tw.liuli.launcher.ui.components.KeepVisibleSpec
 import tw.liuli.launcher.ui.components.SheetItem
 import tw.liuli.launcher.ui.components.SheetSpec
 import tw.liuli.launcher.ui.components.focusRow
+import tw.liuli.launcher.ui.glass.GlassFocusCapsule
+import tw.liuli.launcher.ui.glass.GlassKind
+import tw.liuli.launcher.ui.glass.glassFocusHost
+import tw.liuli.launcher.ui.glass.glassFocusItem
 import tw.liuli.launcher.ui.theme.GText
 import tw.liuli.launcher.ui.theme.Ink
 import tw.liuli.launcher.ui.theme.LIcon
@@ -1074,6 +1078,8 @@ fun HomeScreen(
                 "drawer" -> { sheet = null; exitingSheet = null; drawerOpen = true }
                 "fakeapps" -> fakeApps = (arg.toIntOrNull() ?: 0).coerceIn(0, 200)
                 "fakesources" -> fakeSources = arg == "1"
+                // 量測用（adb）：ACTION=glassslow:0.1 玻璃焦點的動畫放慢十倍（截滑動中的畫面用）；glassslow:1 恢復。不存設定
+                "glassslow" -> tw.liuli.launcher.ui.glass.GlassDebug.timeScale = (arg.toFloatOrNull() ?: 1f).coerceIn(0.01f, 1f)
                 // 量測用（adb）：ACTION=shot:名稱 把目前的視窗畫面存成 PNG（Android/data/tw.liuli.launcher/files/shots/名稱.png）。
                 // 直接拷貝 App 自己的畫面緩衝，不靠系統截圖（模擬器視窗縮小時 screencap 只會拿到黑畫面）
                 "shot" -> (context as? android.app.Activity)?.window?.let { win ->
@@ -1220,13 +1226,19 @@ fun HomeScreen(
                     )
                 }
 
-                // 常用 App：直接放在桌布上，不加框；按下鍵展開所有 App
-                LazyRow(
-                    state = dockListState,
-                    modifier = Modifier
+                // 常用 App：直接放在桌布上，不加框；按下鍵展開所有 App。焦點是一顆玻璃外框，在磚之間滑動
+                val dockGlass = tw.liuli.launcher.ui.glass.rememberGlassFocus()
+                Box(
+                    Modifier
                         .padding(top = 290.dp)
                         .fillMaxWidth()
                         .height(116.dp)
+                        .glassFocusHost(dockGlass, bumpX = { movingPkg == null }),
+                ) {
+                LazyRow(
+                    state = dockListState,
+                    modifier = Modifier
+                        .fillMaxSize()
                         .onFocusChanged { dockHasFocus = it.hasFocus }
                         .onPreviewKeyEvent { e ->
                             val code = e.nativeKeyEvent.keyCode
@@ -1265,6 +1277,7 @@ fun HomeScreen(
                                 requester = firstDock,
                                 onFocused = { lastDockPkg = null; dockLabel = "打開所有 App，長按 App 可加入常用"; labelX = 48f * context.resources.displayMetrics.density + 75f * context.resources.displayMetrics.density },
                                 onClick = { drawerOpen = true },
+                                outer = Modifier.glassFocusItem(dockGlass, "add"),
                             )
                         }
                     }
@@ -1303,9 +1316,18 @@ fun HomeScreen(
                                 }
                                 .bgTarget(app.themeColor, isApp = true),
                             reveal = { tw.liuli.launcher.ui.components.rowReveal(dockReveal.value, i, stagger = 55f, fade = 280f) },
+                            outer = Modifier.glassFocusItem(dockGlass, app.packageName),
                         )
                         }
                     }
+                }
+                    // 玻璃外框：比放大後的磚再大一圈；磚第一次逐個出現、或移動模式整塊浮起時跟著走
+                    GlassFocusCapsule(
+                        dockGlass, GlassKind.Frame, corner = tw.liuli.launcher.ui.theme.Dimens.TileRadius, pad = 3.dp,
+                        grow = TILE_FOCUS_SCALE - 1f, haze = .16f,
+                        gate = { ((dockReveal.value - 120f) / 280f).coerceIn(0f, 1f) },
+                        watch = { dockReveal.value; movingPkg },
+                    )
                 }
 
                 // 焦點 App 名稱：在焦點圖塊正下方
@@ -1339,19 +1361,22 @@ fun HomeScreen(
             if (!tw.liuli.launcher.ui.bg.PerfProbe.noHome) Box(recedeLayer) {
                 TodayGroup(home, todayReq, openCalendar, Modifier.padding(start = 28.dp, top = 22.dp))
                 WeatherGroup(home, weatherReq, openWeather, Modifier.align(Alignment.TopEnd).padding(end = 96.dp, top = 30.dp))
-                // 右上角：網路狀態 + 設定，直向疊放
-                Column(
-                    Modifier.align(Alignment.TopEnd).padding(end = 28.dp, top = 34.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    NetworkButton(home.network, null, { SystemActions.networkSettings(context) })
-                    GearButton(gearReq, ::openSettings)
-                    if (settings.geekMode) RocketButton(null, onLaunch = {
-                        rocketResult = tw.liuli.launcher.geek.Rocket.launch(context)
-                        delay(3000)
-                        rocketResult = null
-                    })
+                // 右上角：網路狀態 + 設定，直向疊放；一顆圓形玻璃在按鈕之間上下滑動
+                val cornerGlass = tw.liuli.launcher.ui.glass.rememberGlassFocus()
+                Box(Modifier.align(Alignment.TopEnd).padding(end = 28.dp, top = 34.dp).glassFocusHost(cornerGlass)) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        NetworkButton(home.network, null, { SystemActions.networkSettings(context) }, glass = cornerGlass)
+                        GearButton(gearReq, ::openSettings, glass = cornerGlass)
+                        if (settings.geekMode) RocketButton(null, onLaunch = {
+                            rocketResult = tw.liuli.launcher.geek.Rocket.launch(context)
+                            delay(3000)
+                            rocketResult = null
+                        }, glass = cornerGlass)
+                    }
+                    GlassFocusCapsule(cornerGlass, pad = 3.dp, haze = .12f)
                 }
 
                 // 技術宅模式：常用列下方的系統儀表列（不拿焦點，只是看的）

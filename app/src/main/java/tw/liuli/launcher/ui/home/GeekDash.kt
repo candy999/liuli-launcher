@@ -295,7 +295,7 @@ private fun FrameMetricsHook() {
 
 /** 火箭（齒輪正下方）：一鍵清理背景程式。跟齒輪同一種圓鈕，按下不做動畫（結果顯示在畫面中央）。 */
 @Composable
-fun RocketButton(requester: FocusRequester?, onLaunch: suspend () -> Unit, modifier: Modifier = Modifier) {
+fun RocketButton(requester: FocusRequester?, onLaunch: suspend () -> Unit, modifier: Modifier = Modifier, glass: tw.liuli.launcher.ui.glass.GlassFocusState? = null) {
     val scope = rememberCoroutineScope()
     var busy by remember { mutableStateOf(false) }
     RoundIconButton(
@@ -306,6 +306,7 @@ fun RocketButton(requester: FocusRequester?, onLaunch: suspend () -> Unit, modif
             scope.launch { try { onLaunch() } finally { busy = false } }
         },
         modifier = modifier,
+        glass = glass, glassKey = "rocket",
     )
 }
 
