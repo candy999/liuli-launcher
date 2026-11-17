@@ -57,8 +57,8 @@ val LocalGlassBackdrop = staticCompositionLocalOf { GlassBackdrop(null, { 0L }, 
  * 烘出來的內容（全部在玻璃「裡面」，外框是乾淨的圓角，不往外暈）：
  * - 中間：霧化的背景（引擎給的 120×68 小圖放大）＋很淡的白霧與由上往下的淡光。
  * - 邊緣照物理算，沒有任何「畫上去」的顏色：邊緣是一圈圓弧形的斜面（磨圓的玻璃邊，底部最寬），
- *   每個像素依斜面的斜率用 Snell 定律（折射率 1.5）算視線偏折了多少，到那個位置去取背景——越靠邊越陡、偏得越多，中間是平的不偏。
- * - 色散＝同一個折射對紅、綠、藍用各自的折射率（阿貝數約 40）各算一次：偏移只差百分之幾，
+ *   每個像素依斜面的斜率用 Snell 定律（重火石玻璃，折射率約 1.785）算視線偏折了多少，到那個位置去取背景——越靠邊越陡、偏得越多，中間是平的不偏。
+ * - 色散＝同一個折射對紅、綠、藍用各自的折射率（阿貝數約 25）各算一次：偏移只差百分之幾，
  *   只有被折射的背景本身有明暗、顏色變化的地方才會分出一點點色邊；暗的、平的背景上邊緣就是暗的、安靜的。
  * - 邊緣的亮線是反射（Fresnel）：越斜的地方反射越多，反射的是左上方一盞柔和的白光，所以左上亮、右下暗；反射掉的光不再透過來。
  * 只有背景小圖更新、玻璃的位置或大小改變時才重烘（背景在動時每秒最多十幾次，在背景執行緒）；
@@ -228,10 +228,13 @@ private class GlassBake(private val backdrop: GlassBackdrop, private val edge: B
     }
 
     private companion object {
-        // 玻璃的折射率（冕牌玻璃，阿貝數約 40）：紅光折得少、藍光折得多——色散就只是這三個數字的差別
-        const val N_R = 1.4963f
-        const val N_G = 1.5000f
-        const val N_B = 1.5088f
+        // 玻璃的折射率：重火石玻璃（SF11 一類，n≈1.785、阿貝數約 25——真實存在的高色散光學玻璃）。
+        // 紅光折得少、藍光折得多；色散就只是這三個數字的差別，沒有另外畫上去的顏色
+        const val N_R = 1.7745f
+        const val N_G = 1.7850f
+        const val N_B = 1.8050f
+        /** 垂直入射的反射率 ((n−1)/(n+1))²。 */
+        const val R0 = .0795f
 
         /** 垂直入射的視線穿過斜率為 [slope] 的玻璃表面後，水平方向的偏移量（每單位厚度；正值＝往斜面升高的方向，也就是往玻璃裡面）。 */
         private fun refract(slope: Float, n: Float): Float {
@@ -310,8 +313,8 @@ private class GlassBake(private val backdrop: GlassBackdrop, private val edge: B
                             val slope = w1 / root
                             // 光線在玻璃裡走的厚度＝這一點的高度＋底下那一層平的玻璃
                             val thick = bevel * (root + 2.2f)
-                            // 霧面只在平的地方：表面越陡，看到的越是清楚的背景（斜率 1.1 以上完全清楚）
-                            mix = min(1f, slope / 1.1f)
+                            // 霧面只在平的地方：表面越陡，看到的越是清楚的背景（斜率 0.7 以上完全清楚）
+                            mix = min(1f, slope / .7f)
                             // 折射（Snell）：三個波長各算一次，偏移的方向是往玻璃裡面
                             dR = -refract(slope, N_R) * thick
                             dG = -refract(slope, N_G) * thick
@@ -327,7 +330,7 @@ private class GlassBake(private val backdrop: GlassBackdrop, private val edge: B
                                 val sl = wk / sqrt(1f - wk * wk)
                                 val inv = 1f / sqrt(1f + sl * sl)
                                 val om = 1f - inv
-                                val f = .04f + .96f * om * om * om * om * om
+                                val f = R0 + (1f - R0) * om * om * om * om * om
                                 // 反射方向 R＝I＋2cosi·N，N＝(往外的法線·斜率, 1)·inv
                                 val k2 = 2f * inv * inv
                                 var sp = k2 * sl * (nx * lxk + ny * lyk) + (-1f + k2) * lzk
