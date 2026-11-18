@@ -587,6 +587,7 @@ fun AppDrawer(
     androidx.compose.runtime.CompositionLocalProvider(
         tw.liuli.launcher.ui.components.LocalFocusSnap provides { slide.value > 0.001f || asLayer },
         tw.liuli.launcher.ui.components.LocalTileShadow provides { 1f },
+        tw.liuli.launcher.ui.glass.LocalGlassHidden provides { false },
     ) {
     Box(
         Modifier
@@ -633,7 +634,10 @@ fun AppDrawer(
                     // （彈簧衝過頭時 s 是負的，也要維持離屏圖，等彈簧完全停了才換回一般繪製）
                     // 只看「是不是定格中」：App 開始逐排出現之後就一直是一般繪製——底框還在晃（s 在 0 附近來回）時如果跟著
                     // 在離屏圖與一般繪製之間切來切去，每切一次整塊都要重畫
-                    compositingStrategy = if (asLayer) CompositingStrategy.Offscreen else CompositingStrategy.Auto
+                    // 打開的期間整塊抽屜一直是一張離屏圖：背景每動一格（流動的樣式、換色的那一秒）整個畫面都要重畫，
+                    // 抽屜若是一般繪製，玻璃底框加十幾塊磚每格都得重畫一遍（海信上一格 60～80ms＝抽屜一打開、一換色就卡）；
+                    // 離屏圖只要貼一張。裡面有東西變（焦點、玻璃重烘）時系統只重畫那一小塊
+                    compositingStrategy = CompositingStrategy.Offscreen
                 }
                 .liquidGlass(
                     gate = glassGate,

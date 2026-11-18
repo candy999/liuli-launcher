@@ -47,6 +47,12 @@ class GlassBackdrop(
     val lensing: Boolean,
 )
 
+/**
+ * 這一區的玻璃目前完全看不到（主畫面被抽屜蓋住、透明度 0）＝true：不重畫、不重烘。
+ * 不處理的話，背景每換一次色，被蓋住的十幾片玻璃照樣在背後重烘、重新錄製。在繪製階段讀取。
+ */
+val LocalGlassHidden = staticCompositionLocalOf<() -> Boolean> { { false } }
+
 val LocalGlassBackdrop = staticCompositionLocalOf { GlassBackdrop(null, { 0L }, Size.Zero, false) }
 
 /**
@@ -83,6 +89,7 @@ fun Modifier.liquidGlass(
     gate: GlassGate? = null,
 ): Modifier = composed {
     val backdrop = LocalGlassBackdrop.current
+    val hidden = LocalGlassHidden.current
     var origin by remember { mutableStateOf(Offset.Zero) }
     val bake = remember(backdrop.image) { GlassBake(backdrop, edge) }
     bake.gate = gate
@@ -117,6 +124,7 @@ fun Modifier.liquidGlass(
 
             onDrawBehind {
                 if (tw.liuli.launcher.ui.bg.PerfProbe.noGlass) return@onDrawBehind
+                if (hidden()) return@onDrawBehind   // 先讀這個：看不到的時候不訂閱背景版本，背景怎麼變都不會被叫起來重畫
                 tw.liuli.launcher.ui.bg.UiTrace.hit("glassDraw")
                 val v = backdrop.version() // 背景換色時跟著重烘
                 @Suppress("UNUSED_VARIABLE") val t = bake.tick // 烘好一張就重畫

@@ -1244,7 +1244,14 @@ fun HomeScreen(
             ((a - .85f) / .15f).coerceIn(0f, 1f)
         }
     }
-    CompositionLocalProvider(LocalBringIntoViewSpec provides keepVisible, tw.liuli.launcher.ui.components.LocalTileShadow provides tileShadow) {
+    // 主畫面被抽屜完全蓋住（透明度 0）時，主畫面上的玻璃不重畫、不重烘（抽屜、側邊欄自己另外設成「看得到」）
+    val homeGlassHidden = remember { androidx.compose.runtime.derivedStateOf { drawerHide.value > .999f } }
+    val glassHidden: () -> Boolean = remember { { homeGlassHidden.value } }
+    CompositionLocalProvider(
+        LocalBringIntoViewSpec provides keepVisible,
+        tw.liuli.launcher.ui.components.LocalTileShadow provides tileShadow,
+        tw.liuli.launcher.ui.glass.LocalGlassHidden provides glassHidden,
+    ) {
         Box(
             Modifier
                 .fillMaxSize()
