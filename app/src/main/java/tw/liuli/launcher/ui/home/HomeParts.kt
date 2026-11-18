@@ -763,6 +763,7 @@ private fun DrawerCell(
         Modifier
             .onSizeChanged { onHeight(it.height) }
             .graphicsLayer {
+                compositingStrategy = CompositingStrategy.ModulateAlpha   // 捲動中最上面那一排變淡：不為每一格開暫存圖
                 translationY = (1f - revealOf()) * 14.dp.toPx()
                 val firstRow = gridState.firstVisibleItemIndex / DRAWER_COLS
                 val off = gridState.firstVisibleItemScrollOffset
@@ -790,7 +791,7 @@ private fun SystemToggleTile(
                 .fillMaxWidth()
                 .aspectRatio(16f / 9f)
                 .jellyFocus(jelly, focus, TILE_FOCUS_SCALE)
-                .graphicsLayer { alpha = reveal() }
+                .graphicsLayer { alpha = reveal(); compositingStrategy = CompositingStrategy.ModulateAlpha }
                 .focusTarget(focus, requester, onFocused = onFocused, onClick = { jelly.press(); onClick() })
                 .liquidGlass(RoundedCornerShape(Dimens.TileRadius), tint = 0.06f),
             contentAlignment = Alignment.Center,
@@ -801,7 +802,7 @@ private fun SystemToggleTile(
         Spacer(Modifier.height(10.dp))
         GText(
             if (loading) "載入中…" else if (expanded) "隱藏系統應用" else "顯示系統應用",
-            Modifier.fillMaxWidth().graphicsLayer { alpha = reveal() },
+            Modifier.fillMaxWidth().graphicsLayer { alpha = reveal(); compositingStrategy = CompositingStrategy.ModulateAlpha },
             size = 14.sp,
             weight = if (focus.focused) FontWeight.Medium else FontWeight.Normal,
             color = if (focus.focused) Ink.Primary else Ink.Tertiary,

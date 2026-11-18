@@ -174,12 +174,16 @@ fun HomeScreen(
     val geekSampler = remember { tw.liuli.launcher.geek.StatsSampler(context) }
     // 用 State 物件傳下去、不在這裡讀值：每秒更新時只有儀表列重新組合（以前整個主畫面每秒重組一次，海信上 UI 執行緒每次卡 50ms）
     val geekStats = remember { mutableStateOf(tw.liuli.launcher.geek.Stats()) }
+    val overlayChangedAt = remember { LongArray(1) }
     var rocketResult by remember { mutableStateOf<tw.liuli.launcher.geek.RocketResult?>(null) }
     LaunchedEffect(settings.geekMode, active, tw.liuli.launcher.AppForeground.resumed) {
         // 琉璃在背景（看 YouTube、HDMI）時不取樣：不量網路延遲、不讀 CPU
         if (!settings.geekMode || !active || !tw.liuli.launcher.AppForeground.resumed) return@LaunchedEffect
         while (true) {
-            runCatching { geekSampler.sample() }.onSuccess { geekStats.value = it }
+            // 抽屜開著（儀表列被蓋住、看不到）不更新；抽屜、面板開關的那一秒也不更新——
+            // 儀表列每更新一次，海信上那一格要 35ms 以上，剛好落在彈出動畫裡就掉格
+            if (!drawerOpen && android.os.SystemClock.uptimeMillis() - overlayChangedAt[0] > 1000L)
+                runCatching { geekSampler.sample() }.onSuccess { geekStats.value = it }
             delay(1000)
         }
     }
@@ -1210,6 +1214,7 @@ fun HomeScreen(
     val overlay = drawerOpen || sheet != null || picking
     var overlaySeen by remember { mutableStateOf(false) }
     LaunchedEffect(drawerOpen, sheet?.spec, picking) {
+        overlayChangedAt[0] = android.os.SystemClock.uptimeMillis()
         engine.covered = overlay
         tw.liuli.launcher.geek.WeakGpu.init()
         // 設定面板開著：背景壓暗（以前是全螢幕疊一層半透明黑，每格多混一整個螢幕）
