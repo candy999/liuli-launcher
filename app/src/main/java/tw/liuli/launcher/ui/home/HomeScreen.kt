@@ -1230,22 +1230,43 @@ fun HomeScreen(
         else real + List(fakeApps) { i -> real[i % real.size].let { a -> a.copy(packageName = "fake.$i.${a.packageName}", label = "${a.label} ${i + 1}") } }
     }
     val dockApps = remember(apps, dock) { dock.mapNotNull { pkg -> apps.firstOrNull { it.packageName == pkg } } }
-    val recede = animateFloatAsState(if (drawerOpen || sheet != null || picking) 1f else 0f, tween(380), label = "recede")
+    val overlayUp = drawerOpen || sheet != null || picking
+    val recedeT = animateFloatAsState(if (overlayUp) 1f else 0f, tween(if (overlayUp) 380 else 200), label = "recede")
+    // 收起時主畫面「從一半開始回來」：定格的抽屜／側邊欄收到一半之前，主畫面維持原樣（抽屜：看不到；側邊欄：變暗），
+    // 後半段才跟著面板的位置淡回來。面板收前半段時每一格只有那一張圖在動，不用同時重畫整個半透明的主畫面
+    val drawerSlide = remember { tw.liuli.launcher.ui.components.SlideRef() }
+    val sheetSlide = remember { tw.liuli.launcher.ui.components.SlideRef() }
+    val sheetClosing = androidx.compose.runtime.rememberUpdatedState(sheet == null && exitingSheet != null && !drawerOpen && !picking)
+    val drawerOpenNow = androidx.compose.runtime.rememberUpdatedState(drawerOpen)
+    val recede = remember {
+        object : androidx.compose.runtime.State<Float> {
+            override val value: Float get() =
+                if (sheetClosing.value) ((1f - sheetSlide.read().coerceIn(0f, 1f)) / .5f).coerceIn(0f, 1f) else recedeT.value
+        }
+    }
     // 抽屜：主畫面整個隱藏（抽屜上方改放一行精簡的時間、天氣）；側邊欄只是變淡，背後的主畫面還看得到
     val drawerHide = animateFloatAsState(if (drawerOpen) 1f else 0f, tween(if (drawerOpen) 220 else 320), label = "drawerHide")
     // 只在「出現／消失」這一刻重新組合，淡入淡出中不每格重組整個主畫面
     val drawerBarShown by remember { androidx.compose.runtime.derivedStateOf { drawerHide.value > 0.001f } }
+    // 主畫面被抽屜藏起來的程度：打開時照時間淡出；收起時看抽屜收到哪——前半段維持藏著，後半段淡回來
+    val homeHide = remember {
+        object : androidx.compose.runtime.State<Float> {
+            override val value: Float get() =
+                if (drawerOpenNow.value) drawerHide.value
+                else ((1f - drawerSlide.read().coerceIn(0f, 1f)) / .5f).coerceIn(0f, 1f)
+        }
+    }
 
     // 主畫面一開始變淡，常用列焦點磚的陰影就收掉（淡到 85% 以下就沒有）
     val visNow = androidx.compose.runtime.rememberUpdatedState(visibility)
     val tileShadow: () -> Float = remember {
         {
-            val a = (1f - 0.4f * recede.value) * (1f - minimalT.value) * (1f - drawerHide.value) * visNow.value()
+            val a = (1f - 0.4f * recede.value) * (1f - minimalT.value) * (1f - homeHide.value) * visNow.value()
             ((a - .85f) / .15f).coerceIn(0f, 1f)
         }
     }
     // 主畫面被抽屜完全蓋住（透明度 0）時，主畫面上的玻璃不重畫、不重烘（抽屜、側邊欄自己另外設成「看得到」）
-    val homeGlassHidden = remember { androidx.compose.runtime.derivedStateOf { drawerHide.value > .999f } }
+    val homeGlassHidden = remember { androidx.compose.runtime.derivedStateOf { homeHide.value > .999f } }
     val glassHidden: () -> Boolean = remember { { homeGlassHidden.value } }
     CompositionLocalProvider(
         LocalBringIntoViewSpec provides keepVisible,
@@ -1322,7 +1343,7 @@ fun HomeScreen(
                 .graphicsLayer {
                     compositingStrategy = CompositingStrategy.ModulateAlpha
                     val m = minimalT.value
-                    alpha = (1f - 0.4f * recede.value) * (1f - m) * (1f - drawerHide.value)
+                    alpha = (1f - 0.4f * recede.value) * (1f - m) * (1f - homeHide.value)
                     // 簡潔模式：整片往下收、淡出（只動圖層位置，不重新排版）
                     translationY = m * 46.dp.toPx()
                 }
@@ -1495,6 +1516,7 @@ fun HomeScreen(
             if (drawerReady || drawerOpen) {
                 AppDrawer(
                     open = drawerOpen,
+                    slideRef = drawerSlide,
                     apps = visibleApps,
                     onClose = ::closeDrawer,
                     onLaunch = ::launchApp,
@@ -1550,6 +1572,7 @@ fun HomeScreen(
                         s, exiting = sheet == null,
                         onExited = { if (exitingSheet === s) exitingSheet = null },
                         onFocusIndex = { sheetFocus[0] = it },
+                        slideRef = sheetSlide,
                     )
                 }
             }

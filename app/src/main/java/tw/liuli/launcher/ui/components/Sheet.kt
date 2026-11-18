@@ -103,6 +103,9 @@ data class SheetSpec(
  * 焦點鎖在面板內；返回鍵由呼叫端關閉。滑入動畫只動 translationX，不重新排版。
  */
 @OptIn(ExperimentalComposeUiApi::class)
+/** 面板／抽屜目前滑到哪（0＝停好、1＝完全收起）。主畫面用它決定收起時什麼時候淡回來。 */
+class SlideRef { var read by androidx.compose.runtime.mutableStateOf<() -> Float>({ 1f }) }
+
 @Composable
 fun GlassSheet(
     spec: SheetSpec,
@@ -111,11 +114,13 @@ fun GlassSheet(
     onExited: () -> Unit = {},
     /** 焦點停在第幾列（返回上一層時，焦點回到當初進去的那一列）。 */
     onFocusIndex: (Int) -> Unit = {},
+    slideRef: SlideRef? = null,
 ) {
     androidx.compose.runtime.SideEffect { tw.liuli.launcher.ui.bg.UiTrace.hit("Sheet") }
     val first = remember { FocusRequester() }
     // 收尾門檻要很小（0.05%，不到半個像素）：預設 1% 對 440dp 的抽屜是 9 個像素，彈簧最後會「喀」地跳到終點
     val slide = remember { Animatable(1f, visibilityThreshold = SLIDE_THRESHOLD) }
+    if (slideRef != null) androidx.compose.runtime.DisposableEffect(slideRef) { slideRef.read = { slide.value }; onDispose { slideRef.read = { 1f } } }
     // 打開後 0.5 秒內整塊面板維持一張離屏圖（滑入、主畫面淡出、背景暫停都結束才回到一般繪製）；收起時整段都是。
     // 收起沿用同一個元件（不重新組合整個清單——弱電視上要 100ms 以上，收起動畫會被吃掉）
     var asLayer by remember { androidx.compose.runtime.mutableStateOf(true) }
@@ -225,25 +230,26 @@ fun GlassSheet(
                     slide = { Offset(slide.value * (sheetWidthPx + gapPx), 0f) },
                     frozen = { asLayer || kotlin.math.abs(slide.value) > 0.001f },
                 )
-                .padding(horizontal = 16.dp, vertical = 26.dp)
+                // 左右的 16dp 留白放進每一列自己的圖層裡（見下面的清單），這裡只留上下
+                .padding(vertical = 26.dp)
                 .trapDirectionalFocus(),
         ) {
-            GText(spec.title, Modifier.padding(horizontal = 12.dp), size = 22.sp, weight = FontWeight.Medium)
+            GText(spec.title, Modifier.padding(horizontal = 28.dp), size = 22.sp, weight = FontWeight.Medium)
             if (spec.subtitle != null) {
                 Spacer(Modifier.height(4.dp))
-                GText(spec.subtitle, Modifier.padding(horizontal = 12.dp), size = 13.sp, color = Ink.Tertiary, maxLines = 7)
+                GText(spec.subtitle, Modifier.padding(horizontal = 28.dp), size = 13.sp, color = Ink.Tertiary, maxLines = 7)
             }
             if (spec.header != null) {
                 Spacer(Modifier.height(14.dp))
-                spec.header.invoke()
+                Box(Modifier.padding(horizontal = 16.dp)) { spec.header.invoke() }
             }
             Spacer(Modifier.height(4.dp))
             // 焦點列：和主畫面的按鈕同一套——有焦點的那一列自己像布丁一樣被帶一下、彈回來，上面亮一層玻璃
             Box(Modifier.weight(1f)) {
             // 上下各留 12dp：清單會裁切超出範圍的內容，第一列往上撞牆、最後一列往下撞牆時整列（含亮起來的邊線）要完整看得到
             LazyColumn(
-                Modifier.fillMaxSize(), state = listState, verticalArrangement = Arrangement.spacedBy(4.dp),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 12.dp),
+                Modifier.fillMaxSize(), state = listState,
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 10.dp),
             ) {
                 itemsIndexed(spec.items) { index, item ->
                     Box(
@@ -251,12 +257,15 @@ fun GlassSheet(
                             // 第幾個「看得到的」列決定出場順序（捲動過的清單從畫面上第一列開始算）
                             val order = (index - listState.firstVisibleItemIndex).coerceAtLeast(0)
                             val a = rowReveal(reveal.value, order)
-                            // 整列先畫好再整體淡入（焦點的白底和文字不會互相透出）；列不會放大，不怕被裁
+                            // 整列先畫好再整體淡入（焦點的白底和文字不會互相透出）。
+                            // 淡入時這一層是一張和它同大的離屏圖，超出去的會被裁掉：有焦點的那一列會放大一點、還會像布丁一樣被拉長，
+                            // 所以這一層要比列本身大——左右各 16dp、上下各 2dp 的留白算在這一層裡面（以前留白在外面，
+                            // 側邊欄彈出來、第一列淡入的那幾格，亮起來的玻璃左右兩端被切成直的）
                             compositingStrategy = if (a < .999f) androidx.compose.ui.graphics.CompositingStrategy.Offscreen
                             else androidx.compose.ui.graphics.CompositingStrategy.Auto
                             alpha = a
                             translationY = (1f - a) * 10.dp.toPx()
-                        },
+                        }.padding(horizontal = 16.dp, vertical = 2.dp),
                     ) {
                         SheetRow(item, if (index == focusAt) first else null) { onFocusIndex(index); edgeScroll(index) }
                     }
