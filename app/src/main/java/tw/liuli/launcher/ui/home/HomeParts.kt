@@ -44,7 +44,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.onPreviewKeyEvent
@@ -586,11 +585,10 @@ fun AppDrawer(
     Box(
         Modifier
             .fillMaxSize()
-            .layout { measurable, constraints ->
-                val p = measurable.measure(constraints)
-                layout(p.width, p.height) { if (open || shown) p.place(0, 0) }
-            }
-            // 收起中的抽屜不能再被焦點走進去
+            // 收起來的時候也一直「擺著」（只是整塊透明度 0，GPU 完全不畫）：
+            // 以前收起就不擺放，Compose 會把裡面一百多個圖層全部丟掉，下次打開的第一格要重建、重新錄製每一塊磚的繪圖指令——
+            // 海信上那一格主執行緒要 0.1 秒以上（打開抽屜按下去之後的那一下停頓）
+            // 收起中、收起後的抽屜不能被焦點走進去
             .focusProperties { if (!open) enter = { FocusRequester.Cancel } }
             .focusGroup(),
         contentAlignment = Alignment.BottomCenter,
@@ -601,6 +599,7 @@ fun AppDrawer(
                 .fillMaxWidth()
                 .height(440.dp + DRAWER_OVERSHOOT)
                 .graphicsLayer {
+                    if (!open && !shown) { alpha = 0f; return@graphicsLayer }   // 收起來了：不畫（圖層與繪圖指令都留著）
                     if (prep) {
                         // 準備中：在停下來的位置、幾乎全透明（約 0.4%，肉眼看不到）畫一次，讓 GPU 把整張離屏圖建好
                         translationY = overshootPx; alpha = .004f
@@ -628,7 +627,7 @@ fun AppDrawer(
                     gate = glassGate,
                     shape = RoundedCornerShape(topStart = 34.dp, topEnd = 34.dp), tint = 0.09f,
                     slide = { drawerSlideOffset(slide.value, drawerHeightPx) },
-                    frozen = { asLayer || kotlin.math.abs(slide.value) > 0.001f },
+                    frozen = { asLayer || (!open && !shown) || kotlin.math.abs(slide.value) > 0.001f },   // 收起來的時候不重烘
                     // 受光：上緣一道光、一片跟著焦點那一欄移動的柔光、往下漸暗（烘在同一張圖裡；位置量化成 24 格，移動中最多每 0.12 秒重烘一次）
                     light = { androidx.compose.ui.geometry.Offset(lightStep / 240f, .08f) },
                 )
