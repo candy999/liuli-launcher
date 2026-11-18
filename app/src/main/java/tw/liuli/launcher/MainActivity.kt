@@ -220,14 +220,6 @@ fun LiuliApp(lensing: Boolean, homePresses: Int, externalAction: Pair<Int, Strin
         else tween(PAGE_OUT_MS, easing = FastOutLinearInEasing),
         label = "pageVis",
     )
-    // 子頁面浮上來／收下去的位移用和抽屜、側邊欄同一條彈簧（衝過頭一點再晃回來），透明度照舊
-    val pageRise = remember { androidx.compose.animation.core.Animatable(0f) }
-    LaunchedEffect(screen) {
-        if (screen != Screen.Home) {
-            kotlinx.coroutines.delay((PAGE_OUT_MS - 30).toLong())
-            pageRise.animateTo(1f, tw.liuli.launcher.ui.theme.SheetSpring)
-        } else pageRise.animateTo(0f, tw.liuli.launcher.ui.theme.SheetExit)
-    }
     var lastPage by remember { mutableStateOf(Screen.Weather) }
     if (screen != Screen.Home) lastPage = screen
     var pagesReady by remember { mutableStateOf(false) }
@@ -304,7 +296,7 @@ fun LiuliApp(lensing: Boolean, homePresses: Int, externalAction: Pair<Int, Strin
                 val placed = (isLast && (screen == page || pageVis.value > 0.001f)) || (warmPages && screen == Screen.Home)
                 if (pagesReady || placed) {
                     key(page) {
-                        PageHost(placed, alpha = { if (warmPages && screen == Screen.Home) WARM_ALPHA else if (isLast) pageVis.value else 0f }, rise = { pageRise.value }, speed = { pageRise.velocity }) {
+                        PageHost(placed, alpha = { if (warmPages && screen == Screen.Home) WARM_ALPHA else if (isLast) pageVis.value else 0f }) {
                             when (page) {
                                 Screen.Calendar -> CalendarScreen(home.now, calendarStart ?: home.now.toLocalDate(), active = screen == Screen.Calendar)
                                 else -> WeatherScreen(home, active = screen == Screen.Weather)
@@ -335,7 +327,7 @@ private const val WARM_ALPHA = .004f
  * 淡入淡出與上下浮動只改圖層屬性，頁面內容不用重畫。
  */
 @androidx.compose.runtime.Composable
-private fun PageHost(placed: Boolean, alpha: () -> Float, rise: () -> Float, speed: () -> Float, content: @androidx.compose.runtime.Composable () -> Unit) {
+private fun PageHost(placed: Boolean, alpha: () -> Float, content: @androidx.compose.runtime.Composable () -> Unit) {
     val lift = with(LocalDensity.current) { 20.dp.toPx() }
     Box(
         Modifier
@@ -350,12 +342,8 @@ private fun PageHost(placed: Boolean, alpha: () -> Float, rise: () -> Float, spe
                         compositingStrategy = if (a < .999f) androidx.compose.ui.graphics.CompositingStrategy.Offscreen
                         else androidx.compose.ui.graphics.CompositingStrategy.Auto
                         this.alpha = a
-                        // 位移跟著彈簧（會衝過頭一點）；移動中順著方向微微拉長、衝過頭那一下壓扁——和抽屜、按鈕同一種布丁
-                        val r = rise()
-                        translationY = (1f - r) * lift * 1.6f
-                        val st = (kotlin.math.abs(speed()) * .006f).coerceAtMost(.03f) - (r - 1f).coerceAtLeast(0f) * .5f
-                        scaleY = 1f + st; scaleX = 1f / (1f + .5f * st)
-                        transformOrigin = androidx.compose.ui.graphics.TransformOrigin(.5f, 1f)
+                        // 進出頁面：跟著淡入淡出上下浮動（布丁只用在頁面裡的焦點操作，不用在換頁）
+                        translationY = (1f - a) * lift
                     }
                 }
             },
