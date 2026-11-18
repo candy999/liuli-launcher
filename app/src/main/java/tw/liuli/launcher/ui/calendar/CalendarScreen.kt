@@ -2,10 +2,11 @@ package tw.liuli.launcher.ui.calendar
 
 import android.view.KeyEvent
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.EnterExitState
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
@@ -42,6 +43,7 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.KeyEventType
@@ -147,13 +149,25 @@ fun CalendarScreen(now: java.time.LocalDateTime, initial: LocalDate = now.toLoca
                 transitionSpec = {
                     val down = targetState > initialState
                     // 不裁切：選中的那一格會放大、布丁變形會超出格子，裁切的話最邊邊那幾格（週日、週六那兩欄與最上最下那兩列）
-                    // 的外框在翻月的過場中會被切掉
-                    ((slideInVertically(tween(380)) { h -> if (down) h / 14 else -h / 14 } + fadeIn(tween(300))) togetherWith fadeOut(tween(150)))
+                    // 的外框在翻月的過場中會被切掉。
+                    // 淡入淡出也不用內建的 fadeIn／fadeOut：那會把整個月曆畫進一張跟月曆一樣大的離屏圖再調透明度，
+                    // 超出月曆範圍的部分（週日的左邊、週六的右邊、最下面一列的下邊）就被切掉了。改成下面自己調透明度。
+                    (slideInVertically(tween(380)) { h -> if (down) h / 14 else -h / 14 } togetherWith ExitTransition.None)
                         .using(androidx.compose.animation.SizeTransform(clip = false))
                 },
                 label = "month",
             ) { m ->
-                MonthGrid(m, sel, today, cache)
+                val alpha by transition.animateFloat(
+                    transitionSpec = { if (targetState == EnterExitState.Visible) tween(300) else tween(150) },
+                    label = "monthAlpha",
+                ) { if (it == EnterExitState.Visible) 1f else 0f }
+                Box(
+                    Modifier.fillMaxSize().graphicsLayer {
+                        this.alpha = alpha
+                        // 每一筆繪製各自乘上透明度，不經過離屏圖，所以不會被裁切
+                        compositingStrategy = CompositingStrategy.ModulateAlpha
+                    },
+                ) { MonthGrid(m, sel, today, cache) }
             }
         }
         Column(Modifier.weight(1f).fillMaxHeight()) {
