@@ -44,6 +44,12 @@ import tw.liuli.launcher.ui.theme.Ink
  * 焦點效果全部在圖層階段完成（只改圖層屬性，不重畫內容）：微微放大、陰影、左上角一抹受光；
  * 整塊磚自己像布丁一樣變形（jellyFocus），邊緣亮一圈細玻璃邊。
  */
+/**
+ * 磚的焦點陰影要不要畫（0～1，在圖層階段讀取）。主畫面整片變淡時（打開抽屜、側邊欄、換頁）由主畫面提供：
+ * 陰影是系統另外畫的，不會跟著「每筆繪圖乘透明度」一起淡掉——不處理的話，主畫面淡出的那幾格會留下一個深色的方框。
+ */
+val LocalTileShadow = androidx.compose.runtime.staticCompositionLocalOf<() -> Float> { { 1f } }
+
 @Composable
 fun AppTile(
     app: AppEntry,
@@ -64,6 +70,7 @@ fun AppTile(
     val focus = rememberFocusAnim()
     val jelly = tw.liuli.launcher.ui.glass.rememberJelly()
     val tileShape = RoundedCornerShape(Dimens.TileRadius)
+    val shadowFade = LocalTileShadow.current
 
     Column(Modifier.width(width), horizontalAlignment = Alignment.CenterHorizontally) {
         Box(
@@ -75,7 +82,7 @@ fun AppTile(
                 // 焦點陰影：畫在淡入層「外面」（淡入層暫時是一張和磚同大的圖，陰影畫在裡面會被切掉＝破圖）。
                 // 陰影在磚的正下方，磚半透明時會透出底下整片陰影（像一個方框），所以等磚幾乎不透明（90% 以上）才浮現
                 .graphicsLayer {
-                    shadowElevation = 6.dp.toPx() * focus.value() * ((reveal() - .9f) / .1f).coerceIn(0f, 1f)
+                    shadowElevation = 6.dp.toPx() * focus.value() * ((reveal() - .9f) / .1f).coerceIn(0f, 1f) * shadowFade()
                     shape = tileShape
                     clip = false
                 }

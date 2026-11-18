@@ -1236,7 +1236,15 @@ fun HomeScreen(
     // 只在「出現／消失」這一刻重新組合，淡入淡出中不每格重組整個主畫面
     val drawerBarShown by remember { androidx.compose.runtime.derivedStateOf { drawerHide.value > 0.001f } }
 
-    CompositionLocalProvider(LocalBringIntoViewSpec provides keepVisible) {
+    // 主畫面一開始變淡，常用列焦點磚的陰影就收掉（淡到 85% 以下就沒有）
+    val visNow = androidx.compose.runtime.rememberUpdatedState(visibility)
+    val tileShadow: () -> Float = remember {
+        {
+            val a = (1f - 0.4f * recede.value) * (1f - minimalT.value) * (1f - drawerHide.value) * visNow.value()
+            ((a - .85f) / .15f).coerceIn(0f, 1f)
+        }
+    }
+    CompositionLocalProvider(LocalBringIntoViewSpec provides keepVisible, tw.liuli.launcher.ui.components.LocalTileShadow provides tileShadow) {
         Box(
             Modifier
                 .fillMaxSize()
