@@ -599,7 +599,13 @@ fun AppDrawer(
                 .fillMaxWidth()
                 .height(440.dp + DRAWER_OVERSHOOT)
                 .graphicsLayer {
-                    if (!open && !shown) { alpha = 0f; return@graphicsLayer }   // 收起來了：不畫（圖層與繪圖指令都留著）
+                    if (!open && !shown) {
+                        // 收起來了：不畫（圖層與繪圖指令都留著）。位置和「滑到底」時一樣——玻璃是用「目前位置減掉滑動量」推算停靠位置的，
+                        // 這裡不跟著位移的話，第一次算出來的停靠位置會高出一整個抽屜，烘出來的是天空那一段的顏色
+                        translationY = slide.value * drawerHeightPx + overshootPx
+                        alpha = 0f
+                        return@graphicsLayer
+                    }
                     if (prep) {
                         // 準備中：在停下來的位置、幾乎全透明（約 0.4%，肉眼看不到）畫一次，讓 GPU 把整張離屏圖建好
                         translationY = overshootPx; alpha = .004f
