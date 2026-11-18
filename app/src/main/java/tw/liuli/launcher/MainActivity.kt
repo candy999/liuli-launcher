@@ -38,6 +38,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.KeyEventType
@@ -66,6 +67,21 @@ class MainActivity : ComponentActivity() {
     /** 已在主畫面時又按 Home 的次數，用來觸發「回到第一個 App」。 */
     private val homePresses = mutableIntStateOf(0)
 
+    /**
+     * 開著的無障礙服務只有琉璃自己的「按鍵服務」（只過濾按鍵、不讀畫面）時＝true：畫面的語意樹整棵不提供。
+     * 只要有任何無障礙服務開著，Compose 就會在主執行緒上持續整理整棵語意樹（每次焦點移動、排版變動後走訪所有節點、排序、比對）；
+     * 海信上抽屜開關、移動焦點時這件事每 0.1 秒佔主執行緒 15～60ms，動畫就在這些空檔裡掉格。
+     * 按鍵服務用不到語意樹；有別的服務（TalkBack 這類要讀畫面的）或開了觸控探索時照常提供。
+     */
+    private val a11yQuiet = androidx.compose.runtime.mutableStateOf(false)
+    private fun checkA11y() {
+        val am = getSystemService(Context.ACCESSIBILITY_SERVICE) as? android.view.accessibility.AccessibilityManager ?: return
+        a11yQuiet.value = runCatching {
+            val on = am.getEnabledAccessibilityServiceList(android.accessibilityservice.AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
+            !am.isTouchExplorationEnabled && on.isNotEmpty() && on.all { it.resolveInfo?.serviceInfo?.packageName == packageName }
+        }.getOrDefault(false)
+    }
+
     /** 外部（按鍵服務）要求的動作：序號＋動作名稱。 */
     private val externalAction = mutableStateOf(0 to null as String?)
 
@@ -85,8 +101,17 @@ class MainActivity : ComponentActivity() {
         }, Handler(metricsThread.looper))
         val lensing = Build.VERSION.SDK_INT >= 33 &&
             !(getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager).isLowRamDevice
+        checkA11y()
+        (getSystemService(Context.ACCESSIBILITY_SERVICE) as? android.view.accessibility.AccessibilityManager)?.let { am ->
+            am.addAccessibilityStateChangeListener { checkA11y() }
+            am.addTouchExplorationStateChangeListener { checkA11y() }
+        }
         setContent {
-            LiuliApp(lensing, homePresses.intValue, externalAction.value)
+            Box(
+                if (a11yQuiet.value) Modifier.fillMaxSize().clearAndSetSemantics { } else Modifier.fillMaxSize(),
+            ) {
+                LiuliApp(lensing, homePresses.intValue, externalAction.value)
+            }
         }
         // 第一格畫完就拿掉視窗底色：背景永遠蓋滿整個畫面，底色只是每格白白多塗一次全螢幕
         // （海信 Mali-470 填色很慢，抽屜滑動時每格要填 4 個螢幕的像素，省一個很有感）
@@ -113,6 +138,7 @@ class MainActivity : ComponentActivity() {
     // 螢幕小時鐘：琉璃在前景時隱藏（主畫面本來就有大時鐘），離開就出現
     override fun onResume() {
         super.onResume()
+        checkA11y()   // 從系統設定回來：無障礙服務可能開了或關了
         AppForeground.resumed = true
         AppForeground.resumeCount++
         tw.liuli.launcher.keys.ClockOverlay.liuliResumed = true

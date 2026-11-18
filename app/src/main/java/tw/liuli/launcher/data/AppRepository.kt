@@ -34,6 +34,14 @@ object AppRepository {
         (p.vibrantSwatch ?: p.lightVibrantSwatch ?: p.darkVibrantSwatch ?: p.dominantSwatch)?.rgb
     }.getOrNull()
 
+    /**
+     * 圖示、橫幅轉成「直接放在 GPU 上」的不可變圖（取完主題色之後）。
+     * 一般的圖每次重新出現在畫面上（抽屜打開）都可能要從記憶體重新上傳到 GPU——海信上十幾張橫幅一起上傳，打開抽屜的第一格就卡 0.2 秒；
+     * 放在 GPU 上的圖只上傳一次。轉不成（極少數機型）就用原圖。
+     */
+    private fun gpu(b: android.graphics.Bitmap): android.graphics.Bitmap =
+        runCatching { b.copy(android.graphics.Bitmap.Config.HARDWARE, false) }.getOrNull() ?: b   // 原圖不回收：可能是系統圖示快取裡共用的那一張
+
     // 橫幅縮到 320x180，約 230KB／張，低記憶體電視也撐得住
     private const val BANNER_W = 320
     private const val BANNER_H = 180
@@ -66,8 +74,9 @@ object AppRepository {
             val iconBmp = if (bannerBmp == null) {
                 runCatching { info.loadIcon(pm).toBitmap(ICON_SIZE, ICON_SIZE) }.getOrNull()
             } else null
-            val banner = bannerBmp?.asImageBitmap()
-            val icon = iconBmp?.asImageBitmap()
+            val themeColor = (bannerBmp ?: iconBmp)?.let(::themeColorOf)
+            val banner = bannerBmp?.let(::gpu)?.asImageBitmap()
+            val icon = iconBmp?.let(::gpu)?.asImageBitmap()
 
             result[pkg] = AppEntry(
                 packageName = pkg,
@@ -76,7 +85,7 @@ object AppRepository {
                 icon = icon,
                 isTvApp = isTv,
                 launchIntent = intent,
-                themeColor = (bannerBmp ?: iconBmp)?.let(::themeColorOf),
+                themeColor = themeColor,
             )
         }
 
@@ -109,14 +118,15 @@ object AppRepository {
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
             val bannerBmp = runCatching { (activity.loadBanner(pm) ?: app.loadBanner(pm))?.toBitmap(BANNER_W, BANNER_H) }.getOrNull()
             val iconBmp = if (bannerBmp == null) runCatching { info.loadIcon(pm).toBitmap(ICON_SIZE, ICON_SIZE) }.getOrNull() else null
+            val themeColor = (bannerBmp ?: iconBmp)?.let(::themeColorOf)
             result[pkg] = AppEntry(
                 packageName = pkg,
                 label = runCatching { app.loadLabel(pm).toString() }.getOrDefault(pkg),
-                banner = bannerBmp?.asImageBitmap(),
-                icon = iconBmp?.asImageBitmap(),
+                banner = bannerBmp?.let(::gpu)?.asImageBitmap(),
+                icon = iconBmp?.let(::gpu)?.asImageBitmap(),
                 isTvApp = true,   // 不標「手機版」
                 launchIntent = intent,
-                themeColor = (bannerBmp ?: iconBmp)?.let(::themeColorOf),
+                themeColor = themeColor,
             )
         }
         val collator = Collator.getInstance(Locale.TAIWAN)
