@@ -143,20 +143,50 @@ object UiTrace {
     @Volatile var enabled = false
     private var installed = false
     private val counts = java.util.TreeMap<String, Int>()
-    private var t0 = 0L
+    @Volatile private var t0 = 0L
     private var tPre = 0L
     private var what = ""
     fun hit(name: String) { if (enabled && android.os.Looper.myLooper() === android.os.Looper.getMainLooper()) counts[name] = (counts[name] ?: 0) + 1 }
+    // 取樣：訊息跑超過 6ms 之後，每 3ms 看一次主執行緒停在哪（堆疊最上面 10 層），uitrace:0 時把次數最多的印出來
+    private val stacks = HashMap<String, Int>()
+    @Volatile private var running = false
+    @Volatile private var kind = ""
+    private fun dump() {
+        val top = synchronized(stacks) { val l = stacks.entries.sortedByDescending { it.value }.take(40).map { it.value to it.key }; stacks.clear(); l }
+        for ((n, k) in top) Log.i("LiuliUi", "stack x$n $k")
+    }
+    private fun startSampler() {
+        val main = android.os.Looper.getMainLooper().thread
+        Thread({
+            while (true) {
+                Thread.sleep(3)
+                if (!enabled || !running || System.nanoTime() - t0 < 6_000_000L) continue
+                val st = main.stackTrace
+                if (st.isEmpty() || !running) continue
+                val sb = StringBuilder(kind).append(" | ")
+                var n = 0
+                for (e in st) { if (n++ >= 10) break; sb.append(e.className.removePrefix("android.")).append('.').append(e.methodName).append(" < ") }
+                val k = sb.toString()
+                synchronized(stacks) { stacks[k] = (stacks[k] ?: 0) + 1 }
+            }
+        }, "uitrace").apply { isDaemon = true; priority = Thread.MAX_PRIORITY }.start()
+    }
     fun set(on: Boolean, view: android.view.View) {
+        if (!on && enabled) { enabled = false; dump(); return }
         enabled = on
         if (!on || installed) return
         installed = true
+        startSampler()
         view.viewTreeObserver.addOnPreDrawListener { if (enabled) tPre = System.nanoTime(); true }
         android.os.Looper.getMainLooper().setMessageLogging { s ->
             if (!enabled) return@setMessageLogging
             val now = System.nanoTime()
-            if (s.startsWith(">")) { t0 = now; tPre = 0L; what = s }
-            else {
+            if (s.startsWith(">")) {
+                t0 = now; tPre = 0L; what = s
+                kind = if (s.contains("Choreographer")) "frame" else s.substringAfter("} ").substringBefore("@").take(40)
+                running = true
+            } else {
+                running = false
                 val d = (now - t0) / 1e6f
                 val frame = what.contains("Choreographer")
                 if (d > 8f) {

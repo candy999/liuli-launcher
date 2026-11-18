@@ -460,7 +460,9 @@ fun AppDrawer(
             inset = with(density) { 20.dp.toPx() },
             corner = with(density) { 34.dp.toPx() },
             // 只有抽屜完全停好時才跳過被蓋住的背景：彈出中抽屜會縮放（比原位窄），兩側若不畫背景會露出黑邊
-            slide = { if (openNow.value && kotlin.math.abs(slide.value) < .002f) 0f else 1f },
+            // 「停好」＝彈簧已經結束：彈簧衝過停靠位置的那一格 slide 剛好接近 0，但抽屜還被布丁壓窄著，
+            // 那一格若跳過背景，抽屜兩側各露出一條黑線（閃一格）
+            slide = { if (openNow.value && !slide.isRunning && kotlin.math.abs(slide.value) < .002f) 0f else 1f },
         )
         onDispose { bgEngine?.cover = null }
     }
