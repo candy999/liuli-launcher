@@ -130,16 +130,20 @@ fun Modifier.liquidGlass(
                 val paint = bake.paint(matrix)
                 if (paint != null) drawIntoCanvas {
                     val c = it.nativeCanvas
-                    if (size.width * size.height > 250_000f) {
+                    if (size.width * size.height > 500_000f) {   // 只有側邊欄、抽屜這種大面板；時鐘、天氣的玻璃會整片淡入淡出（逐筆乘透明度），重疊的地方會多疊一層
                         // 大片面板（側邊欄、抽屜）：中間絕大部分是一個不透明、不用反鋸齒的矩形（GPU 不必混合、不必算邊緣覆蓋率），
                         // 只有上下兩條含圓角的窄帶才用反鋸齒的路徑。海信上抽屜的玻璃是整個畫面最貴的一筆填色
                         val top = kotlin.math.ceil(max(radii[0], radii[1]))
                         val bot = kotlin.math.ceil(max(radii[2], radii[3]))
-                        if (top > 0f) { c.save(); c.clipRect(0f, 0f, size.width, top); c.drawPath(androidPath, paint); c.restore() }
+                        // 兩條窄帶各往中間多畫 3 像素、先畫；中間的矩形最後蓋上去。
+                        // 這一片玻璃在布丁變形的圖層裡會被非整數地縮放、位移：不重疊的話，矩形的邊（不反鋸齒、貼齊像素）和窄帶的裁切邊
+                        // 可能落在不同的像素列，中間露出一條一個像素的縫（閃一格的橫線）
+                        val lap = 3f
+                        if (top > 0f) { c.save(); c.clipRect(0f, 0f, size.width, top + lap); c.drawPath(androidPath, paint); c.restore() }
+                        if (bot > 0f) { c.save(); c.clipRect(0f, size.height - bot - lap, size.width, size.height); c.drawPath(androidPath, paint); c.restore() }
                         paint.isAntiAlias = false
                         c.drawRect(0f, top, size.width, size.height - bot, paint)
                         paint.isAntiAlias = true
-                        if (bot > 0f) { c.save(); c.clipRect(0f, size.height - bot, size.width, size.height); c.drawPath(androidPath, paint); c.restore() }
                     } else c.drawPath(androidPath, paint)
                 }
                 // 第一張還沒烘好（剛出現的那一兩格）：直接貼霧化的背景小圖＋同樣的白霧——和烘好的中間幾乎一樣，只差邊緣那一圈，
