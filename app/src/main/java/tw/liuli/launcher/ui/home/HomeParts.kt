@@ -548,8 +548,7 @@ fun AppDrawer(
             apps.firstOrNull()?.let { a -> runCatching { requesters[a.packageName]?.requestFocus() } }
             // 等玻璃烘好（通常一兩格；最多等 0.3 秒），再讓烘好的畫面真的畫進離屏圖一格
             kotlinx.coroutines.withTimeoutOrNull(300) { androidx.compose.runtime.snapshotFlow { glassGate.baked }.first { it } }
-            androidx.compose.runtime.withFrameNanos { }
-            androidx.compose.runtime.withFrameNanos { }
+            tw.liuli.launcher.ui.components.awaitCalmFrames()
             prep = false
             if (!lite) launch {
                 // 抽屜「幾乎到位」（剩不到 3%）就開始逐排出現，和彈簧最後的收尾重疊，不會有一段空框在等
@@ -673,8 +672,8 @@ fun AppDrawer(
                         requester = requesters.getOrPut(app.packageName) { FocusRequester() },
                         onFocused = {
                             focused = i; focusedPkg = app.packageName; showRow(i / DRAWER_COLS)
-                            // 面板上的那一片光跟著焦點的那一欄慢慢移過去
-                            scope.launch { lightX.animateTo((i % DRAWER_COLS + .5f) / DRAWER_COLS, androidx.compose.animation.core.tween(520)) }
+                            // 面板上的那一片光跟著焦點的那一欄慢慢移過去（滑動中直接到位：光一動，整張離屏圖每一格都要重畫）
+                            scope.launch { val x = (i % DRAWER_COLS + .5f) / DRAWER_COLS; if (asLayer) lightX.snapTo(x) else lightX.animateTo(x, androidx.compose.animation.core.tween(520)) }
                         },
                         onClick = { onLaunch(app) },
                         onLongClick = { fr -> onLongClick(app, fr) },
@@ -694,7 +693,7 @@ fun AppDrawer(
                         requester = requesters.getOrPut("sys:" + app.packageName) { FocusRequester() },
                         onFocused = {
                             focused = i; focusedPkg = null; showRow(i / DRAWER_COLS)
-                            scope.launch { lightX.animateTo((i % DRAWER_COLS + .5f) / DRAWER_COLS, androidx.compose.animation.core.tween(520)) }
+                            scope.launch { val x = (i % DRAWER_COLS + .5f) / DRAWER_COLS; if (asLayer) lightX.snapTo(x) else lightX.animateTo(x, androidx.compose.animation.core.tween(520)) }
                         },
                         onClick = { onLaunch(app) },
                         onLongClick = { fr -> onSystemLongClick(app, fr) },
@@ -712,7 +711,7 @@ fun AppDrawer(
                             requester = toggleReq,
                             onFocused = {
                                 focused = i; focusedPkg = null; showRow(i / DRAWER_COLS)
-                                scope.launch { lightX.animateTo((i % DRAWER_COLS + .5f) / DRAWER_COLS, androidx.compose.animation.core.tween(520)) }
+                                scope.launch { val x = (i % DRAWER_COLS + .5f) / DRAWER_COLS; if (asLayer) lightX.snapTo(x) else lightX.animateTo(x, androidx.compose.animation.core.tween(520)) }
                             },
                             onClick = onToggleSystem,
                             reveal = revealOf,

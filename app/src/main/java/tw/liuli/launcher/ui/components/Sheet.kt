@@ -138,8 +138,7 @@ fun GlassSheet(
             if (lite) reveal.snapTo(REVEAL_TOTAL_MS)
             delay(16)
             kotlinx.coroutines.withTimeoutOrNull(300) { androidx.compose.runtime.snapshotFlow { glassGate.baked }.first { it } }
-            androidx.compose.runtime.withFrameNanos { }
-            androidx.compose.runtime.withFrameNanos { }
+            awaitCalmFrames()
             prep = false
             if (!lite) launch {
                 // 底框「幾乎到位」（剩不到 3%）就開始逐列出現，和彈簧最後的收尾重疊，不會有一段空框在等
@@ -348,4 +347,21 @@ private const val REVEAL_TOTAL_MS = REVEAL_STAGGER_MS * 14 + REVEAL_FADE_MS
 internal fun rowReveal(ms: Float, order: Int, stagger: Float = REVEAL_STAGGER_MS, fade: Float = REVEAL_FADE_MS): Float {
     val x = ((ms - order * stagger) / fade).coerceIn(0f, 1f)
     return x * x * (3f - 2f * x)
+}
+
+/**
+ * 等畫面「靜下來」再開始滑動：打開面板的那一瞬間，主執行緒要重新組合、第一次畫出整塊面板，那幾格特別慢（海信上一格 70ms 以上）；
+ * 這段時間面板是用看不見的透明度在原地準備。連續兩格的間隔都正常（< 24ms）就算準備好了；最多等 0.45 秒。
+ */
+internal suspend fun awaitCalmFrames() {
+    var calm = 0
+    var last = 0L
+    kotlinx.coroutines.withTimeoutOrNull(450) {
+        while (calm < 2) {
+            androidx.compose.runtime.withFrameNanos { t ->
+                if (last != 0L && t - last < 24_000_000L) calm++ else calm = 0
+                last = t
+            }
+        }
+    }
 }
