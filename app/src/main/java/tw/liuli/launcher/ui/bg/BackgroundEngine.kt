@@ -135,6 +135,41 @@ class BgState {
  * 3. 脈動是充放電，漣漪相位連續前進
  * 只在轉場期間逐幀繪製，追上目標後停止。
  */
+/**
+ * 量測用（adb，ACTION=uitrace:1／0）：主執行緒每一則超過 8ms 的訊息印到 logcat（LiuliUi trace）——
+ * 畫面那一則分成「動畫＋重新組合＋排版」與「繪製」兩段，後面附上這一格裡各元件重新組合／重畫的次數。不存設定。
+ */
+object UiTrace {
+    @Volatile var enabled = false
+    private var installed = false
+    private val counts = java.util.TreeMap<String, Int>()
+    private var t0 = 0L
+    private var tPre = 0L
+    private var what = ""
+    fun hit(name: String) { if (enabled && android.os.Looper.myLooper() === android.os.Looper.getMainLooper()) counts[name] = (counts[name] ?: 0) + 1 }
+    fun set(on: Boolean, view: android.view.View) {
+        enabled = on
+        if (!on || installed) return
+        installed = true
+        view.viewTreeObserver.addOnPreDrawListener { if (enabled) tPre = System.nanoTime(); true }
+        android.os.Looper.getMainLooper().setMessageLogging { s ->
+            if (!enabled) return@setMessageLogging
+            val now = System.nanoTime()
+            if (s.startsWith(">")) { t0 = now; tPre = 0L; what = s }
+            else {
+                val d = (now - t0) / 1e6f
+                val frame = what.contains("Choreographer")
+                if (d > 8f) {
+                    val w = what.substringAfter("Dispatching to ").take(90)
+                    if (frame && tPre != 0L) Log.i("LiuliUi", "trace %.0fms (compose+layout %.0f, draw %.0f) %s".format(d, (tPre - t0) / 1e6f, (now - tPre) / 1e6f, counts.toString()))
+                    else Log.i("LiuliUi", "trace %.0fms %s %s".format(d, w, counts.toString()))
+                }
+                if (frame) counts.clear()
+            }
+        }
+    }
+}
+
 /** 量測用：按鍵 → 處理完按鍵之後的第一格畫面畫完，隔了多久。 */
 object KeyLat {
     @Volatile var enabled = false
@@ -854,6 +889,7 @@ class BackgroundEngine {
             }
             glassBitmap.setPixels(px, 0, GLASS_W, 0, 0, GLASS_W, GLASS_H)
             // 轉場中：等下一格背景一起重畫（省一次整個畫面的重繪）；靜止時立刻更新
+            tw.liuli.launcher.ui.bg.UiTrace.hit("glassImg")
             if (moving) glassDirty = true else glassVersion++
         }
     }

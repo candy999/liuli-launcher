@@ -219,6 +219,7 @@ fun GlassLit(lit: () -> Float, corner: Dp, modifier: Modifier = Modifier, haze: 
                 )
                 val body = Brush.verticalGradient(0f to Color.White.copy(alpha = haze + .07f), .62f to Color.White.copy(alpha = haze))
                 onDrawBehind {
+                    tw.liuli.launcher.ui.bg.UiTrace.hit("litDraw")
                     if (fill) drawRoundRect(body, cornerRadius = CornerRadius(r))
                     drawRoundRect(
                         rim, topLeft = Offset(sw / 2f, sw / 2f), size = Size(size.width - sw, size.height - sw),

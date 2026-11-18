@@ -124,6 +124,8 @@ fun HomeScreen(
     onOpenCalendar: () -> Unit,
     onOpenWeather: () -> Unit,
 ) {
+    val traceView = androidx.compose.ui.platform.LocalView.current
+    androidx.compose.runtime.SideEffect { tw.liuli.launcher.ui.bg.UiTrace.hit("Home") }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val dockStore = remember { DockStore(context) }
@@ -1093,6 +1095,7 @@ fun HomeScreen(
                 "bgpace" -> engine.startPaceLog()
                 "bgcap" -> tw.liuli.launcher.ui.bg.BackgroundEngine.debugNoFast = arg == "30"
                 "keylat" -> tw.liuli.launcher.ui.bg.KeyLat.enabled = arg == "1"
+                "uitrace" -> tw.liuli.launcher.ui.bg.UiTrace.set(arg == "1", traceView)
                 // 量測用（adb）：ACTION=glassslow:0.1 玻璃焦點的動畫放慢十倍（截滑動中的畫面用）；glassslow:1 恢復。不存設定
                 "glassslow" -> tw.liuli.launcher.ui.glass.GlassDebug.timeScale = (arg.toFloatOrNull() ?: 1f).coerceIn(0.01f, 1f)
                 // 量測用（adb）：ACTION=shot:名稱 把目前的視窗畫面存成 PNG（Android/data/tw.liuli.launcher/files/shots/名稱.png）。

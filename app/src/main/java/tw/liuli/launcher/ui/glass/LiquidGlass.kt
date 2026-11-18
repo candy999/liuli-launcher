@@ -117,6 +117,7 @@ fun Modifier.liquidGlass(
 
             onDrawBehind {
                 if (tw.liuli.launcher.ui.bg.PerfProbe.noGlass) return@onDrawBehind
+                tw.liuli.launcher.ui.bg.UiTrace.hit("glassDraw")
                 val v = backdrop.version() // 背景換色時跟著重烘
                 @Suppress("UNUSED_VARIABLE") val t = bake.tick // 烘好一張就重畫
                 val hl = highlight()
@@ -253,6 +254,7 @@ private class GlassBake(private val backdrop: GlassBackdrop, private val edge: B
             q = nq
             bakedFor = r
             tick++
+            tw.liuli.launcher.ui.bg.UiTrace.hit("bake")
             gate?.baked = true
             // 背景在動時每秒最多烘十幾次：玻璃後面是模糊的背景，慢一兩格看不出來
             // 面板上的光正在移動：馬上接著烘下一張（不然光是一段一段跳過去的）

@@ -152,6 +152,7 @@ private fun f1(v: Float) = "%.1f".format(v)
 /** 每秒更新的儀表列：在這裡才讀取數值，更新時只有這一塊重新組合。 */
 @Composable
 fun GeekDashboardLive(stats: androidx.compose.runtime.State<Stats>, modifier: Modifier = Modifier) {
+    androidx.compose.runtime.SideEffect { tw.liuli.launcher.ui.bg.UiTrace.hit("Geek") }
     GeekDashboard(stats.value, null, modifier)
 }
 

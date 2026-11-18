@@ -112,6 +112,7 @@ fun GlassSheet(
     /** 焦點停在第幾列（返回上一層時，焦點回到當初進去的那一列）。 */
     onFocusIndex: (Int) -> Unit = {},
 ) {
+    androidx.compose.runtime.SideEffect { tw.liuli.launcher.ui.bg.UiTrace.hit("Sheet") }
     val first = remember { FocusRequester() }
     // 收尾門檻要很小（0.05%，不到半個像素）：預設 1% 對 440dp 的抽屜是 9 個像素，彈簧最後會「喀」地跳到終點
     val slide = remember { Animatable(1f, visibilityThreshold = SLIDE_THRESHOLD) }
@@ -266,6 +267,7 @@ fun GlassSheet(
 
 @Composable
 private fun SheetRow(item: SheetItem, requester: FocusRequester?, onFocused: () -> Unit) {
+    androidx.compose.runtime.SideEffect { tw.liuli.launcher.ui.bg.UiTrace.hit("Row") }
     val focus = rememberFocusAnim()
     val jelly = rememberJelly()
     Box(

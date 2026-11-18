@@ -247,6 +247,7 @@ fun WeatherGroup(home: HomeContext, requester: FocusRequester, onClick: () -> Un
  */
 @Composable
 fun DrawerStatusBar(home: HomeContext, visible: () -> Float, modifier: Modifier = Modifier) {
+    androidx.compose.runtime.SideEffect { tw.liuli.launcher.ui.bg.UiTrace.hit("Bar") }
     val context = LocalContext.current
     val now = rememberMinuteClock()
     val is24h = android.text.format.DateFormat.is24HourFormat(context)
@@ -375,6 +376,7 @@ fun InputsRow(
     onSwitch: (TvSource) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    androidx.compose.runtime.SideEffect { tw.liuli.launcher.ui.bg.UiTrace.hit("Inputs") }
     Row(modifier.focusRow(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         GText("訊號源", Modifier.padding(end = 4.dp), size = 13.sp, color = Ink.Tertiary, shadow = true)
         sources.forEachIndexed { i, src ->
@@ -440,6 +442,7 @@ fun AppDrawer(
     onToggleSystem: () -> Unit = {},
     onSystemLongClick: (AppEntry, FocusRequester) -> Unit = { _, _ -> },
 ) {
+    androidx.compose.runtime.SideEffect { tw.liuli.launcher.ui.bg.UiTrace.hit("Drawer") }
     // 收尾門檻要很小（0.05%，不到半個像素）：預設 1% 對 440dp 的抽屜是 9 個像素，彈簧最後會「喀」地跳到終點
     val slide = remember { Animatable(1f, visibilityThreshold = SLIDE_THRESHOLD) }
     val density = androidx.compose.ui.platform.LocalDensity.current
@@ -750,6 +753,7 @@ private fun DrawerCell(
     onHeight: (Int) -> Unit,
     content: @Composable (reveal: () -> Float) -> Unit,
 ) {
+    androidx.compose.runtime.SideEffect { tw.liuli.launcher.ui.bg.UiTrace.hit("Cell") }
     val pos = { (i - gridState.firstVisibleItemIndex).coerceAtLeast(0) }
     val revealOf = { tw.liuli.launcher.ui.components.rowReveal(revealMs(), pos() / 6 * 3 + pos() % 6 / 2, stagger = 30f, fade = 200f) }
     val cell = androidx.compose.runtime.rememberUpdatedState(cellPx)

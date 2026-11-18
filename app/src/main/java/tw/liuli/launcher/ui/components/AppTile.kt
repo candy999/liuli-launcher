@@ -58,6 +58,7 @@ fun AppTile(
     /** 出場淡入的透明度（0～1，在繪製階段讀取）。 */
     reveal: () -> Float = { 1f },
 ) {
+    androidx.compose.runtime.SideEffect { tw.liuli.launcher.ui.bg.UiTrace.hit("Tile") }
     val own = remember { FocusRequester() }
     val req = requester ?: own
     val focus = rememberFocusAnim()
