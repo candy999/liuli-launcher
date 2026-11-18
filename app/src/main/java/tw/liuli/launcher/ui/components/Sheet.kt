@@ -98,14 +98,14 @@ data class SheetSpec(
     val id: String get() = key ?: title
 }
 
+/** 面板／抽屜目前滑到哪（0＝停好、1＝完全收起）。主畫面用它決定收起時什麼時候淡回來。 */
+class SlideRef { var read by androidx.compose.runtime.mutableStateOf<() -> Float>({ 1f }) }
+
 /**
  * 從右側滑入的玻璃側邊面板（Google TV／tvOS 的設定慣例）。
  * 焦點鎖在面板內；返回鍵由呼叫端關閉。滑入動畫只動 translationX，不重新排版。
  */
 @OptIn(ExperimentalComposeUiApi::class)
-/** 面板／抽屜目前滑到哪（0＝停好、1＝完全收起）。主畫面用它決定收起時什麼時候淡回來。 */
-class SlideRef { var read by androidx.compose.runtime.mutableStateOf<() -> Float>({ 1f }) }
-
 @Composable
 fun GlassSheet(
     spec: SheetSpec,
