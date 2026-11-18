@@ -126,28 +126,30 @@ fun GlassSheet(
     val reveal = remember { Animatable(0f) }
     LaunchedEffect(exiting) {
         if (exiting) {
+            // 收起：先把整塊面板定格成一張離屏圖、等畫面靜下來，再用彈簧把這一張圖收出去
             prep = false
             asLayer = true
+            awaitCalmFrames(180)
             slide.animateTo(1f, SheetExit)
             onExited()
         } else {
-            // 先準備、再動（和抽屜一樣）：整塊面板先在停下來的位置用看不見的透明度畫好一次、等玻璃烘好，
-            // 滑進來的每一格只是移動這張離屏圖
-            val lite = tw.liuli.launcher.geek.WeakGpu.value
+            // 打開的順序（和抽屜一樣）：先在停下來的位置用看不見的透明度把整塊面板準備好（玻璃烘好、清單排好畫好、等畫面靜下來）
+            // → 只有底框彈進來（清單還是透明的，移動的是一張離屏圖）→ 底框幾乎到位，清單才一列一列淡入
+            val t0 = android.os.SystemClock.uptimeMillis()
             prep = true
-            if (lite) reveal.snapTo(REVEAL_TOTAL_MS)
             delay(16)
             kotlinx.coroutines.withTimeoutOrNull(300) { androidx.compose.runtime.snapshotFlow { glassGate.baked }.first { it } }
             awaitCalmFrames()
             prep = false
-            if (!lite) launch {
+            val t1 = android.os.SystemClock.uptimeMillis()
+            launch {
                 // 底框「幾乎到位」（剩不到 3%）就開始逐列出現，和彈簧最後的收尾重疊，不會有一段空框在等
                 androidx.compose.runtime.snapshotFlow { slide.value }.first { it < .03f }
                 asLayer = false
+                android.util.Log.i("LiuliUi", "sheet open: prep ${t1 - t0}ms, first rows at ${android.os.SystemClock.uptimeMillis() - t0}ms")
                 reveal.animateTo(REVEAL_TOTAL_MS, tween(REVEAL_TOTAL_MS.toInt(), easing = LinearEasing))
             }
             slide.animateTo(0f, SheetSpring)
-            if (lite) asLayer = false
         }
     }
     val sheetWidthPx = with(androidx.compose.ui.platform.LocalDensity.current) { 340.dp.toPx() }
@@ -209,15 +211,15 @@ fun GlassSheet(
                     val st = (kotlin.math.abs(slide.velocity) * .020f).coerceAtMost(.09f) - (-s).coerceAtLeast(0f) * 1.4f
                     scaleX = (1f - .06f * k) * (1f + st); scaleY = (1f - .06f * k) / (1f + .5f * st)
                     transformOrigin = androidx.compose.ui.graphics.TransformOrigin(1f, .5f)
-                    alpha = 1f - .5f * k * k
+                    alpha = if (k < .03f) 1f else 1f - .5f * k * k
                     // 滑動中：整塊面板畫成一張離屏圖；停下來恢復一般繪製
-                    compositingStrategy = if (asLayer || kotlin.math.abs(s) > 0.001f) CompositingStrategy.Offscreen else CompositingStrategy.Auto
+                    compositingStrategy = if (asLayer) CompositingStrategy.Offscreen else CompositingStrategy.Auto
                 }
                 .liquidGlass(
                     gate = glassGate,
                     shape = RoundedCornerShape(30.dp), tint = 0.09f,
                     slide = { Offset(slide.value * (sheetWidthPx + gapPx), 0f) },
-                    frozen = { asLayer || slide.value > 0.001f },
+                    frozen = { asLayer || kotlin.math.abs(slide.value) > 0.001f },
                 )
                 .padding(horizontal = 16.dp, vertical = 26.dp)
                 .trapDirectionalFocus(),
@@ -353,10 +355,10 @@ internal fun rowReveal(ms: Float, order: Int, stagger: Float = REVEAL_STAGGER_MS
  * 等畫面「靜下來」再開始滑動：打開面板的那一瞬間，主執行緒要重新組合、第一次畫出整塊面板，那幾格特別慢（海信上一格 70ms 以上）；
  * 這段時間面板是用看不見的透明度在原地準備。連續兩格的間隔都正常（< 24ms）就算準備好了；最多等 0.45 秒。
  */
-internal suspend fun awaitCalmFrames() {
+internal suspend fun awaitCalmFrames(maxMs: Long = 450) {
     var calm = 0
     var last = 0L
-    kotlinx.coroutines.withTimeoutOrNull(450) {
+    kotlinx.coroutines.withTimeoutOrNull(maxMs) {
         while (calm < 2) {
             androidx.compose.runtime.withFrameNanos { t ->
                 if (last != 0L && t - last < 24_000_000L) calm++ else calm = 0

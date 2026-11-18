@@ -531,38 +531,46 @@ fun AppDrawer(
     val reveal = remember { Animatable(0f) }
     LaunchedEffect(open) {
         if (open) {
-            // 先準備、再動：整塊抽屜（玻璃底框＋邊緣＋格子）先在「停下來的位置」用看不見的透明度完整畫好一次、
-            // 存成一張離屏圖，然後彈上來的每一格只是移動、縮放這張圖——不在滑動中才烘玻璃、才畫格子（弱電視會跟不上）
-            val lite = tw.liuli.launcher.geek.WeakGpu.value
+            // 打開的順序（弱電視也跟得上）：
+            // 1. 準備：玻璃底框（含光、邊緣）在「停下來的位置」烘好，格子排好、畫好，整塊用看不見的透明度畫進一張離屏圖；
+            //    打開那一瞬間主執行緒的重新組合、第一次繪製都在這裡做完，等畫面靜下來
+            // 2. 只有底框彈上來（App 還是透明的）：每一格只是移動、縮放那張離屏圖
+            // 3. 底框幾乎到位，App 才一排一排淡入（這時不再是離屏圖；底框剩下的晃動只是圖層位移，不重畫）
+            val t0 = android.os.SystemClock.uptimeMillis()
             shown = true
             asLayer = true
             glassGate.baked = false   // 背景可能換過顏色了：等這一次烘好的
             prep = true
             slide.snapTo(1f)
-            // 弱 GPU：App 跟著底框一起上來，不在彈簧收尾時再逐排淡入（那段時間每一格都要重畫整個抽屜）
-            reveal.snapTo(if (lite) DRAWER_REVEAL_MS else 0f)
+            reveal.snapTo(0f)
             focused = 0
             topRow = 0
             runCatching { gridState.scrollToItem(0) }
             delay(16)
             apps.firstOrNull()?.let { a -> runCatching { requesters[a.packageName]?.requestFocus() } }
-            // 等玻璃烘好（通常一兩格；最多等 0.3 秒），再讓烘好的畫面真的畫進離屏圖一格
+            // 等玻璃烘好（通常一兩格；最多等 0.3 秒），再等畫面靜下來
             kotlinx.coroutines.withTimeoutOrNull(300) { androidx.compose.runtime.snapshotFlow { glassGate.baked }.first { it } }
             tw.liuli.launcher.ui.components.awaitCalmFrames()
             prep = false
-            if (!lite) launch {
+            val t1 = android.os.SystemClock.uptimeMillis()
+            launch {
                 // 抽屜「幾乎到位」（剩不到 3%）就開始逐排出現，和彈簧最後的收尾重疊，不會有一段空框在等
                 androidx.compose.runtime.snapshotFlow { slide.value }.first { it < .03f }
                 asLayer = false
+                android.util.Log.i("LiuliUi", "drawer open: prep ${t1 - t0}ms, first tiles at ${android.os.SystemClock.uptimeMillis() - t0}ms")
                 reveal.animateTo(DRAWER_REVEAL_MS, androidx.compose.animation.core.tween(DRAWER_REVEAL_MS.toInt(), easing = androidx.compose.animation.core.LinearEasing))
             }
             slide.animateTo(0f, SheetSpring)
-            if (lite) asLayer = false
         } else if (shown) {
-            // 收起：背景與主畫面已經先畫好（背景不再裁掉被蓋住的部分），抽屜整塊當一張圖加速滑出
+            // 收起的順序：先把整塊抽屜（底框＋目前的內容）定格成一張離屏圖、等畫面靜下來（關抽屜那一瞬間主畫面要重新組合），
+            // 再用彈簧把這一張圖收下去——不逐個動、不重烘玻璃
+            val t0 = android.os.SystemClock.uptimeMillis()
             prep = false
             asLayer = true
+            tw.liuli.launcher.ui.components.awaitCalmFrames(180)
+            val t1 = android.os.SystemClock.uptimeMillis()
             slide.animateTo(1f, SheetExit)
+            android.util.Log.i("LiuliUi", "drawer close: freeze ${t1 - t0}ms, gone at ${android.os.SystemClock.uptimeMillis() - t0}ms")
             asLayer = false
             shown = false
         }
@@ -603,16 +611,19 @@ fun AppDrawer(
                     val st = (kotlin.math.abs(slide.velocity) * .020f).coerceAtMost(.09f) - (-s).coerceAtLeast(0f) * 1.4f
                     scaleX = (1f - .05f * k) / (1f + .5f * st); scaleY = (1f - .05f * k) * (1f + st)
                     transformOrigin = androidx.compose.ui.graphics.TransformOrigin(.5f, 1f)
-                    alpha = 1f - .55f * k * k
+                    // 快到位時就當成完全不透明：差一點點（0.05%）不透明的話，系統每一格都要把整個抽屜先畫到暫存層再疊上去
+                    alpha = if (k < .03f) 1f else 1f - .55f * k * k
                     // 滑動中：整塊抽屜（玻璃＋App 格子）畫成一張離屏圖，GPU 每格只貼一個四邊形；停下來恢復一般繪製
                     // （彈簧衝過頭時 s 是負的，也要維持離屏圖，等彈簧完全停了才換回一般繪製）
-                    compositingStrategy = if (asLayer || kotlin.math.abs(s) > 0.001f) CompositingStrategy.Offscreen else CompositingStrategy.Auto
+                    // 只看「是不是定格中」：App 開始逐排出現之後就一直是一般繪製——底框還在晃（s 在 0 附近來回）時如果跟著
+                    // 在離屏圖與一般繪製之間切來切去，每切一次整塊都要重畫
+                    compositingStrategy = if (asLayer) CompositingStrategy.Offscreen else CompositingStrategy.Auto
                 }
                 .liquidGlass(
                     gate = glassGate,
                     shape = RoundedCornerShape(topStart = 34.dp, topEnd = 34.dp), tint = 0.09f,
                     slide = { drawerSlideOffset(slide.value, drawerHeightPx) },
-                    frozen = { asLayer || slide.value > 0.001f },
+                    frozen = { asLayer || kotlin.math.abs(slide.value) > 0.001f },
                     // 受光：上緣一道光、一片跟著焦點那一欄移動的柔光、往下漸暗（烘在同一張圖裡；位置量化成 24 格，移動中最多每 0.12 秒重烘一次）
                     light = { androidx.compose.ui.geometry.Offset(lightStep / 240f, .08f) },
                 )
