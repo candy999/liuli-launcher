@@ -448,6 +448,7 @@ fun AppDrawer(
     val drawerHeightPx = with(density) { 440.dp.toPx() }
     // 往下多延伸一段（平常在螢幕外）：滑入的彈簧會衝過頭一點，底邊抬起時露出的仍是抽屜，不是一條縫
     val overshootPx = with(density) { DRAWER_OVERSHOOT.toPx() }
+    val padPx = with(density) { 40.dp.toPx() }
     // 告訴背景：抽屜蓋住的部分不用畫。
     // 「是否打開」要在組合時就更新（rememberUpdatedState），抽屜消失的同一格背景就畫滿；
     // 只看 slide 的話，slide 要等到下一格的 LaunchedEffect 才歸位，中間那一兩格被蓋住的位置沒人畫＝露出黑色。
@@ -461,7 +462,9 @@ fun AppDrawer(
             // 只有抽屜完全停好時才跳過被蓋住的背景：彈出中抽屜會縮放（比原位窄），兩側若不畫背景會露出黑邊
             // 「停好」＝彈簧已經結束：彈簧衝過停靠位置的那一格 slide 剛好接近 0，但抽屜還被布丁壓窄著，
             // 那一格若跳過背景，抽屜兩側各露出一條黑線（閃一格）
-            slide = { if (openNow.value && !slide.isRunning && kotlin.math.abs(slide.value) < .002f) 0f else 1f },
+            slide = { if (openNow.value && kotlin.math.abs(slide.value) < .03f) 0f else 1f },
+            // 彈簧還在晃的時候，背景少跳過一圈（抽屜這時被布丁壓窄、壓扁一點點，邊緣外面要有背景）；停好才整塊跳過
+            pad = { if (slide.isRunning) padPx else 0f },
         )
         onDispose { bgEngine?.cover = null }
     }
@@ -768,7 +771,6 @@ private fun DrawerCell(
         Modifier
             .onSizeChanged { onHeight(it.height) }
             .graphicsLayer {
-                compositingStrategy = CompositingStrategy.ModulateAlpha   // 捲動中最上面那一排變淡：不為每一格開暫存圖
                 translationY = (1f - revealOf()) * 14.dp.toPx()
                 val firstRow = gridState.firstVisibleItemIndex / DRAWER_COLS
                 val off = gridState.firstVisibleItemScrollOffset
@@ -796,7 +798,7 @@ private fun SystemToggleTile(
                 .fillMaxWidth()
                 .aspectRatio(16f / 9f)
                 .jellyFocus(jelly, focus, TILE_FOCUS_SCALE)
-                .graphicsLayer { alpha = reveal(); compositingStrategy = CompositingStrategy.ModulateAlpha }
+                .graphicsLayer { alpha = reveal() }
                 .focusTarget(focus, requester, onFocused = onFocused, onClick = { jelly.press(); onClick() })
                 .liquidGlass(RoundedCornerShape(Dimens.TileRadius), tint = 0.06f),
             contentAlignment = Alignment.Center,
@@ -807,7 +809,7 @@ private fun SystemToggleTile(
         Spacer(Modifier.height(10.dp))
         GText(
             if (loading) "載入中…" else if (expanded) "隱藏系統應用" else "顯示系統應用",
-            Modifier.fillMaxWidth().graphicsLayer { alpha = reveal(); compositingStrategy = CompositingStrategy.ModulateAlpha },
+            Modifier.fillMaxWidth().graphicsLayer { alpha = reveal() },
             size = 14.sp,
             weight = if (focus.focused) FontWeight.Medium else FontWeight.Normal,
             color = if (focus.focused) Ink.Primary else Ink.Tertiary,

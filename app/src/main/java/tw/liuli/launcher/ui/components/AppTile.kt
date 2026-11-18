@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -65,8 +64,6 @@ fun AppTile(
     val focus = rememberFocusAnim()
     val jelly = tw.liuli.launcher.ui.glass.rememberJelly()
     val tileShape = RoundedCornerShape(Dimens.TileRadius)
-    // 只在「淡入完成」那一刻變一次（繪製時讀它，淡入中不會每格重畫磚的內容）
-    val revealed by remember { androidx.compose.runtime.derivedStateOf { reveal() >= .999f } }
 
     Column(Modifier.width(width), horizontalAlignment = Alignment.CenterHorizontally) {
         Box(
@@ -82,17 +79,17 @@ fun AppTile(
                     shape = tileShape
                     clip = false
                 }
-                // 出場淡入：每個繪圖各自乘透明度，不經離屏圖。
-                // 以前每塊磚淡入時各開一張離屏圖：抽屜一打開就要一次向 GPU 要十幾張圖（海信上光是這件事就讓準備階段多卡 0.1 秒以上），
-                // 淡入完又全部丟掉。有橫幅的磚淡入時不畫深色底（不然半透明的橫幅底下會透出它），淡入完才補上
+                // 出場淡入：在「已經放大過」的層裡、整塊先畫好再整體淡入——
+                // 不會透出底下的深色底（每個繪圖各自半透明會像破圖），放大的部分也不會被裁成直角
                 .graphicsLayer {
-                    alpha = reveal()
-                    compositingStrategy = CompositingStrategy.ModulateAlpha
+                    val a = reveal()
+                    alpha = a
+                    compositingStrategy = if (a < .999f) CompositingStrategy.Offscreen else CompositingStrategy.Auto
                 }
                 .then(extra)
                 .focusTarget(focus, req, onFocused, { jelly.press(); onClick() }, onLongClick = { onLongClick(req) })
                 .clip(tileShape)
-                .drawBehind { if (app.banner == null || revealed) drawRect(Color(0xFF1B1E26)) },
+                .background(Color(0xFF1B1E26)),
         ) {
             val banner = app.banner
             val icon = app.icon
@@ -138,7 +135,7 @@ fun AppTile(
             Spacer(Modifier.height(10.dp))
             GText(
                 app.label,
-                Modifier.fillMaxWidth().graphicsLayer { alpha = reveal(); compositingStrategy = CompositingStrategy.ModulateAlpha },
+                Modifier.fillMaxWidth().graphicsLayer { alpha = reveal() },
                 size = 14.sp,
                 weight = if (focus.focused) FontWeight.Medium else FontWeight.Normal,
                 color = if (focus.focused) Ink.Primary else Ink.Tertiary,

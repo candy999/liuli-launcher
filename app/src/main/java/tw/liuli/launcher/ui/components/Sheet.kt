@@ -248,8 +248,9 @@ fun GlassSheet(
                             // 第幾個「看得到的」列決定出場順序（捲動過的清單從畫面上第一列開始算）
                             val order = (index - listState.firstVisibleItemIndex).coerceAtLeast(0)
                             val a = rowReveal(reveal.value, order)
-                            // 每個繪圖各自乘透明度，不為每一列開離屏圖（面板一打開就要向 GPU 要十張圖，弱電視的準備階段因此多卡一下）
-                            compositingStrategy = androidx.compose.ui.graphics.CompositingStrategy.ModulateAlpha
+                            // 整列先畫好再整體淡入（焦點的白底和文字不會互相透出）；列不會放大，不怕被裁
+                            compositingStrategy = if (a < .999f) androidx.compose.ui.graphics.CompositingStrategy.Offscreen
+                            else androidx.compose.ui.graphics.CompositingStrategy.Auto
                             alpha = a
                             translationY = (1f - a) * 10.dp.toPx()
                         },

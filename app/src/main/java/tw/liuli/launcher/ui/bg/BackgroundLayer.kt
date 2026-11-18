@@ -319,19 +319,21 @@ private fun RidgeMountains(engine: BackgroundEngine, fullW: Int, fullH: Int, alp
  */
 private fun Modifier.coverClip(engine: BackgroundEngine): Modifier = drawWithContent {
     val c = engine.cover
-    val vis = if (c == null) 0f else floor((1f - c.slide()) * c.height - c.corner)
+    val pad = c?.pad?.invoke() ?: 0f
+    val vis = if (c == null) 0f else floor((1f - c.slide()) * c.height - c.corner - pad)
     if (c == null || vis < 2f) { drawContent(); return@drawWithContent }
     val top = size.height - vis
+    val side = c.inset + pad
     clipRect(0f, 0f, size.width, top) { this@drawWithContent.drawContent() }
-    clipRect(0f, top, c.inset, size.height) { this@drawWithContent.drawContent() }
-    clipRect(size.width - c.inset, top, size.width, size.height) { this@drawWithContent.drawContent() }
+    clipRect(0f, top, side, size.height) { this@drawWithContent.drawContent() }
+    clipRect(size.width - side, top, size.width, size.height) { this@drawWithContent.drawContent() }
 }
 
 /**
  * 蓋在背景上的不透明面板：從畫面底部往上 [height] 像素、左右各留 [inset] 像素、頂端圓角 [corner]（圓角處透出背景）。
- * [slide]：0＝完全打開、1＝完全收起（在繪製階段讀取）。
+ * [slide]：0＝完全打開、1＝完全收起（在繪製階段讀取）。[pad]：面板還在晃動時，四周多留幾個像素的背景不跳過。
  */
-class PanelCover(val height: Float, val inset: Float, val corner: Float, val slide: () -> Float)
+class PanelCover(val height: Float, val inset: Float, val corner: Float, val slide: () -> Float, val pad: () -> Float = { 0f })
 
 /**
  * 冷啟動擴散：黑色蓋在背景上，中間挖一個從 [from]（畫面比例）往外長大的圓洞，邊緣柔和漸變。
