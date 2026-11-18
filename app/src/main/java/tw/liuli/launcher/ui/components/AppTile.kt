@@ -63,6 +63,8 @@ fun AppTile(
     extra: Modifier = Modifier,
     /** 出場淡入的透明度（0～1，在繪製階段讀取）。 */
     reveal: () -> Float = { 1f },
+    /** 整批還在出場（別的磚還在淡入）＝true：這塊磚就算已經淡入完也先維持一張離屏圖（在圖層階段讀取）。 */
+    revealing: () -> Boolean = { false },
 ) {
     androidx.compose.runtime.SideEffect { tw.liuli.launcher.ui.bg.UiTrace.hit("Tile") }
     val own = remember { FocusRequester() }
@@ -91,7 +93,9 @@ fun AppTile(
                 .graphicsLayer {
                     val a = reveal()
                     alpha = a
-                    compositingStrategy = if (a < .999f) CompositingStrategy.Offscreen else CompositingStrategy.Auto
+                    // 整批出場結束前都維持離屏圖：別的磚還在淡入的每一格，整個抽屜都會被重畫，已經淡入完的磚如果改回一般繪製，
+                    // 每格都要把橫幅、圓角、文字重畫一遍（海信在閒置後 GPU 還沒升頻的那一秒，逐排出現的後半段因此掉到每格 50～80ms）
+                    compositingStrategy = if (a < .999f || revealing()) CompositingStrategy.Offscreen else CompositingStrategy.Auto
                 }
                 .then(extra)
                 .focusTarget(focus, req, onFocused, { jelly.press(); onClick() }, onLongClick = { onLongClick(req) })

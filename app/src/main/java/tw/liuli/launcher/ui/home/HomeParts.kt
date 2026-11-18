@@ -709,6 +709,7 @@ fun AppDrawer(
                         onLongClick = { fr -> onLongClick(app, fr) },
                         extra = Modifier.bgTarget(app.themeColor, isApp = true),
                         reveal = revealOf,
+                        revealing = { reveal.value < DRAWER_REVEAL_MS },
                     )
                     }
                 }
@@ -729,6 +730,7 @@ fun AppDrawer(
                         onLongClick = { fr -> onSystemLongClick(app, fr) },
                         extra = Modifier.bgTarget(app.themeColor, isApp = true),
                         reveal = revealOf,
+                        revealing = { reveal.value < DRAWER_REVEAL_MS },
                     )
                     }
                 }
