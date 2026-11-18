@@ -118,23 +118,37 @@ fun GlassSheet(
     // 打開後 0.5 秒內整塊面板維持一張離屏圖（滑入、主畫面淡出、背景暫停都結束才回到一般繪製）；收起時整段都是。
     // 收起沿用同一個元件（不重新組合整個清單——弱電視上要 100ms 以上，收起動畫會被吃掉）
     var asLayer by remember { androidx.compose.runtime.mutableStateOf(true) }
+    var prep by remember { androidx.compose.runtime.mutableStateOf(false) }
+    val glassGate = remember { tw.liuli.launcher.ui.glass.GlassGate() }
     // 先出底框、再逐列出現：滑進來的只有玻璃底框與標題（第一格要畫的東西少，不會頓），
     // 停好之後清單一列一列淡入、微微浮上來——內容出現本身成了效果，而不是「卡了一下才出來」。
     // reveal＝停好後經過的毫秒數。
     val reveal = remember { Animatable(0f) }
     LaunchedEffect(exiting) {
         if (exiting) {
+            prep = false
             asLayer = true
             slide.animateTo(1f, SheetExit)
             onExited()
         } else {
-            // 底框「幾乎到位」（剩不到 3%）就開始逐列出現，和彈簧最後的收尾重疊，不會有一段空框在等
-            launch {
+            // 先準備、再動（和抽屜一樣）：整塊面板先在停下來的位置用看不見的透明度畫好一次、等玻璃烘好，
+            // 滑進來的每一格只是移動這張離屏圖
+            val lite = tw.liuli.launcher.geek.WeakGpu.value
+            prep = true
+            if (lite) reveal.snapTo(REVEAL_TOTAL_MS)
+            delay(16)
+            kotlinx.coroutines.withTimeoutOrNull(300) { androidx.compose.runtime.snapshotFlow { glassGate.baked }.first { it } }
+            androidx.compose.runtime.withFrameNanos { }
+            androidx.compose.runtime.withFrameNanos { }
+            prep = false
+            if (!lite) launch {
+                // 底框「幾乎到位」（剩不到 3%）就開始逐列出現，和彈簧最後的收尾重疊，不會有一段空框在等
                 androidx.compose.runtime.snapshotFlow { slide.value }.first { it < .03f }
                 asLayer = false
                 reveal.animateTo(REVEAL_TOTAL_MS, tween(REVEAL_TOTAL_MS.toInt(), easing = LinearEasing))
             }
             slide.animateTo(0f, SheetSpring)
+            if (lite) asLayer = false
         }
     }
     val sheetWidthPx = with(androidx.compose.ui.platform.LocalDensity.current) { 340.dp.toPx() }
@@ -183,6 +197,11 @@ fun GlassSheet(
                 .width(340.dp)
                 .fillMaxHeight()
                 .graphicsLayer {
+                    if (prep) {
+                        translationX = 0f; alpha = .004f
+                        compositingStrategy = CompositingStrategy.Offscreen
+                        return@graphicsLayer
+                    }
                     val s = slide.value
                     translationX = s * (size.width + 40.dp.toPx())
                     // 從稍小、稍透明滑進來並長到原大（以右側中央為支點）；整塊是一張離屏圖，縮放不重畫內容
@@ -193,10 +212,11 @@ fun GlassSheet(
                     transformOrigin = androidx.compose.ui.graphics.TransformOrigin(1f, .5f)
                     alpha = 1f - .5f * k * k
                     // 滑動中：整塊面板畫成一張離屏圖；停下來恢復一般繪製
-                    compositingStrategy = if (asLayer || s > 0.001f) CompositingStrategy.Offscreen else CompositingStrategy.Auto
+                    compositingStrategy = if (asLayer || kotlin.math.abs(s) > 0.001f) CompositingStrategy.Offscreen else CompositingStrategy.Auto
                 }
                 .liquidGlass(
-                    RoundedCornerShape(30.dp), tint = 0.09f,
+                    gate = glassGate,
+                    shape = RoundedCornerShape(30.dp), tint = 0.09f,
                     slide = { Offset(slide.value * (sheetWidthPx + gapPx), 0f) },
                     frozen = { asLayer || slide.value > 0.001f },
                 )

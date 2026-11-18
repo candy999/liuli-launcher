@@ -523,29 +523,45 @@ fun AppDrawer(
     }
     // 打開後 0.5 秒內（滑入＋主畫面淡出＋背景暫停都還在進行）整塊抽屜維持一張離屏圖，之後才回到一般繪製
     var asLayer by remember { mutableStateOf(false) }
+    var prep by remember { mutableStateOf(false) }
+    val glassGate = remember { tw.liuli.launcher.ui.glass.GlassGate() }
     // 是否擺放（看得到）：打開時立刻擺放；收起時等滑出動畫結束才拿掉
     var shown by remember { mutableStateOf(false) }
     // 先出底框、再逐排出現：滑上來的只有玻璃底框與標題列，停好後 App 一排一排淡入浮上
     val reveal = remember { Animatable(0f) }
     LaunchedEffect(open) {
         if (open) {
+            // 先準備、再動：整塊抽屜（玻璃底框＋邊緣＋格子）先在「停下來的位置」用看不見的透明度完整畫好一次、
+            // 存成一張離屏圖，然後彈上來的每一格只是移動、縮放這張圖——不在滑動中才烘玻璃、才畫格子（弱電視會跟不上）
+            val lite = tw.liuli.launcher.geek.WeakGpu.value
             shown = true
             asLayer = true
-            reveal.snapTo(0f)
+            glassGate.baked = false   // 背景可能換過顏色了：等這一次烘好的
+            prep = true
+            slide.snapTo(1f)
+            // 弱 GPU：App 跟著底框一起上來，不在彈簧收尾時再逐排淡入（那段時間每一格都要重畫整個抽屜）
+            reveal.snapTo(if (lite) DRAWER_REVEAL_MS else 0f)
             focused = 0
             topRow = 0
             runCatching { gridState.scrollToItem(0) }
             delay(16)
             apps.firstOrNull()?.let { a -> runCatching { requesters[a.packageName]?.requestFocus() } }
-            // 抽屜「幾乎到位」（剩不到 3%）就開始逐排出現，和彈簧最後的收尾重疊，不會有一段空框在等
-            launch {
+            // 等玻璃烘好（通常一兩格；最多等 0.3 秒），再讓烘好的畫面真的畫進離屏圖一格
+            kotlinx.coroutines.withTimeoutOrNull(300) { androidx.compose.runtime.snapshotFlow { glassGate.baked }.first { it } }
+            androidx.compose.runtime.withFrameNanos { }
+            androidx.compose.runtime.withFrameNanos { }
+            prep = false
+            if (!lite) launch {
+                // 抽屜「幾乎到位」（剩不到 3%）就開始逐排出現，和彈簧最後的收尾重疊，不會有一段空框在等
                 androidx.compose.runtime.snapshotFlow { slide.value }.first { it < .03f }
                 asLayer = false
                 reveal.animateTo(DRAWER_REVEAL_MS, androidx.compose.animation.core.tween(DRAWER_REVEAL_MS.toInt(), easing = androidx.compose.animation.core.LinearEasing))
             }
             slide.animateTo(0f, SheetSpring)
+            if (lite) asLayer = false
         } else if (shown) {
             // 收起：背景與主畫面已經先畫好（背景不再裁掉被蓋住的部分），抽屜整塊當一張圖加速滑出
+            prep = false
             asLayer = true
             slide.animateTo(1f, SheetExit)
             asLayer = false
@@ -573,6 +589,12 @@ fun AppDrawer(
                 .fillMaxWidth()
                 .height(440.dp + DRAWER_OVERSHOOT)
                 .graphicsLayer {
+                    if (prep) {
+                        // 準備中：在停下來的位置、幾乎全透明（約 0.4%，肉眼看不到）畫一次，讓 GPU 把整張離屏圖建好
+                        translationY = overshootPx; alpha = .004f
+                        compositingStrategy = CompositingStrategy.Offscreen
+                        return@graphicsLayer
+                    }
                     val s = slide.value
                     translationY = s * drawerHeightPx + overshootPx
                     // 大面積的動作要有「重量」：從稍小、稍透明，一邊上升一邊長到原大（以底邊中央為支點），
@@ -584,10 +606,12 @@ fun AppDrawer(
                     transformOrigin = androidx.compose.ui.graphics.TransformOrigin(.5f, 1f)
                     alpha = 1f - .55f * k * k
                     // 滑動中：整塊抽屜（玻璃＋App 格子）畫成一張離屏圖，GPU 每格只貼一個四邊形；停下來恢復一般繪製
-                    compositingStrategy = if (asLayer || s > 0.001f) CompositingStrategy.Offscreen else CompositingStrategy.Auto
+                    // （彈簧衝過頭時 s 是負的，也要維持離屏圖，等彈簧完全停了才換回一般繪製）
+                    compositingStrategy = if (asLayer || kotlin.math.abs(s) > 0.001f) CompositingStrategy.Offscreen else CompositingStrategy.Auto
                 }
                 .liquidGlass(
-                    RoundedCornerShape(topStart = 34.dp, topEnd = 34.dp), tint = 0.09f,
+                    gate = glassGate,
+                    shape = RoundedCornerShape(topStart = 34.dp, topEnd = 34.dp), tint = 0.09f,
                     slide = { drawerSlideOffset(slide.value, drawerHeightPx) },
                     frozen = { asLayer || slide.value > 0.001f },
                     // 受光：上緣一道光、一片跟著焦點那一欄移動的柔光、往下漸暗（烘在同一張圖裡；位置量化成 24 格，移動中最多每 0.12 秒重烘一次）

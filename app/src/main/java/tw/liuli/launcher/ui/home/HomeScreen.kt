@@ -1465,7 +1465,8 @@ fun HomeScreen(
             }
 
             // 抽屜上方的精簡資訊列（抽屜打開時才出現）
-            if (drawerOpen || drawerBarShown) DrawerStatusBar(home, { drawerHide.value })
+            // 抽屜上方的資訊列跟抽屜一起預先組合好（平常透明度 0），打開的那一格不用才組合、排版那幾段文字
+            if (drawerOpen || drawerBarShown || drawerReady) DrawerStatusBar(home, { drawerHide.value })
 
             // 抽屜預先建好（主畫面穩定 2.5 秒後，或第一次打開時），之後打開只剩滑入動畫
             if (drawerReady || drawerOpen) {

@@ -79,10 +79,13 @@ fun Modifier.liquidGlass(
     edge: Boolean = true,
     /** 大片面板的受光：光的位置（0～1 的比例）；null＝不加。在繪製階段讀取。 */
     light: (() -> Offset)? = null,
+    /** 第一張烘好時通知（面板等它烘好才開始滑入）。 */
+    gate: GlassGate? = null,
 ): Modifier = composed {
     val backdrop = LocalGlassBackdrop.current
     var origin by remember { mutableStateOf(Offset.Zero) }
     val bake = remember(backdrop.image) { GlassBake(backdrop, edge) }
+    bake.gate = gate
     LaunchedEffect(bake) { bake.run() }
     val matrix = remember { android.graphics.Matrix() }
     val rough = remember(backdrop.image) {
@@ -122,7 +125,8 @@ fun Modifier.liquidGlass(
                     return@onDrawBehind
                 }
                 val lp = light?.invoke()
-                bake.request(origin, size, radii, tint, hl, v, dens, lp?.x ?: -1f, lp?.y ?: 0f)
+                // 面板滑動中（整塊是一張離屏圖在移動）：已經有烘好的就不再重烘——一重烘，整張離屏圖就得重畫一次
+                if (!(frozen() && bake.baked && gate?.baked != false)) bake.request(origin, size, radii, tint, hl, v, dens, lp?.x ?: -1f, lp?.y ?: 0f)
                 val paint = bake.paint(matrix)
                 if (paint != null) drawIntoCanvas {
                     val c = it.nativeCanvas
@@ -152,6 +156,11 @@ fun Modifier.liquidGlass(
         }
 }
 
+/** 一片玻璃「第一張烘好了沒」（可觀察）。面板滑入之前先等它。 */
+class GlassGate {
+    var baked by mutableStateOf(false)
+}
+
 /** 給所有玻璃共用的背景小圖像素（每個版本只讀一次）。 */
 private object BackdropPixels {
     var px = IntArray(0); var w = 0; var h = 0
@@ -170,6 +179,8 @@ private object BackdropPixels {
 private class GlassBake(private val backdrop: GlassBackdrop, private val edge: Boolean) {
     var tick by mutableIntStateOf(0)
         private set
+    var gate: GlassGate? = null
+    val baked: Boolean get() = bakedFor != null
     private val wake = Channel<Unit>(Channel.CONFLATED)
 
     private class Req(
@@ -191,7 +202,11 @@ private class GlassBake(private val backdrop: GlassBackdrop, private val edge: B
         val image = backdrop.image ?: return
         if (size.width < 2f || size.height < 2f) return
         val r = Req(origin.x, origin.y, size.width, size.height, radii, tint, hl, version, density, lx, ly)
-        if (r.same(wanted)) return
+        if (r.same(wanted)) {
+            // 參數沒變、但有人在等「烘好了」的通知（面板重新打開）：叫醒一下，讓它回報
+            if (gate?.baked == false) wake.trySend(Unit)
+            return
+        }
         BackdropPixels.sync(image, version)
         wanted = r
         wake.trySend(Unit)
@@ -212,7 +227,7 @@ private class GlassBake(private val backdrop: GlassBackdrop, private val edge: B
         while (true) {
             wake.receive()
             val r = wanted ?: continue
-            if (r.same(bakedFor)) continue
+            if (r.same(bakedFor)) { gate?.baked = true; continue }
             val area = r.w * r.h
             // 越大片烘得越粗（中間本來就是模糊的背景，粗一點看不出來）：抽屜 1880×976 用 ÷6，約 5 萬個像素
             val nq = when { area <= 40_000f -> 1; area <= 160_000f -> 2; area <= 500_000f -> 3; area <= 1_000_000f -> 4; else -> 6 }
@@ -234,6 +249,7 @@ private class GlassBake(private val backdrop: GlassBackdrop, private val edge: B
             q = nq
             bakedFor = r
             tick++
+            gate?.baked = true
             // 背景在動時每秒最多烘十幾次：玻璃後面是模糊的背景，慢一兩格看不出來
             // 面板上的光正在移動：馬上接著烘下一張（不然光是一段一段跳過去的）
             val lightMoving = wanted?.let { it.lx != r.lx } == true
