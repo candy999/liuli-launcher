@@ -125,7 +125,7 @@ fun Modifier.liquidGlass(
             onDrawBehind {
                 if (tw.liuli.launcher.ui.bg.PerfProbe.noGlass) return@onDrawBehind
                 if (hidden()) return@onDrawBehind   // 先讀這個：看不到的時候不訂閱背景版本，背景怎麼變都不會被叫起來重畫
-                tw.liuli.launcher.ui.bg.UiTrace.hit("glassDraw")
+                if (tw.liuli.launcher.ui.bg.UiTrace.enabled) tw.liuli.launcher.ui.bg.UiTrace.hit("glassDraw${size.width.toInt()}x${size.height.toInt()}")
                 val v = backdrop.version() // 背景換色時跟著重烘
                 @Suppress("UNUSED_VARIABLE") val t = bake.tick // 烘好一張就重畫
                 val hl = highlight()
