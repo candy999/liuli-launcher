@@ -126,6 +126,8 @@ fun GlassSheet(
     var asLayer by remember { androidx.compose.runtime.mutableStateOf(true) }
     var prep by remember { androidx.compose.runtime.mutableStateOf(false) }
     val glassGate = remember { tw.liuli.launcher.ui.glass.GlassGate() }
+    // 只在真假翻轉時才變（玻璃在繪製時讀它；直接讀滑動位置會讓面板每格重畫）
+    val glassFrozen by remember { androidx.compose.runtime.derivedStateOf { asLayer || kotlin.math.abs(slide.value) > 0.001f } }
     // 先出底框、再逐列出現：滑進來的只有玻璃底框與標題（第一格要畫的東西少，不會頓），
     // 停好之後清單一列一列淡入、微微浮上來——內容出現本身成了效果，而不是「卡了一下才出來」。
     // reveal＝停好後經過的毫秒數。
@@ -228,7 +230,7 @@ fun GlassSheet(
                     gate = glassGate,
                     shape = RoundedCornerShape(30.dp), tint = 0.09f,
                     slide = { Offset(slide.value * (sheetWidthPx + gapPx), 0f) },
-                    frozen = { asLayer || kotlin.math.abs(slide.value) > 0.001f },
+                    frozen = { glassFrozen },
                 )
                 // 左右的 16dp 留白放進每一列自己的圖層裡（見下面的清單），這裡只留上下
                 .padding(vertical = 26.dp)

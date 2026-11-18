@@ -536,6 +536,9 @@ fun AppDrawer(
     val glassGate = remember { tw.liuli.launcher.ui.glass.GlassGate() }
     // 是否擺放（看得到）：打開時立刻擺放；收起時等滑出動畫結束才拿掉
     var shown by remember { mutableStateOf(false) }
+    // 玻璃「定住不重烘」：定格中、收起來了、或還沒停好。包成只在真假翻轉時才變的狀態——玻璃是在繪製時讀它的，
+    // 直接讀滑動位置的話，位置每格都在變，玻璃（連同整塊抽屜）就每格重畫
+    val glassFrozen by remember { androidx.compose.runtime.derivedStateOf { asLayer || (!openNow.value && !shown) || kotlin.math.abs(slide.value) > 0.001f } }
     // 先出底框、再逐排出現：滑上來的只有玻璃底框與標題列，停好後 App 一排一排淡入浮上
     val reveal = remember { Animatable(0f) }
     LaunchedEffect(open) {
@@ -644,7 +647,7 @@ fun AppDrawer(
                     gate = glassGate,
                     shape = RoundedCornerShape(topStart = 34.dp, topEnd = 34.dp), tint = 0.09f,
                     slide = { drawerSlideOffset(slide.value, drawerHeightPx) },
-                    frozen = { asLayer || (!open && !shown) || kotlin.math.abs(slide.value) > 0.001f },   // 收起來的時候不重烘
+                    frozen = { glassFrozen },
                     // 受光：上緣一道光、一片跟著焦點那一欄移動的柔光、往下漸暗（烘在同一張圖裡；位置量化成 24 格，移動中最多每 0.12 秒重烘一次）
                     light = { androidx.compose.ui.geometry.Offset(lightStep / 240f, .08f) },
                 )
@@ -749,6 +752,7 @@ fun AppDrawer(
                             },
                             onClick = onToggleSystem,
                             reveal = revealOf,
+                            glassSlide = { drawerSlideOffset(slide.value, drawerHeightPx) }, glassFrozen = { glassFrozen },
                         )
                     }
                 }
@@ -799,6 +803,7 @@ private fun DrawerCell(
 private fun SystemToggleTile(
     expanded: Boolean, loading: Boolean, count: Int,
     requester: FocusRequester, onFocused: () -> Unit, onClick: () -> Unit, reveal: () -> Float,
+    glassSlide: () -> androidx.compose.ui.geometry.Offset = { androidx.compose.ui.geometry.Offset.Zero }, glassFrozen: () -> Boolean = { false },
 ) {
     val focus = rememberFocusAnim()
     val jelly = rememberJelly()
@@ -810,7 +815,9 @@ private fun SystemToggleTile(
                 .jellyFocus(jelly, focus, TILE_FOCUS_SCALE)
                 .graphicsLayer { alpha = reveal() }
                 .focusTarget(focus, requester, onFocused = onFocused, onClick = { jelly.press(); onClick() })
-                .liquidGlass(RoundedCornerShape(Dimens.TileRadius), tint = 0.06f),
+                // 抽屜滑動、定格時這一片玻璃也要定住：它算自己在畫面上的位置來取背景，抽屜一動位置就變、每格重烘重畫——
+                // 收起時「定格成一張圖」的抽屜就因為這一小片，每格整張重畫（海信實測收起每格 20ms）
+                .liquidGlass(RoundedCornerShape(Dimens.TileRadius), tint = 0.06f, slide = glassSlide, frozen = glassFrozen),
             contentAlignment = Alignment.Center,
         ) {
             GlassLit(focus, Dimens.TileRadius, Modifier.matchParentSize(), haze = .12f)
