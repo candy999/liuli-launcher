@@ -177,6 +177,8 @@
 
 ## 安裝
 
+需要 **Android 8.0 以上**的電視或電視盒（Android TV、Google TV 都可以）。
+
 1. 下載 [Releases](https://github.com/candy999/liuli-launcher/releases/latest) 上的 APK。
 2. 安裝到電視，二擇一：
    - **用電腦 ADB**：

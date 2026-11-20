@@ -15,7 +15,8 @@ android {
 
     defaultConfig {
         applicationId = "tw.liuli.launcher"
-        minSdk = 28
+        // Android 8.0 起：java.time（月曆、農民曆）、GPU 常駐圖片、安裝未知來源的權限檢查都要 API 26
+        minSdk = 26
         targetSdk = 34
         versionCode = buildNumber
         // 正式版（推 v1.0.0 這類 tag）用 tag 的版本號；main 的每日建置是 0.1.<建置號>
@@ -58,9 +59,11 @@ android {
     buildFeatures {
         compose = true
     }
+    // lint 只檢查「用到比 minSdk 新的系統功能卻沒判斷版本」，CI 每次建置都跑，有就讓建置失敗
     lint {
         checkReleaseBuilds = false
-        abortOnError = false
+        checkOnly += setOf("NewApi")
+        abortOnError = true
     }
 }
 
