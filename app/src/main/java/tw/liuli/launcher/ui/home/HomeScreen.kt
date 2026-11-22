@@ -1,5 +1,6 @@
 package tw.liuli.launcher.ui.home
 
+import androidx.compose.foundation.gestures.detectTapGestures
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -1535,7 +1536,7 @@ fun HomeScreen(
                         .graphicsLayer { alpha = if (dockHasFocus && !drawerOpen) 1f else 0f }
                         // 滑鼠／飛鼠：點這個提示打開所有 App（看得到的時候才有作用）
                         .pointerInput(Unit) {
-                            androidx.compose.foundation.gestures.detectTapGestures { if (dockHasFocus && !drawerOpen && sheet == null) drawerOpen = true }
+                            detectTapGestures { if (dockHasFocus && !drawerOpen && sheet == null) drawerOpen = true }
                         },
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {

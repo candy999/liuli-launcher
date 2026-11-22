@@ -1,5 +1,7 @@
 package tw.liuli.launcher.ui.weather
 
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectTapGestures
 import android.view.KeyEvent
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
@@ -235,7 +237,7 @@ private fun Slots(slots: List<Slot>, selected: Int, nowSlot: Int, bump: Pair<Int
                 val jelly = rememberSelJelly(on, bump, vertical = false)
                 Box(Modifier.width(58.dp).zIndex(if (on) 1f else 0f).jellyLayer(jelly) { 1f + .06f * v }
                     // 滑鼠／飛鼠：點一下選這個時段
-                    .androidx.compose.ui.input.pointer.pointerInput(k) { androidx.compose.foundation.gestures.detectTapGestures { onPick(k) } }) {
+                    .pointerInput(k) { detectTapGestures { onPick(k) } }) {
                     GlassLit({ v }, 14.dp, Modifier.matchParentSize(), haze = .18f)
                     Column(Modifier.fillMaxWidth().padding(vertical = 10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                         GText(if (k == nowSlot) "現在" else "${k * 3}時", size = 12.sp, color = sub)
@@ -269,7 +271,7 @@ private fun Daily(days: List<DayForecast>, selected: Int, modifier: Modifier, bu
             val jelly = rememberSelJelly(on, bump, vertical = true)
             Box(Modifier.height(48.dp).zIndex(if (on) 1f else 0f).jellyLayer(jelly) { 1f + .02f * v }
                 // 滑鼠／飛鼠：點一下選這一天
-                .androidx.compose.ui.input.pointer.pointerInput(i) { androidx.compose.foundation.gestures.detectTapGestures { onPick(i) } }) {
+                .pointerInput(i) { detectTapGestures { onPick(i) } }) {
             GlassLit({ v }, 14.dp, Modifier.matchParentSize(), haze = .16f)
             Row(
                 Modifier.fillMaxSize().padding(horizontal = 10.dp),
