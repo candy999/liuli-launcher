@@ -52,6 +52,10 @@ jobs:
           LIULI_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: gradle assembleRelease lintRelease --no-daemon --stacktrace
 
+      - name: 相容性檢查的完整結果
+        if: failure()
+        run: cat app/build/intermediates/lint_intermediate_text_report/release/lintReportRelease/lint-results-release.txt || true
+
       - name: 命名 APK
         run: |
           mkdir -p dist

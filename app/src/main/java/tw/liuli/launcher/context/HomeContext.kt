@@ -131,7 +131,7 @@ private fun build(
 
 private fun networkOf(context: Context): NetworkStatus {
     val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return NetworkStatus.NONE
-    val caps = cm.getNetworkCapabilities(cm.activeNetwork) ?: return NetworkStatus.NONE
+    val caps = cm.getNetworkCapabilities(tw.liuli.launcher.Legacy.activeNetwork(cm) ?: return NetworkStatus.NONE) ?: return NetworkStatus.NONE
     if (!caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) return NetworkStatus.NONE
     return when {
         caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> NetworkStatus.ETHERNET

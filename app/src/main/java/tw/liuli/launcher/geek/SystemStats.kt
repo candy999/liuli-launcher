@@ -138,7 +138,7 @@ class StatsSampler(private val context: Context) {
         val mi = ActivityManager.MemoryInfo().also { am.getMemoryInfo(it) }
         // ── 網路 ──
         val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-        val an = cm.activeNetwork
+        val an = tw.liuli.launcher.Legacy.activeNetwork(cm)
         val caps = an?.let { cm.getNetworkCapabilities(it) }
         val lp = an?.let { cm.getLinkProperties(it) }
         val kind = when {
