@@ -132,9 +132,9 @@ fun WeatherScreen(home: HomeContext, active: Boolean = true) {
         Column(Modifier.align(Alignment.TopStart).width(500.dp)) {
             Detail(w, d, day, sel, isNow = day == 0 && slot == nowSlot, cityName = home.city.name)
             Spacer(Modifier.height(26.dp))
-            Slots(slots, slot, if (day == 0) nowSlot else -1, slotBump)
+            Slots(slots, slot, if (day == 0) nowSlot else -1, slotBump) { slot = it }
         }
-        Daily(w.days, day, Modifier.align(Alignment.TopEnd).width(330.dp), dayBump)
+        Daily(w.days, day, Modifier.align(Alignment.TopEnd).width(330.dp), dayBump) { day = it }
         GText("↑↓ 切換日期　←→ 選擇時段　返回鍵回主畫面", Modifier.align(Alignment.BottomStart), size = 12.sp, color = Ink.Faint)
     }
 }
@@ -220,7 +220,7 @@ private fun rememberSelJelly(on: Boolean, bump: Pair<Int, Int>, vertical: Boolea
 
 /** 這一天的 8 個時段；選中的那一段亮一層玻璃、像布丁一樣彈（和主畫面、設定面板的焦點同一套），今天已經過去的時段變淡。 */
 @Composable
-private fun Slots(slots: List<Slot>, selected: Int, nowSlot: Int, bump: Pair<Int, Int>) {
+private fun Slots(slots: List<Slot>, selected: Int, nowSlot: Int, bump: Pair<Int, Int>, onPick: (Int) -> Unit) {
     Column(Modifier.fillMaxWidth()) {
         Box(Modifier.fillMaxWidth().height(1.dp).drawBehind { drawRect(Color.White.copy(alpha = 0.14f)) })
         Spacer(Modifier.height(14.dp))
@@ -233,7 +233,9 @@ private fun Slots(slots: List<Slot>, selected: Int, nowSlot: Int, bump: Pair<Int
                 val sub = if (on) Ink.Secondary else Ink.Tertiary
                 val v by animateFloatAsState(if (on) 1f else 0f, tween(160), label = "slot")
                 val jelly = rememberSelJelly(on, bump, vertical = false)
-                Box(Modifier.width(58.dp).zIndex(if (on) 1f else 0f).jellyLayer(jelly) { 1f + .06f * v }) {
+                Box(Modifier.width(58.dp).zIndex(if (on) 1f else 0f).jellyLayer(jelly) { 1f + .06f * v }
+                    // 滑鼠／飛鼠：點一下選這個時段
+                    .androidx.compose.ui.input.pointer.pointerInput(k) { androidx.compose.foundation.gestures.detectTapGestures { onPick(k) } }) {
                     GlassLit({ v }, 14.dp, Modifier.matchParentSize(), haze = .18f)
                     Column(Modifier.fillMaxWidth().padding(vertical = 10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                         GText(if (k == nowSlot) "現在" else "${k * 3}時", size = 12.sp, color = sub)
@@ -255,7 +257,7 @@ private fun Slots(slots: List<Slot>, selected: Int, nowSlot: Int, bump: Pair<Int
 
 /** 右邊 8 日預報（今天＋往後 7 天）；選中的那一天亮一層玻璃、像布丁一樣彈。 */
 @Composable
-private fun Daily(days: List<DayForecast>, selected: Int, modifier: Modifier, bump: Pair<Int, Int>) {
+private fun Daily(days: List<DayForecast>, selected: Int, modifier: Modifier, bump: Pair<Int, Int>, onPick: (Int) -> Unit) {
     val lo = days.minOfOrNull { it.min } ?: 0.0
     val hi = days.maxOfOrNull { it.max } ?: 1.0
     Column(modifier) {
@@ -265,7 +267,9 @@ private fun Daily(days: List<DayForecast>, selected: Int, modifier: Modifier, bu
             val on = i == selected
             val v by animateFloatAsState(if (on) 1f else 0f, tween(160), label = "day")
             val jelly = rememberSelJelly(on, bump, vertical = true)
-            Box(Modifier.height(48.dp).zIndex(if (on) 1f else 0f).jellyLayer(jelly) { 1f + .02f * v }) {
+            Box(Modifier.height(48.dp).zIndex(if (on) 1f else 0f).jellyLayer(jelly) { 1f + .02f * v }
+                // 滑鼠／飛鼠：點一下選這一天
+                .androidx.compose.ui.input.pointer.pointerInput(i) { androidx.compose.foundation.gestures.detectTapGestures { onPick(i) } }) {
             GlassLit({ v }, 14.dp, Modifier.matchParentSize(), haze = .16f)
             Row(
                 Modifier.fillMaxSize().padding(horizontal = 10.dp),
