@@ -156,6 +156,8 @@ object WeatherRepository {
                 connectTimeout = 8000
                 readTimeout = 8000
             }
+            // Android 7.1 以下沒有 Let's Encrypt 的根憑證（見 LegacyTls）
+            tw.liuli.launcher.LegacyTls.apply(conn)
             try {
                 val body = conn.inputStream.bufferedReader().use { it.readText() }
                 parse(JSONObject(body))
