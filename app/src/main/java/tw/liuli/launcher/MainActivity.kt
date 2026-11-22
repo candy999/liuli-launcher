@@ -9,6 +9,7 @@ import android.os.Handler
 import android.os.HandlerThread
 import android.view.FrameMetrics
 import android.view.KeyEvent
+import tw.liuli.launcher.ui.components.blockPointer
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -84,6 +85,39 @@ class MainActivity : ComponentActivity() {
 
     /** 外部（按鍵服務）要求的動作：序號＋動作名稱。 */
     private val externalAction = mutableStateOf(0 to null as String?)
+
+    /** 滑鼠滾輪累積的格數（觸控板等會送小數）。 */
+    private var wheelAcc = 0f
+
+    /**
+     * 滑鼠／飛鼠：游標移動記下來（焦點跟著游標，見 MouseInput）；滾輪一格＝一次上／下鍵，
+     * 主畫面、抽屜、設定、月曆、天氣不用各自處理，行為和遙控器完全一樣。
+     */
+    override fun dispatchGenericMotionEvent(ev: android.view.MotionEvent): Boolean {
+        if (ev.isFromSource(android.view.InputDevice.SOURCE_CLASS_POINTER)) {
+            when (ev.actionMasked) {
+                android.view.MotionEvent.ACTION_HOVER_MOVE, android.view.MotionEvent.ACTION_HOVER_ENTER ->
+                    tw.liuli.launcher.ui.components.MouseInput.onPointerMotion(ev)
+                android.view.MotionEvent.ACTION_SCROLL -> {
+                    val v = ev.getAxisValue(android.view.MotionEvent.AXIS_VSCROLL)
+                    if (v != 0f) {
+                        if (v * wheelAcc < 0f) wheelAcc = 0f // 換方向重新累積
+                        wheelAcc += v
+                        while (wheelAcc >= 1f) { wheelAcc -= 1f; tapKey(KeyEvent.KEYCODE_DPAD_UP) }
+                        while (wheelAcc <= -1f) { wheelAcc += 1f; tapKey(KeyEvent.KEYCODE_DPAD_DOWN) }
+                    }
+                    return true
+                }
+            }
+        }
+        return super.dispatchGenericMotionEvent(ev)
+    }
+
+    private fun tapKey(code: Int) {
+        val t = android.os.SystemClock.uptimeMillis()
+        dispatchKeyEvent(KeyEvent(t, t, KeyEvent.ACTION_DOWN, code, 0))
+        dispatchKeyEvent(KeyEvent(t, t, KeyEvent.ACTION_UP, code, 0))
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -347,5 +381,9 @@ private fun PageHost(placed: Boolean, alpha: () -> Float, content: @androidx.com
                     }
                 }
             },
-    ) { content() }
+    ) {
+        // 頁面蓋在主畫面上：游標經過頁面的空白處不會穿到後面的主畫面（放在內容下面，頁面裡可點的東西照樣點得到）
+        if (placed) Box(Modifier.fillMaxSize().blockPointer())
+        content()
+    }
 }

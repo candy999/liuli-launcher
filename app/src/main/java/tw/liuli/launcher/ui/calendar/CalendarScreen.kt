@@ -167,7 +167,7 @@ fun CalendarScreen(now: java.time.LocalDateTime, initial: LocalDate = now.toLoca
                         // 每一筆繪製各自乘上透明度，不經過離屏圖，所以不會被裁切
                         compositingStrategy = CompositingStrategy.ModulateAlpha
                     },
-                ) { MonthGrid(m, sel, today, cache) }
+                ) { MonthGrid(m, sel, today, cache) { sel = it } }
             }
         }
         Column(Modifier.weight(1f).fillMaxHeight()) {
@@ -182,7 +182,7 @@ private fun dayInfo(date: LocalDate): DayInfo {
 }
 
 @Composable
-private fun MonthGrid(month: YearMonth, sel: LocalDate, today: LocalDate, cache: Map<LocalDate, DayInfo>) {
+private fun MonthGrid(month: YearMonth, sel: LocalDate, today: LocalDate, cache: Map<LocalDate, DayInfo>, onPick: (LocalDate) -> Unit) {
     Column(Modifier.fillMaxSize()) {
         Row(verticalAlignment = Alignment.Bottom) {
             GText("${month.year}年${month.monthValue}月", size = 34.sp, weight = FontWeight.Light, shadow = true)
@@ -214,8 +214,12 @@ private fun MonthGrid(month: YearMonth, sel: LocalDate, today: LocalDate, cache:
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     for (i in 0 until 7) {
-                        Box(Modifier.weight(1f).fillMaxHeight().zIndex(if (week.getOrNull(i) == sel) 1f else 0f)) {
-                            val date = week.getOrNull(i)
+                        val date = week.getOrNull(i)
+                        Box(
+                            Modifier.weight(1f).fillMaxHeight().zIndex(if (date == sel) 1f else 0f)
+                                // 滑鼠／飛鼠：點一下選這一天
+                                .then(if (date != null) Modifier.androidx.compose.ui.input.pointer.pointerInput(date) { androidx.compose.foundation.gestures.detectTapGestures { onPick(date) } } else Modifier),
+                        ) {
                             if (date != null) DayCell(date, cache[date], date == sel, date == today)
                         }
                     }

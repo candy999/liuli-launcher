@@ -55,6 +55,8 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.pointer.pointerInput
+import tw.liuli.launcher.ui.components.blockPointer
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -338,10 +340,15 @@ fun HomeScreen(
         lastKeyAt[0] = android.os.SystemClock.uptimeMillis()
         while (true) {
             delay(1000)
-            val quiet = android.os.SystemClock.uptimeMillis() - lastKeyAt[0]
+            // 滑鼠／飛鼠在動也算在用
+            val quiet = android.os.SystemClock.uptimeMillis() - maxOf(lastKeyAt[0], tw.liuli.launcher.ui.components.MouseInput.lastMoveAt)
             if (!minimal && sheet == null && !drawerOpen && !picking && movingPkg == null && quiet > idle * 1000L) minimal = true
         }
     }
+
+    // 滑鼠／飛鼠動一下就離開簡潔模式（和按任何鍵一樣）
+    val mouseWakes = tw.liuli.launcher.ui.components.MouseInput.wakes
+    LaunchedEffect(mouseWakes) { if (mouseWakes > 0 && minimal) minimal = false }
 
     // 打開側邊欄（設定等面板）時離開簡潔模式：背後的主畫面要看得到，不能變成一片空的
     LaunchedEffect(sheet != null) { if (sheet != null && minimal) minimal = false }
@@ -1094,6 +1101,23 @@ fun HomeScreen(
                 "drawer" -> { sheet = null; exitingSheet = null; drawerOpen = true }
                 "fakeapps" -> fakeApps = (arg.toIntOrNull() ?: 0).coerceIn(0, 200)
                 "fakesources" -> fakeSources = arg == "1"
+                // 量測用（adb）：模擬滑鼠（Android 9 的 adb 沒有游標移動、滾輪）。mouse:move,x,y 游標移到 (x,y) 像素；mouse:wheel,-1 滾輪往下一格
+                "mouse" -> (context as? android.app.Activity)?.let { act ->
+                    val p = arg.split(',')
+                    val t = android.os.SystemClock.uptimeMillis()
+                    val pp = android.view.MotionEvent.PointerProperties().apply { id = 0; toolType = android.view.MotionEvent.TOOL_TYPE_MOUSE }
+                    val pc = android.view.MotionEvent.PointerCoords()
+                    val action = if (p[0] == "wheel") {
+                        pc.setAxisValue(android.view.MotionEvent.AXIS_VSCROLL, p.getOrNull(1)?.toFloatOrNull() ?: -1f)
+                        android.view.MotionEvent.ACTION_SCROLL
+                    } else {
+                        pc.x = p.getOrNull(1)?.toFloatOrNull() ?: 0f; pc.y = p.getOrNull(2)?.toFloatOrNull() ?: 0f
+                        android.view.MotionEvent.ACTION_HOVER_MOVE
+                    }
+                    val ev = android.view.MotionEvent.obtain(t, t, action, 1, arrayOf(pp), arrayOf(pc), 0, 0, 1f, 1f, 0, 0, android.view.InputDevice.SOURCE_MOUSE, 0)
+                    act.dispatchGenericMotionEvent(ev)
+                    ev.recycle()
+                }
                 // 量測用（adb）：bgpace＝記錄接下來 300 格背景的間隔、印到 logcat（LiuliBg pace）；bgcap:30＝背景不升到每秒 60 格（比較用），bgcap:0 恢復；
                 // keylat:1＝每次按鍵印出「按下 → 下一格畫面畫完」的延遲（LiuliBg keylat）
                 "bgpace" -> engine.startPaceLog()
@@ -1500,13 +1524,20 @@ fun HomeScreen(
                     Modifier
                         .align(Alignment.BottomCenter)
                         .padding(bottom = if (settings.geekMode) 6.dp else 16.dp)
-                        .graphicsLayer { alpha = if (dockHasFocus && !drawerOpen) 1f else 0f },
+                        .graphicsLayer { alpha = if (dockHasFocus && !drawerOpen) 1f else 0f }
+                        // 滑鼠／飛鼠：點這個提示打開所有 App（看得到的時候才有作用）
+                        .pointerInput(Unit) {
+                            androidx.compose.foundation.gestures.detectTapGestures { if (dockHasFocus && !drawerOpen && sheet == null) drawerOpen = true }
+                        },
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     LIcon(LIcons.ChevronUp, 18.dp, Ink.Tertiary)
                     GText("所有 App", size = 13.sp, color = Ink.Tertiary)
                 }
             }
+
+            // 抽屜、面板、色盤打開時：游標經過空白處不會穿到後面的主畫面、把焦點帶過去
+            if (drawerOpen || sheet != null || picking) Box(Modifier.fillMaxSize().blockPointer())
 
             // 抽屜上方的精簡資訊列（抽屜打開時才出現）
             // 抽屜上方的資訊列跟抽屜一起預先組合好（平常透明度 0），打開的那一格不用才組合、排版那幾段文字

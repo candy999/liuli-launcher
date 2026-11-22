@@ -22,6 +22,8 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.PointerType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.zIndex
 import tw.liuli.launcher.ui.theme.FocusOutSpring
@@ -37,6 +39,9 @@ fun Modifier.tvClickable(
 ): Modifier = composed {
     var pressed by remember { mutableStateOf(false) }
     var longFired by remember { mutableStateOf(false) }
+    // 滑鼠／飛鼠：游標移進來就拿焦點（見 MouseInput）
+    val hoverReq = remember { FocusRequester() }
+    val hasFocus = remember { booleanArrayOf(false) }
     this
         .onKeyEvent { event ->
             val code = event.nativeKeyEvent.keyCode
@@ -68,6 +73,18 @@ fun Modifier.tvClickable(
             val longPress: ((Offset) -> Unit)? = onLongClick?.let { handler -> { _: Offset -> handler() } }
             detectTapGestures(onTap = { onClick() }, onLongPress = longPress)
         }
+        .pointerInput(Unit) {
+            awaitPointerEventScope {
+                while (true) {
+                    val e = awaitPointerEvent()
+                    if (hasFocus[0] || !MouseInput.recentlyMoved) continue
+                    if (e.type != PointerEventType.Enter && e.type != PointerEventType.Move) continue
+                    if (e.changes.any { it.type == PointerType.Mouse && !it.pressed }) runCatching { hoverReq.requestFocus() }
+                }
+            }
+        }
+        .focusRequester(hoverReq)
+        .onFocusChanged { hasFocus[0] = it.isFocused }
         .focusable()
 }
 
