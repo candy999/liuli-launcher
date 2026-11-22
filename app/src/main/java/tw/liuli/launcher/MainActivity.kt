@@ -97,20 +97,32 @@ class MainActivity : ComponentActivity() {
         if (ev.isFromSource(android.view.InputDevice.SOURCE_CLASS_POINTER)) {
             when (ev.actionMasked) {
                 android.view.MotionEvent.ACTION_HOVER_MOVE, android.view.MotionEvent.ACTION_HOVER_ENTER ->
-                    tw.liuli.launcher.ui.components.MouseInput.onPointerMotion(ev)
+                    tw.liuli.launcher.ui.components.MouseInput.onPointerMotion(ev, 24f * resources.displayMetrics.density)
                 android.view.MotionEvent.ACTION_SCROLL -> {
                     val v = ev.getAxisValue(android.view.MotionEvent.AXIS_VSCROLL)
                     if (v != 0f) {
                         if (v * wheelAcc < 0f) wheelAcc = 0f // 換方向重新累積
                         wheelAcc += v
-                        while (wheelAcc >= 1f) { wheelAcc -= 1f; tapKey(KeyEvent.KEYCODE_DPAD_UP) }
-                        while (wheelAcc <= -1f) { wheelAcc += 1f; tapKey(KeyEvent.KEYCODE_DPAD_DOWN) }
+                        // 頁面（月曆、天氣）自己處理滾輪；其他地方一格＝一次上／下鍵
+                        fun step(dir: Int) {
+                            tw.liuli.launcher.ui.components.MouseInput.onKey()
+                            if (tw.liuli.launcher.ui.components.MouseInput.wheel?.invoke(dir, ev.x, ev.y) != true)
+                                tapKey(if (dir < 0) KeyEvent.KEYCODE_DPAD_UP else KeyEvent.KEYCODE_DPAD_DOWN)
+                        }
+                        while (wheelAcc >= 1f) { wheelAcc -= 1f; step(-1) }
+                        while (wheelAcc <= -1f) { wheelAcc += 1f; step(1) }
                     }
                     return true
                 }
             }
         }
         return super.dispatchGenericMotionEvent(ev)
+    }
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        // 按了遙控器：抖動的飛鼠游標不會把焦點搶走（見 MouseInput.onKey）
+        if (event.action == KeyEvent.ACTION_DOWN) tw.liuli.launcher.ui.components.MouseInput.onKey()
+        return super.dispatchKeyEvent(event)
     }
 
     private fun tapKey(code: Int) {

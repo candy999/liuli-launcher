@@ -1,5 +1,7 @@
 package tw.liuli.launcher.ui.weather
 
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.gestures.detectTapGestures
 import android.view.KeyEvent
@@ -80,6 +82,25 @@ fun WeatherScreen(home: HomeContext, active: Boolean = true) {
     // 撞牆：（第幾次, 方向）——選中的那一個看到次數變了就彈一下
     var dayBump by remember { androidx.compose.runtime.mutableStateOf(0 to 0) }
     var slotBump by remember { androidx.compose.runtime.mutableStateOf(0 to 0) }
+    // 時段那一列在畫面上的範圍（滾輪用）
+    val slotsBounds = remember { floatArrayOf(0f, 0f, 0f, 0f) }
+    // 滑鼠滾輪：游標在時段那一列上＝換時段（往下＝下一個時段），其他地方＝換日子（往下＝下一天）
+    androidx.compose.runtime.DisposableEffect(active, w) {
+        val h: (Int, Float, Float) -> Boolean = h@{ dir, x, y ->
+            val ww = w ?: return@h false
+            val b = slotsBounds
+            if (x >= b[0] && x <= b[2] && y >= b[1] && y <= b[3]) {
+                tw.liuli.launcher.ui.glass.JellyInput.note(dir, 0)
+                slot = (slot + dir).coerceIn(0, 7)
+            } else {
+                tw.liuli.launcher.ui.glass.JellyInput.note(0, dir)
+                day = (day + dir).coerceIn(0, (ww.days.size - 1).coerceAtLeast(0))
+            }
+            true
+        }
+        if (active) tw.liuli.launcher.ui.components.MouseInput.wheel = h
+        onDispose { if (tw.liuli.launcher.ui.components.MouseInput.wheel === h) tw.liuli.launcher.ui.components.MouseInput.wheel = null }
+    }
     // 頁面是預先組合好的：每次打開都回到「今天、現在」，再拿焦點
     LaunchedEffect(active) {
         if (active) {
@@ -134,7 +155,10 @@ fun WeatherScreen(home: HomeContext, active: Boolean = true) {
         Column(Modifier.align(Alignment.TopStart).width(500.dp)) {
             Detail(w, d, day, sel, isNow = day == 0 && slot == nowSlot, cityName = home.city.name)
             Spacer(Modifier.height(26.dp))
-            Slots(slots, slot, if (day == 0) nowSlot else -1, slotBump) { slot = it }
+            Box(Modifier.onGloballyPositioned { c ->
+                val r = c.boundsInRoot()
+                slotsBounds[0] = r.left; slotsBounds[1] = r.top; slotsBounds[2] = r.right; slotsBounds[3] = r.bottom
+            }) { Slots(slots, slot, if (day == 0) nowSlot else -1, slotBump) { slot = it } }
         }
         Daily(w.days, day, Modifier.align(Alignment.TopEnd).width(330.dp), dayBump) { day = it }
         GText("↑↓ 切換日期　←→ 選擇時段　返回鍵回主畫面", Modifier.align(Alignment.BottomStart), size = 12.sp, color = Ink.Faint)

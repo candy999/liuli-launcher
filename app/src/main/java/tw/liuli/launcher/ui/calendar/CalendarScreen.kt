@@ -102,6 +102,16 @@ fun CalendarScreen(now: java.time.LocalDateTime, initial: LocalDate = now.toLoca
             runCatching { root.requestFocus() }
         }
     }
+    // 滑鼠滾輪：在月曆上一格＝翻一個月（往下＝下個月），跟遙控器的頻道鍵一樣
+    androidx.compose.runtime.DisposableEffect(active) {
+        val h: (Int, Float, Float) -> Boolean = { dir, _, _ ->
+            tw.liuli.launcher.ui.glass.JellyInput.note(0, dir)
+            sel = if (dir < 0) sel.minusMonths(1) else sel.plusMonths(1)
+            true
+        }
+        if (active) tw.liuli.launcher.ui.components.MouseInput.wheel = h
+        onDispose { if (tw.liuli.launcher.ui.components.MouseInput.wheel === h) tw.liuli.launcher.ui.components.MouseInput.wheel = null }
+    }
     // 農民曆計算比較慢（宜忌、吉時…）：日期格子先畫，算好的日子放進快取再補上。
     // 這個月算完接著預先算上個月、下個月，翻月時通常已經好了。
     val cache = remember { mutableStateMapOf<LocalDate, DayInfo>() }
