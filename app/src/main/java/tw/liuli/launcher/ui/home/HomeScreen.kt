@@ -1112,7 +1112,7 @@ fun HomeScreen(
                 "glassslow" -> tw.liuli.launcher.ui.glass.GlassDebug.timeScale = (arg.toFloatOrNull() ?: 1f).coerceIn(0.01f, 1f)
                 // 量測用（adb）：ACTION=shot:名稱 把目前的視窗畫面存成 PNG（Android/data/tw.liuli.launcher/files/shots/名稱.png）。
                 // 直接拷貝 App 自己的畫面緩衝，不靠系統截圖（模擬器視窗縮小時 screencap 只會拿到黑畫面）
-                "shot" -> if (android.os.Build.VERSION.SDK_INT >= 24) (context as? android.app.Activity)?.window?.let { win ->
+                "shot" -> if (android.os.Build.VERSION.SDK_INT >= 26) (context as? android.app.Activity)?.window?.let { win ->
                     val v = win.decorView
                     if (v.width > 0 && v.height > 0) {
                         val bmp = android.graphics.Bitmap.createBitmap(v.width, v.height, android.graphics.Bitmap.Config.ARGB_8888)
@@ -1133,7 +1133,7 @@ fun HomeScreen(
                 "probe" -> tw.liuli.launcher.ui.bg.PerfProbe.apply(arg)
                 // 量測用（adb）：ACTION=burst:名稱,格數,後續動作 連續每一格拷貝畫面（半解析度）存成 名稱_00.png…，
                 // 開始拷貝後立刻執行後續動作（sheet:settings 或 drawer）——看面板滑入的每一格
-                "burst" -> if (android.os.Build.VERSION.SDK_INT >= 24) (context as? android.app.Activity)?.window?.let { win ->
+                "burst" -> if (android.os.Build.VERSION.SDK_INT >= 26) (context as? android.app.Activity)?.window?.let { win ->
                     val parts = arg.split(',')
                     val name = parts.getOrNull(0).orEmpty().ifBlank { "burst" }
                     val n = (parts.getOrNull(1)?.toIntOrNull() ?: 24).coerceIn(1, 60)

@@ -38,11 +38,11 @@ object TvSources {
             ?: return emptyList()
         val inputs = runCatching { manager.tvInputList }.getOrDefault(emptyList())
         return inputs
-            .filter { it.parentId == null && !it.isHidden(context) }
+            .filter { it.parentId == null && !(android.os.Build.VERSION.SDK_INT >= 24 && it.isHidden(context)) }
             .map { info ->
                 TvSource(
                     id = info.id,
-                    label = (info.loadCustomLabel(context) ?: info.loadLabel(context)).toString(),
+                    label = ((if (android.os.Build.VERSION.SDK_INT >= 24) info.loadCustomLabel(context) else null) ?: info.loadLabel(context)).toString(),
                     type = info.type,
                     isPassthrough = info.isPassthroughInput,
                     servicePackage = info.serviceInfo.packageName,

@@ -236,7 +236,7 @@ object Updater {
         }
         try {
             if (c.responseCode !in 200..299) error("下載 HTTP ${c.responseCode}")
-            val total = if (size > 0) size else c.contentLengthLong
+            val total = if (size > 0) size else if (Build.VERSION.SDK_INT >= 24) c.contentLengthLong else c.contentLength.toLong()
             c.inputStream.use { inp ->
                 tmp.outputStream().use { out ->
                     val buf = ByteArray(32 * 1024)
