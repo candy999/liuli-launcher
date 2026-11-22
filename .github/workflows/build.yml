@@ -2,7 +2,8 @@ name: 編譯 APK
 
 on:
   push:
-    branches: [main]
+    # android5：Android 5～7 專用版的分支（定案後不再加功能）
+    branches: [main, android5]
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
@@ -92,3 +93,32 @@ jobs:
           prerelease: false
           make_latest: true
           files: dist/*.apk
+
+      # android5 分支：覆蓋「Android 5～7 專用版」預覽版（不是正式版，軟體更新不會看到它），固定網址：
+      # https://github.com/candy999/liuli-launcher/releases/download/legacy-android5/LiuliLauncher-android5.apk
+      - name: 移動 Android 5 專用版標籤
+        if: github.event_name == 'push' && github.ref == 'refs/heads/android5'
+        run: |
+          cp dist/*.apk dist/LiuliLauncher-android5.apk
+          git tag -f legacy-android5
+          git push -f origin refs/tags/legacy-android5
+
+      - name: 更新 Android 5 專用版
+        if: github.event_name == 'push' && github.ref == 'refs/heads/android5'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: legacy-android5
+          name: Android 5～7 專用版（測試中）
+          prerelease: true
+          make_latest: false
+          body: |
+            給 Android 5.0～7.1 電視盒的簡化版，以 1.2.3 為基礎（建置 ${{ github.run_number }}，${{ github.sha }}）。
+            Android 8.0 以上請安裝正式版。
+
+            和正式版的差別：
+            - 背景只有純色、純黑，沒有背景模糊與細緻噪點
+            - 沒有軟體更新（正式版要 Android 8.0 以上才裝得起來）
+            - Android 5.0 沒有螢幕小時鐘（Android 5.1 以上有）
+
+            固定下載網址：https://github.com/candy999/liuli-launcher/releases/download/legacy-android5/LiuliLauncher-android5.apk
+          files: dist/LiuliLauncher-android5.apk

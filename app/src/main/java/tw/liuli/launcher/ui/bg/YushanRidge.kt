@@ -275,7 +275,7 @@ internal object YushanRidge {
         if (!trailsStarted.compareAndSet(false, true)) return
         Thread({
             trails = runCatching { buildTrails(TRAIL_SCALE) }.getOrNull()
-            trailsHi = runCatching { buildTrails(TRAIL_HI).let { b -> b.copy(Bitmap.Config.HARDWARE, false)?.also { b.recycle() } ?: b } }.getOrNull()
+            trailsHi = runCatching { buildTrails(TRAIL_HI).let { b -> if (android.os.Build.VERSION.SDK_INT < 26) b else b.copy(Bitmap.Config.HARDWARE, false)?.also { b.recycle() } ?: b } }.getOrNull()
         }, "liuli-trails").apply { priority = Thread.MIN_PRIORITY; start() }
     }
 

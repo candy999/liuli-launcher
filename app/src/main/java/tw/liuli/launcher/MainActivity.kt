@@ -89,6 +89,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         handleAction(intent)
         // 每一幀的實際總耗時（vsync → 畫完）交給背景引擎決定解析度；在另一條執行緒回報，不佔主執行緒
+        if (Build.VERSION.SDK_INT >= 24) {
         val metricsThread = HandlerThread("liuli-frames").apply { start() }
         window.addOnFrameMetricsAvailableListener({ _, m, _ ->
             tw.liuli.launcher.ui.bg.KeyLat.onFrame(m.getMetric(FrameMetrics.INTENDED_VSYNC_TIMESTAMP), m.getMetric(FrameMetrics.TOTAL_DURATION))
@@ -99,6 +100,7 @@ class MainActivity : ComponentActivity() {
                 m.getMetric(FrameMetrics.UNKNOWN_DELAY_DURATION) + m.getMetric(FrameMetrics.ANIMATION_DURATION),
             )
         }, Handler(metricsThread.looper))
+        }
         val lensing = Build.VERSION.SDK_INT >= 33 &&
             !(getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager).isLowRamDevice
         checkA11y()
@@ -187,7 +189,7 @@ fun LiuliApp(lensing: Boolean, homePresses: Int, externalAction: Pair<Int, Strin
         BackgroundEngine().apply {
             applyStyle(settings.resolveBgStyle())
             applyFollow(settings.bgFollow, settings.bgHue, settings.bgSat)
-            applyBlur(settings.bgBlur)
+            applyBlur(if (Legacy.on) 0 else settings.bgBlur)
         }
     }
     val scope = rememberCoroutineScope()
@@ -274,7 +276,7 @@ fun LiuliApp(lensing: Boolean, homePresses: Int, externalAction: Pair<Int, Strin
 
         BackgroundLayer(engine, blurred = { pageBlur.value })
         // 細緻噪點：背景之上、所有介面之下（黑框、App 列都在它上面），原生解析度
-        GrainLayer(engine, settings.grain)
+        GrainLayer(engine, if (Legacy.on) 0 else settings.grain)
 
         CompositionLocalProvider(LocalGlassBackdrop provides backdrop, LocalBgLink provides link) {
             // 主畫面一直保留（App 清單、焦點都不會重來），子頁面疊在上面

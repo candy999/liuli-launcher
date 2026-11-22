@@ -160,6 +160,8 @@ class LauncherSettings(context: Context) {
 
     /** 這次要畫的樣式：設定是「隨機」就抽一個（不和上次抽到的重複，並記住這次的）。 */
     fun resolveBgStyle(): BgStyle {
+        // Android 8 以下只有純色、純黑（其他樣式在舊的顯示晶片上跑不動）
+        if (tw.liuli.launcher.Legacy.on) return if (bgStyle == BgStyle.BLACK.id) BgStyle.BLACK else BgStyle.SOLID
         if (bgStyle != BgStyle.RANDOM_ID) return BgStyle.byId(bgStyle)
         val last = prefs.getString("bg_random_last", null)?.let { BgStyle.byId(it) }
         return BgStyle.random(last, randomPool).also { prefs.edit().putString("bg_random_last", it.id).apply() }

@@ -15,12 +15,13 @@ android {
 
     defaultConfig {
         applicationId = "tw.liuli.launcher"
-        // Android 8.0 起：java.time（月曆、農民曆）、GPU 常駐圖片、安裝未知來源的權限檢查都要 API 26
-        minSdk = 26
+        // android5 分支：Android 5.0 起（主線是 Android 8.0 起）。java.time 靠 desugaring，其餘依版本判斷（見 Legacy.kt）
+        minSdk = 21
         targetSdk = 34
         versionCode = buildNumber
         // 正式版（推 v1.0.0 這類 tag）用 tag 的版本號；main 的每日建置是 0.1.<建置號>
-        versionName = System.getenv("LIULI_VERSION_NAME") ?: "0.1.$buildNumber"
+        // Android 5 專用版：以 1.2.3 為基礎，後面接建置號
+        versionName = "1.2.3-android5.$buildNumber"
     }
 
     signingConfigs {
@@ -50,6 +51,8 @@ android {
     }
 
     compileOptions {
+        // 讓 java.time（月曆、農民曆、天氣）在 Android 8 以下也能用
+        isCoreLibraryDesugaringEnabled = true
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
@@ -64,10 +67,14 @@ android {
         checkReleaseBuilds = false
         checkOnly += setOf("NewApi")
         abortOnError = true
+        // 有問題時直接印在建置紀錄裡
+        textReport = true
+        textOutput = file("stdout")
     }
 }
 
 dependencies {
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
     implementation(platform("androidx.compose:compose-bom:2024.09.00"))
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.foundation:foundation")

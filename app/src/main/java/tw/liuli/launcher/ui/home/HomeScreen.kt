@@ -560,19 +560,23 @@ fun HomeScreen(
 
     fun styleSheet() {
         val before = engine.style
-        val random = settings.bgStyle == BgStyle.RANDOM_ID
+        // Android 8 以下只有純色、純黑，沒有隨機
+        val legacy = tw.liuli.launcher.Legacy.on
+        val random = !legacy && settings.bgStyle == BgStyle.RANDOM_ID
+        val styles = if (legacy) listOf(BgStyle.SOLID, BgStyle.BLACK) else BgStyle.entries
         open(SheetSpec(
-            "背景樣式", "上下移動即時預覽；確定套用，返回取消。",
-            listOf(
+            "背景樣式", if (legacy) "Android 8 以下只有純色與純黑兩種背景。上下移動即時預覽；確定套用，返回取消。" else "上下移動即時預覽；確定套用，返回取消。",
+            listOfNotNull(
                 // 隨機：每次冷啟動（背景從黑畫面載入）從勾選的樣式裡換一個；進去可以勾選範圍
+                if (legacy) null else
                 SheetItem("隨機", subtitle = "每次重新啟動時，從勾選的 ${settings.randomPool.size} 個樣式裡換一個", selected = random,
                     onFocus = { engine.applyStyle(before) }) { randomSheet(0) },
-            ) + BgStyle.entries.map { st ->
+            ) + styles.map { st ->
                 SheetItem(st.label, subtitle = st.note, selected = !random && st == before, onFocus = { engine.applyStyle(st) }) {
                     settings.updateBgStyle(st.id); engine.applyStyle(st); close()
                 }
             },
-            focusIndex = if (random) 0 else before.ordinal + 1,
+            focusIndex = if (legacy) styles.indexOf(before).coerceAtLeast(0) else if (random) 0 else before.ordinal + 1,
             onCancel = { engine.applyStyle(before) },
         ), gearReq)
     }
@@ -987,7 +991,7 @@ fun HomeScreen(
         open(SheetSpec(
             "外觀", "背景、顏色、質感、邊框與簡潔模式。",
             listOf(
-                SheetItem("背景樣式", liveDetail = { if (settings.bgStyle == BgStyle.RANDOM_ID) "隨機・" + engine.style.label else engine.style.label }) { styleSheet() },
+                SheetItem("背景樣式", liveDetail = { if (!tw.liuli.launcher.Legacy.on && settings.bgStyle == BgStyle.RANDOM_ID) "隨機・" + engine.style.label else engine.style.label }) { styleSheet() },
                 SheetItem("背景色系", liveDetail = { if (settings.bgFollow) "自動（跟著焦點）" else "固定・色相 ${settings.bgHue.roundToInt()}°" }) { colorSheet() },
                 SheetItem("背景質感", liveDetail = {
                     listOfNotNull(
@@ -1001,7 +1005,8 @@ fun HomeScreen(
                 }) { frameSheet() },
                 SheetItem("時光", liveDetail = { timeSummary() }) { timeSheet() },
                 SheetItem("簡潔模式", liveDetail = { minimalSummary() }) { minimalSheet() },
-            ),
+            // Android 8 以下沒有背景模糊與細緻噪點
+            ).filterNot { tw.liuli.launcher.Legacy.on && it.label == "背景質感" },
             key = "appearance", reopen = { appearanceSheet() },
         ), gearReq)
     }
@@ -1025,6 +1030,8 @@ fun HomeScreen(
         open(SheetSpec(
             "關於琉璃", "琉璃 Launcher：給 Google TV／Android TV 的主畫面。",
             listOf(
+                // Android 5 專用版不檢查更新：正式版要 Android 8 以上才裝得起來
+                if (tw.liuli.launcher.Legacy.on) SheetItem("Android 5～7 專用版", subtitle = "以 1.2.3 為基礎，不會檢查更新；正式版需要 Android 8.0 以上") { } else
                 // 只有一列：檢查、下載進度、有新版、交給系統安裝、失敗重試，全部都在這一列按確定
                 SheetItem(
                     "軟體更新",
@@ -1061,7 +1068,8 @@ fun HomeScreen(
                 SheetItem("系統設定") { closeAll(); SystemActions.systemSettings(context) },
                 SheetItem("進階", "效能最佳化、預設主畫面") { advancedSheet() },
                 SheetItem("關於琉璃", liveDetail = { BuildConfigInfo.versionName(context) }) { aboutSheet() },
-            ),
+            // Android 5.0 沒有無障礙疊加層：沒有螢幕小時鐘
+            ).filterNot { !tw.liuli.launcher.Legacy.clockSupported && it.label == "螢幕小時鐘" },
             key = "settings", reopen = { openSettings() },
         ), gearReq)
     }
@@ -1104,7 +1112,7 @@ fun HomeScreen(
                 "glassslow" -> tw.liuli.launcher.ui.glass.GlassDebug.timeScale = (arg.toFloatOrNull() ?: 1f).coerceIn(0.01f, 1f)
                 // 量測用（adb）：ACTION=shot:名稱 把目前的視窗畫面存成 PNG（Android/data/tw.liuli.launcher/files/shots/名稱.png）。
                 // 直接拷貝 App 自己的畫面緩衝，不靠系統截圖（模擬器視窗縮小時 screencap 只會拿到黑畫面）
-                "shot" -> (context as? android.app.Activity)?.window?.let { win ->
+                "shot" -> if (android.os.Build.VERSION.SDK_INT >= 24) (context as? android.app.Activity)?.window?.let { win ->
                     val v = win.decorView
                     if (v.width > 0 && v.height > 0) {
                         val bmp = android.graphics.Bitmap.createBitmap(v.width, v.height, android.graphics.Bitmap.Config.ARGB_8888)
@@ -1125,7 +1133,7 @@ fun HomeScreen(
                 "probe" -> tw.liuli.launcher.ui.bg.PerfProbe.apply(arg)
                 // 量測用（adb）：ACTION=burst:名稱,格數,後續動作 連續每一格拷貝畫面（半解析度）存成 名稱_00.png…，
                 // 開始拷貝後立刻執行後續動作（sheet:settings 或 drawer）——看面板滑入的每一格
-                "burst" -> (context as? android.app.Activity)?.window?.let { win ->
+                "burst" -> if (android.os.Build.VERSION.SDK_INT >= 24) (context as? android.app.Activity)?.window?.let { win ->
                     val parts = arg.split(',')
                     val name = parts.getOrNull(0).orEmpty().ifBlank { "burst" }
                     val n = (parts.getOrNull(1)?.toIntOrNull() ?: 24).coerceIn(1, 60)

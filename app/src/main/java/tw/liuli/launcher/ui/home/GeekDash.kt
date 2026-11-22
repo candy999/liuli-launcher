@@ -289,6 +289,7 @@ private fun dur(sec: Long): String {
 @Composable
 private fun FrameMetricsHook() {
     val activity = LocalContext.current as? Activity ?: return
+    if (android.os.Build.VERSION.SDK_INT < 24) return
     DisposableEffect(activity) {
         val window: Window = activity.window
         val thread = HandlerThread("liuli-frames").apply { start() }

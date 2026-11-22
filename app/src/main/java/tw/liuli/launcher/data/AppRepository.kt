@@ -40,7 +40,7 @@ object AppRepository {
      * 放在 GPU 上的圖只上傳一次。轉不成（極少數機型）就用原圖。
      */
     private fun gpu(b: android.graphics.Bitmap): android.graphics.Bitmap =
-        runCatching { b.copy(android.graphics.Bitmap.Config.HARDWARE, false) }.getOrNull() ?: b   // 原圖不回收：可能是系統圖示快取裡共用的那一張
+        if (android.os.Build.VERSION.SDK_INT < 26) b else runCatching { b.copy(android.graphics.Bitmap.Config.HARDWARE, false) }.getOrNull() ?: b   // 原圖不回收：可能是系統圖示快取裡共用的那一張
 
     // 橫幅縮到 320x180，約 230KB／張，低記憶體電視也撐得住
     private const val BANNER_W = 320

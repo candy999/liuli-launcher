@@ -39,7 +39,8 @@ class KeyRemapService : AccessibilityService() {
         Log.i(TAG, "service connected")
         instance = this
         reload()
-        clock = ClockOverlay(this).also { it.start() }
+        // Android 5.0 沒有無障礙疊加層：沒有螢幕小時鐘
+        if (tw.liuli.launcher.Legacy.clockSupported) clock = ClockOverlay(this).also { it.start() }
     }
 
     override fun onDestroy() {
