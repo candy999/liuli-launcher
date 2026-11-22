@@ -1,5 +1,7 @@
 package tw.liuli.launcher.ui.calendar
 
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectTapGestures
 import android.view.KeyEvent
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.EnterExitState
@@ -218,7 +220,7 @@ private fun MonthGrid(month: YearMonth, sel: LocalDate, today: LocalDate, cache:
                         Box(
                             Modifier.weight(1f).fillMaxHeight().zIndex(if (date == sel) 1f else 0f)
                                 // 滑鼠／飛鼠：點一下選這一天
-                                .then(if (date != null) Modifier.androidx.compose.ui.input.pointer.pointerInput(date) { androidx.compose.foundation.gestures.detectTapGestures { onPick(date) } } else Modifier),
+                                .then(if (date != null) Modifier.pointerInput(date) { detectTapGestures { onPick(date) } } else Modifier),
                         ) {
                             if (date != null) DayCell(date, cache[date], date == sel, date == today)
                         }
