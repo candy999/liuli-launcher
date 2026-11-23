@@ -447,6 +447,7 @@ fun HomeScreen(
     }
 
     fun launchApp(app: AppEntry) {
+        tw.liuli.launcher.MStarSource.ensureStorage()
         if (!SystemActions.launch(context, app.launchIntent)) toast("無法開啟 ${app.label}")
     }
 

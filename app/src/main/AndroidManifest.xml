@@ -27,6 +27,8 @@
         android:label="@string/app_name"
         android:supportsRtl="true"
         android:theme="@style/Theme.Liuli">
+        <!-- MStar 電視的系統介面（只在 MStar 晶片上有；沒有也照常安裝）：開機直接進琉璃時把訊號源切到多媒體 -->
+        <uses-library android:name="com.mstar.android" android:required="false" />
 
         <receiver
             android:name=".update.Updater$StatusReceiver"
