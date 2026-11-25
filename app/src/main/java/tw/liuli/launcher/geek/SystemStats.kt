@@ -46,7 +46,7 @@ data class Stats(
     val fps: Float = -1f,
     val frameMs: Float = -1f,
     /** 背景引擎目前的更新率（自動在 30／20／15 之間調整）。 */
-    val bgFps: Int = 0,
+    val bgFps: Int = -1,
     val fpsHist: List<Float> = emptyList(),
     // 記憶體
     val memTotal: Long = 0, val memAvail: Long = 0, val memLow: Boolean = false,
@@ -182,7 +182,7 @@ class StatsSampler(private val context: Context) {
 
         cur = Stats(
             cpuName = cpuName, cpuPct = pct, cpuReal = real, cores = cores, cpuGhz = if (curGhz > 0) curGhz else maxGhz, cpuHist = cpuHist.toList(),
-            gpuName = gpuName, gpuPct = GpuInfo.utilization(), fps = fps, frameMs = ms, bgFps = tw.liuli.launcher.ui.bg.BackgroundEngine.bgFps, fpsHist = fpsHist.toList(),
+            gpuName = gpuName, gpuPct = GpuInfo.utilization(), fps = fps, frameMs = ms, bgFps = bgFpsNow(), fpsHist = fpsHist.toList(),
             memTotal = mi.totalMem, memAvail = mi.availMem, memLow = mi.lowMemory,
             net = kind, netDetail = detail, pingMs = lastPing, gatewayMs = lastGw, jitterMs = jitter, rxMbps = rxM, txMbps = txM,
             netHist = netHist.toList(), offlineSec = if (offlineSince > 0) (now - offlineSince) / 1000 else 0,
@@ -343,4 +343,17 @@ object Rocket {
         val total = ActivityManager.MemoryInfo().also { am.getMemoryInfo(it) }.totalMem
         RocketResult(before, avail(), total)
     }
+}
+
+/**
+ * 背景目前的更新率：背景停下來（轉場結束、不是持續動畫的樣式）就是 0（顯示「背景靜止」）——
+ * 以前一直顯示停下來之前最後一次的更新率；還沒有背景引擎是 -1（不顯示）。
+ */
+private fun bgFpsNow(): Int {
+    val e = tw.liuli.launcher.ui.bg.BackgroundEngine.active ?: return -1
+    if (!e.moving) return 0
+    // 著色器樣式有些每兩格才畫一張（流動得慢的樣式）：顯示實際畫的格數
+    val s = e.style
+    return if (s.gl) tw.liuli.launcher.ui.bg.BackgroundEngine.bgFps / tw.liuli.launcher.ui.bg.GlBackground.every(s)
+    else tw.liuli.launcher.ui.bg.BackgroundEngine.bgFps
 }

@@ -185,7 +185,9 @@ fun GeekDashboard(s: Stats, freed: String?, modifier: Modifier = Modifier) {
             }
         }
         // ── GPU ──
-        val janky = s.fps > 0 && s.frameMs > 25f
+        // 掉幀只在畫面真的在動的時候算（每秒至少 10 格）：畫面靜止時系統每秒只畫一兩格（正常的省電），
+        // 那一兩格多半是儀表自己更新數字，平均每格時間偏高不代表卡
+        val janky = s.fps >= 10f && s.frameMs > 25f
         val gpuWarn = s.gpuPct > 90f || janky
         Card(1f, Modifier.spark(s.fpsHist, 20f, 62f)) {
             Column {
@@ -273,7 +275,7 @@ fun GeekDashboard(s: Stats, freed: String?, modifier: Modifier = Modifier) {
     }
 }
 
-private fun bgText(s: Stats) = if (s.bgFps > 0) "・背景 ${s.bgFps} fps" else ""
+private fun bgText(s: Stats) = if (s.bgFps > 0) "・背景 ${s.bgFps} fps" else if (s.bgFps == 0) "・背景靜止" else ""
 
 private fun dur(sec: Long): String {
     val d = sec / 86400; val h = sec % 86400 / 3600; val m = sec % 3600 / 60

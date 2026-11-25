@@ -70,7 +70,7 @@ object GlBackground {
     }
 
     /** 每幾次要求才真的畫一張：水彩暈開得很慢（剛滴下的前一兩秒以外），每秒 15 格就夠。 */
-    private fun every(style: BgStyle) = when (style) {
+    fun every(style: BgStyle) = when (style) {
         // 流動得慢的樣式：每秒 15 格看不出一格一格，GPU 與合成的工作減半
         BgStyle.WATERCOLOR, BgStyle.CURTAIN, BgStyle.SIMPLEX, BgStyle.WARP, BgStyle.TRUCHET, BgStyle.SOFTAURORA -> 2
         else -> 1
