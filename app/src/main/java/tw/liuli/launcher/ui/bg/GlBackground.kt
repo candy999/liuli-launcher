@@ -55,14 +55,18 @@ object GlBackground {
         private set
 
     /**
-     * 解析度檔位：0＝480×270、1＝320×180。自動：480×270 一格（GPU＋讀回）平均超過 [SLOW_MS] 就降一檔。
-     * [debugLevel]（adb ACTION=glres:1）強制檔位，-1＝自動。
+     * 解析度檔位（每個樣式各自一個）：0＝480×270、1＝320×180。起始檔位見 [startLevel]；
+     * 480×270 一格平均超過 [SLOW_MS] 就降一檔。量到的 GPU 耗時含「排在介面後面等 GPU」的時間（海信實測同一個樣式 4～12ms 都有），
+     * 所以門檻放寬，只抓真的付不起的樣式。[debugLevel]（adb ACTION=glres:1）強制檔位，-1＝自動。
      */
-    @Volatile var level = 0
-        private set
+    private val levels = IntArray(BgStyle.entries.size) { -1 }
     @Volatile var debugLevel = -1
+
+    /** 起始檔位：墨流（十六次雜訊取樣）在海信 480×270 要 30ms，直接從 320×180 開始。 */
+    private fun startLevel(style: BgStyle) = if (style == BgStyle.INK) 1 else 0
+    private var measuredStyle: BgStyle? = null
     private val SIZES = arrayOf(intArrayOf(480, 270), intArrayOf(320, 180))
-    private const val SLOW_MS = 14f
+    private const val SLOW_MS = 20f
 
     private val main = Handler(Looper.getMainLooper())
     private var handler: Handler? = null
@@ -226,7 +230,8 @@ object GlBackground {
     }
 
     private fun draw(style: BgStyle): Bitmap? {
-        val lv = if (debugLevel in SIZES.indices) debugLevel else level
+        if (levels[style.ordinal] < 0) levels[style.ordinal] = startLevel(style)
+        val lv = if (debugLevel in SIZES.indices) debugLevel else levels[style.ordinal]
         var w = SIZES[lv][0]
         var h = SIZES[lv][1]
         val t = tex
@@ -315,14 +320,15 @@ object GlBackground {
 
     /** [read]：讀回（直接顯示時＝交換緩衝）；[copy]：直接顯示時＝玻璃小圖（畫＋讀回）。 */
     private fun measure(style: BgStyle, lv: Int, w: Int, h: Int, gpu: Long, read: Long, copy: Long, direct: Boolean) {
-        if (warm < 20) { warm++; return } // 剛建好 context、編譯著色器的前幾格特別慢
+        if (style != measuredStyle) { measuredStyle = style; warm = 10; nFrames = 0; sumGpu = 0; sumRead = 0; sumCopy = 0 }
+        if (warm < 20) { warm++; return } // 剛建好 context、編譯著色器、換樣式的前幾格特別慢
         sumGpu += gpu; sumRead += read; sumCopy += copy
         if (++nFrames < 30) return
         val g = (if (direct) sumGpu else sumGpu + sumRead) / nFrames / 1e6f
         if (verbose || reports++ < 3) Log.i(TAG, "${style.id} ${w}x$h ${if (direct) "direct: gpu %.1fms + swap %.1fms, glass %.1fms" else "readback: gpu %.1fms + read %.1fms, -%.0f"}".format(sumGpu / nFrames / 1e6f, sumRead / nFrames / 1e6f, sumCopy / nFrames / 1e6f))
         nFrames = 0; sumGpu = 0; sumRead = 0; sumCopy = 0
         if (debugLevel < 0 && lv == 0 && g > SLOW_MS) {
-            level = 1
+            levels[style.ordinal] = 1
             warm = 10
             Log.i(TAG, "太慢（%.1fms），改用 ${SIZES[1][0]}x${SIZES[1][1]}".format(g))
         }

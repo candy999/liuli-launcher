@@ -31,6 +31,8 @@ internal object GlStyles {
      * - fract(sin(x)·43719) 雜湊改成查 64×64 雜訊貼圖（線性內插＋smoothstep 座標，一次取樣就是一格 value noise）
      * - 疊加的旋轉矩陣改成整數 (2,1;-1,2)：雜訊以 64 格為週期，時間漂移取模 64 後接得起來，不會跳
      * - 焦點旋轉與座標放在頂點著色器；顏色改成暗底、主色的墨與亮色的邊
+ * - 頻率降低（6 → 3.5）、墨與邊界的過渡加寬、對比調低：原版是滿版的高對比花紋，當主畫面背景太搶圖示，
+ *   半精度與低解析度下細邊也會變成鋸齒
      * - 漩渦中心跟著焦點（原本是滑桿），焦點脈動時多轉一點
      */
     object Ink {
@@ -41,9 +43,9 @@ internal object GlStyles {
             out[2] = 16f / 9f
             out[3] = 0f
             out[4] = st.fx; out[5] = st.fy
-            put(out, 8, st.col(0f, .45f, .055f))
-            put(out, 12, st.col(-8f, .85f, .27f))
-            put(out, 16, st.col(24f, .9f, .52f))
+            put(out, 8, st.col(0f, .45f, .05f))
+            put(out, 12, st.col(-8f, .7f, .13f))
+            put(out, 16, st.col(24f, .85f, .32f))
         }
 
         const val VERTEX = """
@@ -89,13 +91,13 @@ float L(vec2 p) {
 }
 void main() {
   vec2 q = v_q;
-  float n = L(q * 3.0 + vec2(u_p[0].y, 0.0));
-  q += vec2(L(q * 3.7 + 4.0), L(q * 3.3 + 11.0)) * 0.6;
-  float flow = L(q * 6.0);
-  float ink = smoothstep(0.48, 0.64, flow + 0.14 * sin(q.x * 5.0 + n * 8.0));
-  float edge = exp(-abs(flow - 0.49) * 65.0);
+  float n = L(q * 2.0 + vec2(u_p[0].y, 0.0));
+  q += vec2(L(q * 2.4 + 4.0), L(q * 2.2 + 11.0)) * 0.6;
+  float flow = L(q * 3.5);
+  float ink = smoothstep(0.40, 0.70, flow + 0.14 * sin(q.x * 4.0 + n * 8.0));
+  float edge = exp(-abs(flow - 0.49) * 22.0);
   vec3 col = mix(u_p[2].rgb, u_p[3].rgb, ink);
-  col = mix(col, u_p[4].rgb, edge * 0.5);
+  col = mix(col, u_p[4].rgb, edge * 0.35);
   """ + DITHER + """
   gl_FragColor = vec4(col, 1.0);
 }
@@ -121,8 +123,8 @@ void main() {
             out[4] = st.fx; out[5] = st.fy; out[6] = 16f / 9f
             put(out, 8, st.col(0f, .5f, .035f))
             put(out, 12, st.col(8f, .75f, .11f))
-            put(out, 16, st.col(-18f, .85f, .24f))
-            put(out, 20, st.col(14f, .95f, .40f))
+            put(out, 16, st.col(-18f, .8f, .21f))
+            put(out, 20, st.col(14f, .9f, .33f))
         }
 
         const val VERTEX = """
