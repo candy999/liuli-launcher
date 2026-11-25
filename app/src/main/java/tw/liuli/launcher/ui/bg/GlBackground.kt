@@ -99,6 +99,7 @@ object GlBackground {
     @Volatile var frameMs = 33.3f
         private set
     private var lastShowMs = 0L
+    private var lastLevelLog = 0L
 
     /**
      * 起始檔位（[SIZES] 的索引；0＝1920×1080、2＝960×540、3＝800×450、4＝640×360、5＝480×270、6＝320×180）。
@@ -238,6 +239,10 @@ object GlBackground {
             debugLevel in SIZES.indices -> debugLevel
             still -> 0
             else -> shownLevel
+        }
+        if (verbose && now - lastLevelLog > 2000) {
+            lastLevelLog = now
+            Log.i(TAG, "${style.id} 顯示 ${SIZES[lv][0]}x${SIZES[lv][1]}（學到 ${SIZES[learned][0]}）${if (busy) " 操作中" else ""}、%.1f fps".format(1000f / frameMs))
         }
         synchronized(lock) {
             style.glParams(st, pend)
