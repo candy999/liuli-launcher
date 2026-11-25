@@ -1143,6 +1143,16 @@ fun HomeScreen(
                 "glres" -> tw.liuli.launcher.ui.bg.GlBackground.debugLevel = arg.toIntOrNull() ?: -1
                 // gllog:1＝一直印著色器背景的 GPU 耗時（LiuliGl）與玻璃小圖的 CPU 成本（LiuliBg glass）
                 "gllog" -> tw.liuli.launcher.ui.bg.GlBackground.verbose = arg == "1"
+                // glassdump＝把玻璃取樣的小圖（模糊前的 GL 小圖與模糊後的玻璃圖）存成 PNG（files/shots/），檢查玻璃顏色對不對
+                "glassdump" -> Thread {
+                    runCatching {
+                        val dir = java.io.File(context.getExternalFilesDir(null), "shots").apply { mkdirs() }
+                        tw.liuli.launcher.ui.bg.GlBackground.current?.let { b -> java.io.File(dir, "gl.png").outputStream().use { b.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) } }
+                        val g = androidx.compose.ui.graphics.asAndroidBitmap(engine.glass).copy(android.graphics.Bitmap.Config.ARGB_8888, false)
+                        java.io.File(dir, "glass.png").outputStream().use { g.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
+                        android.util.Log.i("LiuliUi", "glassdump saved")
+                    }
+                }.start()
                 "bgcap" -> tw.liuli.launcher.ui.bg.BackgroundEngine.debugNoFast = arg == "30"
                 "keylat" -> tw.liuli.launcher.ui.bg.KeyLat.enabled = arg == "1"
                 "uitrace" -> tw.liuli.launcher.ui.bg.UiTrace.set(arg == "1", traceView)

@@ -62,8 +62,12 @@ object GlBackground {
     private val levels = IntArray(BgStyle.entries.size) { -1 }
     @Volatile var debugLevel = -1
 
-    /** 起始檔位：墨流（十六次雜訊取樣）在海信 480×270 要 30ms，直接從 320×180 開始。 */
-    private fun startLevel(style: BgStyle) = if (style == BgStyle.INK) 1 else 0
+    /** 起始檔位（全部從 480×270 開始，付不起再降）。 */
+    private fun startLevel(style: BgStyle) = 0
+
+    /** 每幾次要求才真的畫一張：墨流細節多、流動很慢，每秒 10 格就夠（GPU 只花三分之一）。 */
+    private fun every(style: BgStyle) = if (style == BgStyle.INK) 3 else 1
+    private var reqN = 0
     private var measuredStyle: BgStyle? = null
     private val SIZES = arrayOf(intArrayOf(480, 270), intArrayOf(320, 180))
     private const val SLOW_MS = 20f
@@ -159,6 +163,7 @@ object GlBackground {
     /** 背景推進了一格：用目前的狀態排一張新圖（主執行緒呼叫）。 */
     fun request(style: BgStyle, st: BgState) {
         if (failed) return
+        if (every(style) > 1 && reqN++ % every(style) != 0 && currentStyle == style && current != null) return
         synchronized(lock) {
             style.glParams(st, pend)
             pendStyle = style
@@ -507,8 +512,6 @@ void main() { v_uv = a_pos * 0.5 + 0.5; gl_Position = vec4(a_pos.x, a_pos.y * u_
 
 /** 著色器樣式的頂點著色器。 */
 internal fun BgStyle.glVertex(): String = when (this) {
-    BgStyle.MESH -> MeshGradient.VERTEX
-    BgStyle.INK -> GlStyles.Ink.VERTEX
     BgStyle.SWIRL -> GlStyles.Swirl.VERTEX
     else -> GlBackground.VERTEX
 }
