@@ -79,7 +79,9 @@ float gn(vec2 p) {
 float ss(float m) {
   float st = floor(m * 2.0) / 2.0;
   float f = m * 2.0 - floor(m * 2.0);
-  return st + smoothstep(0.47, 0.53, f) / 2.0;
+  // 色階之間的柔邊約 1.5 個繪製像素（f 每個像素平均變約 9／解析度）；以前固定 0.06，放大後糊
+  float hw = clamp(7.0 / u_res.y, 0.006, 0.03);
+  return st + smoothstep(0.5 - hw, 0.5 + hw, f) / 2.0;
 }
 void main() {
   vec2 s = (v_uv - 0.5) * vec2(u_p[0].x, 1.0) * 0.75;
@@ -168,7 +170,7 @@ void main() {
   float ang = atan(uv.y, uv.x) - u_p[1].x;
   float stripe = fract(l + ang / 6.2831853);
   float shape = 2.0 * abs(stripe - 0.5);
-  float px = 2.0 * (5.6 * u_p[0].x / u_res.x) * (1.0 + 0.16 / l);
+  float px = 1.5 * (5.6 * u_p[0].x / u_res.x) * (1.0 + 0.16 / l);
   float res = smoothstep(0.5 - px, 0.5 + px, shape);
   vec3 col = mix(u_p[2].rgb, u_p[3].rgb, res);
   """ + DITHER + """
@@ -229,10 +231,17 @@ void main() {
      * - 座標 y 往下（畫面座標），簾腳在畫面下方、光往上
      */
     object Curtain {
+        // 流動的相位逐格累加：以前是「累計時間 × 速度」，焦點一動速度變了，相位一口氣跳好幾十圈（換格子時整片暴衝）
+        private var phase = 0.0
+        private var lastAt = Float.NaN
+
         fun params(st: BgState, out: FloatArray) {
             head(st, out)
             val act = (.35f + .65f * st.pulse).toDouble()
-            val t = st.at * (.09 + act * .07)
+            val dt = if (lastAt.isNaN()) 0.0 else (st.at - lastAt).toDouble().coerceIn(0.0, .25)
+            lastAt = st.at
+            phase += dt * (.09 + act * .07)   // 雙精度，不取模（各相位的週期沒有公倍數，取模會跳）
+            val t = phase
             out[4] = wrap(t * .25, TAU); out[5] = wrap(t * .6, TAU); out[6] = wrap(t * .35, 64.0); out[7] = wrap(t * .2, 64.0)
             out[8] = wrap(t * .4, 64.0); out[9] = wrap(t * .13, 64.0); out[10] = act.toFloat(); out[11] = 0f
             put(out, 12, c(st, 0f, .9f, .45f))    // 光幕亮色（原版 0.10,0.84,0.40）

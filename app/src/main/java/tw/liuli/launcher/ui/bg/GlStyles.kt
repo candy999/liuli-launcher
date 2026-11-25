@@ -36,27 +36,44 @@ internal object GlStyles {
      * 時間相位在 CPU 取模；中心跟著焦點，中心半徑設下限避免 pow 溢位。
      */
     object Swirl {
+        // 漩渦換位置像水裡的漩渦被吸過去：中心分內外兩個——內圈很快跟上焦點、外圈慢慢拖過去，中間的色帶被拉長；
+        // 移動中（內外中心還沒會合）扭得更緊、轉得更快，會合後慢慢鬆回來。轉動的相位逐格累加（轉速會變，不能用時間 × 速度）
+        private var inX = Float.NaN; private var inY = 0f
+        private var outX = 0f; private var outY = 0f
+        private var spin = 0.0
+        private var lastAt = Float.NaN
+
         fun params(st: BgState, out: FloatArray) {
-            val t = st.at.toDouble() * .22 + st.ripple * .6
+            val dt = if (lastAt.isNaN()) 0f else (st.at - lastAt).coerceIn(0f, .25f)
+            lastAt = st.at
+            if (inX.isNaN()) { inX = st.fx; inY = st.fy; outX = st.fx; outY = st.fy }
+            val kIn = 1f - kotlin.math.exp(-dt / .35f)
+            val kOut = 1f - kotlin.math.exp(-dt / 1.6f)
+            inX += (st.fx - inX) * kIn; inY += (st.fy - inY) * kIn
+            outX += (inX - outX) * kOut; outY += (inY - outY) * kOut
+            // 內外中心差多遠（畫面高度為 1 的單位）＝漩渦正在被拖動的程度
+            val lag = kotlin.math.sqrt(((inX - outX) * 16f / 9f).let { it * it } + (inY - outY).let { it * it }).coerceAtMost(.6f)
+            spin += dt * (.22 + 1.6 * lag)
+            val t = spin + st.ripple * .6
             out[0] = (t % TAU).toFloat()
-            out[1] = .1f + .06f * st.pulse    // 扭轉（Paper 預設 0.1）
-            out[2] = .2f                        // 中心大小（Paper 預設 0.2）
-            out[3] = .06f                       // 柔邊：Paper 預設 0（用 fwidth 反鋸齒）；這裡給一點固定的柔邊代替
-            out[4] = st.fx; out[5] = st.fy; out[6] = 16f / 9f
+            out[1] = .1f + .06f * st.pulse + .22f * lag   // 扭轉（Paper 預設 0.1）；被拖動時扭得更緊
+            out[2] = .2f                                   // 中心大小（Paper 預設 0.2）
+            out[3] = .008f                                 // 柔邊下限（Paper 預設 0，用 fwidth 反鋸齒；這裡在著色器裡依像素算）
+            out[4] = inX * 16f / 9f * .8f; out[5] = inY * .8f; out[6] = outX * 16f / 9f * .8f; out[7] = outY * .8f
             put(out, 8, st.col(0f, .7f, .09f))     // 底色
             put(out, 12, st.col(4f, .9f, .80f))    // 淡（Paper 預設 #ffd1d1）
             put(out, 16, st.col(0f, .95f, .62f))   // 中（#ff8a8a）
             put(out, 20, st.col(-6f, .9f, .21f))   // 深（#660000）
         }
 
+        // v_q：畫面座標（寬高比校正、×0.8，跟 Paper 的尺度一樣）；中心在片段著色器裡依半徑在內外兩個中心之間內插
         const val VERTEX = """
 attribute vec2 a_pos;
-uniform vec4 u_v1;
 uniform float u_fy;
-varying vec2 v_p;
+varying vec2 v_q;
 void main() {
   vec2 uv = a_pos * 0.5 + 0.5;
-  v_p = (uv - u_v1.xy) * vec2(u_v1.z, 1.0) * 0.8;
+  v_q = uv * vec2(1.7777778, 1.0) * 0.8;
   gl_Position = vec4(a_pos.x, a_pos.y * u_fy, 0.0, 1.0);
 }
 """
@@ -66,8 +83,9 @@ void main() {
 precision mediump float;
 uniform sampler2D u_noise;
 uniform sampler2D u_noiseL;
+uniform vec2 u_res;
 uniform vec4 u_p[14];
-varying vec2 v_p;
+varying vec2 v_q;
 float g(vec2 p) {
   vec2 i = floor(p);
   vec2 f = fract(p);
@@ -75,6 +93,9 @@ float g(vec2 p) {
   return texture2D(u_noiseL, (i + f + 0.5) / 64.0).r;
 }
 void main() {
+  vec2 ci = u_p[1].xy;
+  float w = smoothstep(0.05, 0.75, length(v_q - ci));
+  vec2 v_p = v_q - mix(ci, u_p[1].zw, w);
   float l = max(length(v_p), 0.002);
   float twist = 3.0 * u_p[0].y;
   float angle = 4.0 * atan(v_p.y, v_p.x) + u_p[0].x;
@@ -84,7 +105,8 @@ void main() {
   float lt = pow(l, twist);
   shape *= smoothstep(0.2, 0.2 + 0.8 * u_p[0].z, lt);
   float mixer = shape * 3.0;
-  float soft = u_p[0].w;
+  // 柔邊（代替 fwidth）：mixer 每個繪製像素大約變 4.8·(0.64＋扭轉)／(解析度·半徑)，柔邊取約 0.7 個像素——邊緣銳利但不鋸齒
+  float soft = clamp(3.4 * (0.64 + twist) / (u_res.y * l), u_p[0].w, 0.3);
   float m1 = smoothstep(0.5 - soft, 0.5 + soft, clamp(mixer, 0.0, 1.0));
   float m2 = smoothstep(0.5 - soft, 0.5 + soft, clamp(mixer - 1.0, 0.0, 1.0));
   float m3 = smoothstep(0.5 - soft, 0.5 + soft, clamp(mixer - 2.0, 0.0, 1.0));

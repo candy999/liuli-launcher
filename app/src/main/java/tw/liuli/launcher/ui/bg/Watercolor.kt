@@ -169,12 +169,12 @@ vec3 drop(vec3 col, vec2 uv, vec4 a, vec4 b) {
   float n = g(q * 1.3 + b.w + vec2(u_p[13].w, 0.0));
   float r = a.z * (0.8 + 0.38 * n);
   float e = (dist - r) / a.z;
-  // 邊緣與水痕要比 320×180 的一格寬很多（放大六倍），不然會變成鋸齒：柔邊約 0.08 個半徑、水痕約 0.07 個半徑寬
-  // 邊緣柔化的寬度至少 3 個繪製像素（換算成這一滴半徑的比例）：小的水滴、低解析度時邊緣不會只剩一兩個像素而出現鋸齒
+  // 邊緣：水彩的邊是乾掉時顏料聚在邊上形成的，本來就清楚——柔邊約 0.02 個半徑，但至少 1.5 個繪製像素（換算成這一滴半徑的比例）才不會鋸齒；
+  // 水痕（邊上那圈較深的顏料）約 0.06 個半徑寬
   float px = 1.0 / (u_res.y * a.z);
-  float soft = max(0.06, 3.0 * px);
+  float soft = max(0.02, 1.5 * px);
   float inside = 1.0 - smoothstep(-soft, soft * 0.8, e);
-  float rw = max(0.095, 3.0 * px);
+  float rw = max(0.06, 2.0 * px);
   float re = (e + rw * 0.65) / rw;
   float rim = exp(-re * re);
   // 顏料在水裡不均勻，而且跟著水流慢慢漂

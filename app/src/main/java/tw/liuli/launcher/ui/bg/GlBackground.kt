@@ -56,29 +56,38 @@ object GlBackground {
         private set
 
     /**
-     * 解析度檔位（每個樣式各自一個）：0＝480×270、1＝320×180。起始檔位見 [startLevel]；
-     * 480×270 一格平均超過 [SLOW_MS] 就降一檔。量到的 GPU 耗時含「排在介面後面等 GPU」的時間（海信實測同一個樣式 4～12ms 都有），
+     * 解析度檔位（每個樣式各自一個）：[SIZES] 的索引，0＝1920×1080 … 5＝320×180。起始檔位見 [startLevel]；
+     * 連續三窗平均超過 [SLOW_MS] 就降一檔（最多比起始檔位低兩檔）。量到的 GPU 耗時含「排在介面後面等 GPU」的時間（海信實測同一個樣式 4～12ms 都有），
      * 所以門檻放寬，只抓真的付不起的樣式。[debugLevel]（adb ACTION=glres:1）強制檔位，-1＝自動。
      */
     private val levels = IntArray(BgStyle.entries.size) { -1 }
     @Volatile var debugLevel = -1
 
-    /** 起始檔位：重的樣式直接從 320×180 開始。水彩暈染在 320×180 邊緣會有細微的鋸齒，用 480×270（每秒只畫 15 格，海信一格約 23ms）。 */
+    /**
+     * 起始檔位（[SIZES] 的索引）。海信 Mali-470 離屏實測（ACTION=glbench，一張的 GPU 時間）：960×540 約是 480×270 的 3.5 倍、1080p 全部付不起（25～250ms）。
+     * - 960×540（放大兩倍，邊緣清楚）：漩渦 17ms、螺旋 14ms、特魯謝緞帶 18ms、漸層百葉 19ms（每秒 15 格或只在換焦點時畫）、液態以太 7ms
+     * - 640×360：色塊雜訊（960 要 45ms）、扭曲色帶（32ms）、水彩暈染（45ms），每秒 15 格
+     * - 480×270：網格漸層（本來就是柔和的漸層）、柔極光（960 要 51ms）
+     * - 320×180：極光簾（480×270 就要 25ms；光幕本來就柔）
+     */
     private fun startLevel(style: BgStyle) = when (style) {
-        BgStyle.CURTAIN, BgStyle.SOFTAURORA -> 1   // 極光簾：三層、每層六次雜訊取樣；柔極光：三條帶、海信 480×270 要 60ms
-        else -> 0
+        BgStyle.SWIRL, BgStyle.SPIRAL, BgStyle.TRUCHET, BgStyle.BLINDS, BgStyle.LIQUID -> 2
+        BgStyle.SIMPLEX, BgStyle.WARP, BgStyle.WATERCOLOR -> 3
+        BgStyle.CURTAIN -> 5
+        else -> 4
     }
 
-    /** 每幾次要求才真的畫一張：水彩暈開得很慢（剛滴下的前一兩秒以外），每秒 15 格就夠。 */
+    /** 每幾次要求才真的畫一張：流動得慢的樣式每秒 15 格看不出一格一格，GPU 與合成的工作減半。 */
     fun every(style: BgStyle) = when (style) {
-        // 流動得慢的樣式：每秒 15 格看不出一格一格，GPU 與合成的工作減半
-        BgStyle.WATERCOLOR, BgStyle.CURTAIN, BgStyle.SIMPLEX, BgStyle.WARP, BgStyle.TRUCHET, BgStyle.SOFTAURORA -> 2
+        BgStyle.WATERCOLOR, BgStyle.CURTAIN, BgStyle.SIMPLEX, BgStyle.WARP, BgStyle.TRUCHET, BgStyle.SOFTAURORA,
+        BgStyle.SWIRL, BgStyle.SPIRAL -> 2
         else -> 1
     }
     private var reqN = 0
     private var measuredStyle: BgStyle? = null
     private var slowWins = 0
-    private val SIZES = arrayOf(intArrayOf(480, 270), intArrayOf(320, 180))
+    /** 解析度檔位：越後面越小。放大到 1080p 時，畫面上有銳利邊緣的樣式（色帶、線條）要 960×540 以上才不糊。 */
+    private val SIZES = arrayOf(intArrayOf(1920, 1080), intArrayOf(1280, 720), intArrayOf(960, 540), intArrayOf(640, 360), intArrayOf(480, 270), intArrayOf(320, 180))
     private const val SLOW_MS = 20f
 
     private val main = Handler(Looper.getMainLooper())
@@ -347,6 +356,8 @@ object GlBackground {
                 return bmp
             }
         }
+        // 讀回模式（沒有 TextureView）：大圖讀回付不起，最多 480×270
+        if (lv < 4) { w = SIZES[4][0]; h = SIZES[4][1] }
         if (!ensureGl(w, h)) return null
         if (!EGL14.eglMakeCurrent(dpy, surf, surf, ctx)) throw IllegalStateException("eglMakeCurrent")
         val prog = programs.getOrPut(style) { Program(style.glVertex(), style.glShader()) }
@@ -401,11 +412,11 @@ object GlBackground {
         // 要連續三窗（約 12 秒）都慢才降：冷啟動、開抽屜那幾秒 GPU 被介面佔住，量到的會暫時偏高（海信上網格漸層曾因此被永久降成 320×180）
         val slow = g > SLOW_MS * kotlin.math.sqrt(every(style).toFloat())
         slowWins = if (slow) slowWins + 1 else 0
-        if (debugLevel < 0 && lv == 0 && slowWins >= 3) {
+        if (debugLevel < 0 && lv < SIZES.size - 1 && lv < startLevel(style) + 2 && slowWins >= 3) {
             slowWins = 0
-            levels[style.ordinal] = 1
+            levels[style.ordinal] = lv + 1
             warm = 10
-            Log.i(TAG, "太慢（%.1fms），改用 ${SIZES[1][0]}x${SIZES[1][1]}".format(g))
+            Log.i(TAG, "太慢（%.1fms），改用 ${SIZES[lv + 1][0]}x${SIZES[lv + 1][1]}".format(g))
         }
     }
 
