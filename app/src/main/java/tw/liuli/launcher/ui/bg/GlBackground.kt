@@ -99,6 +99,7 @@ object GlBackground {
     private var sumCopy = 0L
     private var sumRead = 0L
     private var warm = 0
+    private var frameNo = 0L
 
     @Volatile private var releasePending = false
 
@@ -223,27 +224,35 @@ object GlBackground {
                     sf.release()
                     windowOk = false; directOk = false
                     Log.w(TAG, "eglCreateWindowSurface 0x${Integer.toHexString(EGL14.eglGetError())}，改用讀回")
-                } else texSurface = sf
+                } else {
+                    texSurface = sf
+                    EGL14.eglMakeCurrent(dpy, win, win, ctx)
+                    EGL14.eglSwapInterval(dpy, 0)
+                }
             }
             if (win != EGL14.EGL_NO_SURFACE) {
                 if (winLevel != lv) { t.setDefaultBufferSize(w, h); winLevel = lv }
                 if (!EGL14.eglMakeCurrent(dpy, win, win, ctx)) throw IllegalStateException("eglMakeCurrent(window)")
-                EGL14.eglSwapInterval(dpy, 0)
                 val prog = programs.getOrPut(style) { Program(style.glVertex(), style.glShader()) }
+                // 每 4 格量一次 GPU 耗時（glFinish 會讓 CPU 等 GPU，平常不用）；玻璃小圖每 2 格更新一次（玻璃很模糊，看不出差別）
+                val n = frameNo++
+                val timed = n % 4 == 0L
                 val t0 = SystemClock.elapsedRealtimeNanos()
                 pass(prog, w, h, flipY = true)
-                GLES20.glFinish()
+                if (timed) GLES20.glFinish()
                 val tg = SystemClock.elapsedRealtimeNanos()
                 if (!EGL14.eglSwapBuffers(dpy, win)) {
                     Log.w(TAG, "eglSwapBuffers 0x${Integer.toHexString(EGL14.eglGetError())}")
                     destroyWindow()
                 }
                 val t1 = SystemClock.elapsedRealtimeNanos()
-                if (!EGL14.eglMakeCurrent(dpy, surf, surf, ctx)) throw IllegalStateException("eglMakeCurrent(pbuffer)")
-                w = BackgroundEngine.GLASS_W; h = BackgroundEngine.GLASS_H
-                pass(prog, w, h, flipY = false)
-                val bmp = readBack(w, h)
-                measure(style, lv, SIZES[lv][0], SIZES[lv][1], tg - t0, t1 - tg, SystemClock.elapsedRealtimeNanos() - t1, direct = true)
+                var bmp: Bitmap? = null
+                if (n % 2 == 0L || current == null) {
+                    if (!EGL14.eglMakeCurrent(dpy, surf, surf, ctx)) throw IllegalStateException("eglMakeCurrent(pbuffer)")
+                    pass(prog, BackgroundEngine.GLASS_W, BackgroundEngine.GLASS_H, flipY = false)
+                    bmp = readBack(BackgroundEngine.GLASS_W, BackgroundEngine.GLASS_H)
+                }
+                if (timed) measure(style, lv, w, h, tg - t0, t1 - tg, SystemClock.elapsedRealtimeNanos() - t1, direct = true)
                 return bmp
             }
         }
@@ -292,7 +301,7 @@ object GlBackground {
     private fun measure(style: BgStyle, lv: Int, w: Int, h: Int, gpu: Long, read: Long, copy: Long, direct: Boolean) {
         if (warm < 20) { warm++; return } // 剛建好 context、編譯著色器的前幾格特別慢
         sumGpu += gpu; sumRead += read; sumCopy += copy
-        if (++nFrames < 60) return
+        if (++nFrames < 30) return
         val g = (if (direct) sumGpu else sumGpu + sumRead) / nFrames / 1e6f
         Log.i(TAG, "${style.id} ${w}x$h ${if (direct) "direct: gpu %.1fms + swap %.1fms, glass %.1fms" else "readback: gpu %.1fms + read %.1fms, -%.0f"}".format(sumGpu / nFrames / 1e6f, sumRead / nFrames / 1e6f, sumCopy / nFrames / 1e6f))
         nFrames = 0; sumGpu = 0; sumRead = 0; sumCopy = 0
