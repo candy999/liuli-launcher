@@ -70,7 +70,11 @@ object GlBackground {
     }
 
     /** 每幾次要求才真的畫一張：水彩暈開得很慢（剛滴下的前一兩秒以外），每秒 15 格就夠。 */
-    private fun every(style: BgStyle) = if (style == BgStyle.WATERCOLOR || style == BgStyle.CURTAIN) 2 else 1
+    private fun every(style: BgStyle) = when (style) {
+        // 流動得慢的樣式：每秒 15 格看不出一格一格，GPU 與合成的工作減半
+        BgStyle.WATERCOLOR, BgStyle.CURTAIN, BgStyle.SIMPLEX, BgStyle.WARP, BgStyle.TRUCHET, BgStyle.SOFTAURORA -> 2
+        else -> 1
+    }
     private var reqN = 0
     private var measuredStyle: BgStyle? = null
     private val SIZES = arrayOf(intArrayOf(480, 270), intArrayOf(320, 180))
@@ -268,6 +272,8 @@ object GlBackground {
         var w = SIZES[lv][0]
         var h = SIZES[lv][1]
         val t = tex
+        // 液態以太：流體模擬在這條執行緒推進（不佔主執行緒），算完上傳
+        if (style == BgStyle.LIQUID) LiquidEther.simulate()
         if (ctx != EGL14.EGL_NO_CONTEXT) uploadData(style)
         if (t != null && windowOk) {
             // 直接顯示：全螢幕那張畫進 TextureView（交換緩衝），玻璃另外畫一張 120×68 的小圖讀回
@@ -534,6 +540,12 @@ object GlBackground {
             return s
         }
     }
+
+    /**
+     * 高光壓縮（所有著色器樣式共用）：亮度超過 0.55 的部分壓扁（最亮約 0.75），色相與明暗結構不變——
+     * 主畫面上是白字，背景整片淡色時字會看不清楚。
+     */
+    const val TONE = "{ float tl = dot(col, vec3(0.299, 0.587, 0.114)); if (tl > 0.55) col *= (0.55 + (tl - 0.55) * 0.45) / tl; }\n  "
 
     /** 預設的頂點著色器：v_uv＝畫面座標 0～1（y 往下，和讀回的圖一致）。 */
     const val VERTEX = """

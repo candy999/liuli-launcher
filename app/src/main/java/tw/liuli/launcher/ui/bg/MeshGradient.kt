@@ -145,7 +145,7 @@ void main() {
   vec3 col = (u_p[4].rgb * w0 + u_p[5].rgb * w1 + u_p[6].rgb * w2 + u_p[7].rgb * w3 + u_p[8].rgb * w4) / (w0 + w1 + w2 + w3 + w4);
 
   // 抖色：加上 ±½ 階的雜訊再寫入 8 bit，暗色的大面積漸層不會斷成一圈一圈
-  col += (texture2D(u_noise, gl_FragCoord.xy / 64.0).rgb - 0.5) / 255.0;
+  """ + GlBackground.TONE + """  col += (texture2D(u_noise, gl_FragCoord.xy / 64.0).rgb - 0.5) / 255.0;
   gl_FragColor = vec4(col, 1.0);
 }
 """

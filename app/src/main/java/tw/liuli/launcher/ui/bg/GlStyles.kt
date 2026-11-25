@@ -24,7 +24,7 @@ internal object GlStyles {
     }
 
     /** 共用的抖色：±½ 階雜訊（最近鄰貼圖）。 */
-    private const val DITHER = "col += (texture2D(u_noise, gl_FragCoord.xy / 64.0).rgb - 0.5) / 255.0;"
+    private const val DITHER = GlBackground.TONE + "col += (texture2D(u_noise, gl_FragCoord.xy / 64.0).rgb - 0.5) / 255.0;"
 
     // ───────────── 漩渦（Paper swirl） ─────────────
 

@@ -54,7 +54,7 @@ float gn(vec2 p) {
   return 1.6 * mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
 }
 """
-    private const val DITHER = "col += (texture2D(u_noise, gl_FragCoord.xy / 64.0).rgb - 0.5) / 255.0;"
+    private const val DITHER = GlBackground.TONE + "col += (texture2D(u_noise, gl_FragCoord.xy / 64.0).rgb - 0.5) / 255.0;"
 
     // ───────────── 色塊雜訊（Paper simplex-noise） ─────────────
 
@@ -157,8 +157,8 @@ void main() {
         fun params(st: BgState, out: FloatArray) {
             head(st, out)
             out[4] = wrap(st.at * .35 + st.ripple * .8, TAU)
-            put(out, 8, c(st, 0f, .9f, .08f))
-            put(out, 12, c(st, 15f, .8f, .70f))
+            put(out, 8, c(st, 0f, .85f, .09f))
+            put(out, 12, c(st, 15f, .75f, .50f))
         }
 
         const val SHADER = HEAD + """
@@ -290,9 +290,9 @@ void main() {
             head(st, out)
             out[4] = wrap(st.at * .055, 64.0)
             out[5] = .085f + (.35f + .4f * st.pulse) * .19f
-            put(out, 8, c(st, 0f, .8f, .16f))     // 底（原版 0.33,0.043,0.11）
-            put(out, 12, c(st, 45f, .95f, .66f))  // 緞帶（0.99,0.82,0.37）
-            put(out, 16, c(st, 22f, .85f, .53f))  // 緞帶外緣（0.91,0.52,0.26）
+            put(out, 8, c(st, 0f, .75f, .13f))    // 底（原版 0.33,0.043,0.11）
+            put(out, 12, c(st, 40f, .85f, .48f))  // 緞帶（0.99,0.82,0.37）；調暗，整片圖樣才不會搶過圖示
+            put(out, 16, c(st, 20f, .8f, .38f))   // 緞帶外緣（0.91,0.52,0.26）
             put(out, 20, c(st, 0f, .8f, .24f))    // 細線（0.42,0.065,0.14）
         }
 
