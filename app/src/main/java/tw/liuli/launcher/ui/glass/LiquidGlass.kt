@@ -220,6 +220,33 @@ private class GlassBake(private val backdrop: GlassBackdrop, private val edge: B
     private var bakedFor: Req? = null
     private var buf = IntArray(0)
     private var geo: Geo? = null
+    /** 上一次烘的時候，背景小圖的像素（用來判斷這片玻璃後面的顏色變了多少）。 */
+    private var lastSrc = IntArray(0)
+
+    private fun rememberBackdrop() {
+        val src = BackdropPixels.px
+        if (lastSrc.size != src.size) lastSrc = IntArray(src.size)
+        src.copyInto(lastSrc)
+    }
+
+    /** 這片玻璃涵蓋的背景小圖範圍（多留 3 格，折射會取到外面一點）裡，任一通道跟上次烘的時候差 3 階以上。 */
+    private fun backdropChanged(r: Req, sx: Float, sy: Float, sw: Int, sh: Int): Boolean {
+        val src = BackdropPixels.px
+        if (lastSrc.size != src.size || src.size != sw * sh) return true
+        val x0 = ((r.ox * sx).toInt() - 3).coerceIn(0, sw - 1); val x1 = (((r.ox + r.w) * sx).toInt() + 3).coerceIn(0, sw - 1)
+        val y0 = ((r.oy * sy).toInt() - 3).coerceIn(0, sh - 1); val y1 = (((r.oy + r.h) * sy).toInt() + 3).coerceIn(0, sh - 1)
+        for (y in y0..y1) {
+            val row = y * sw
+            for (x in x0..x1) {
+                val a = src[row + x]; val b = lastSrc[row + x]
+                if (a == b) continue
+                if (kotlin.math.abs(((a shr 16) and 255) - ((b shr 16) and 255)) >= 3 ||
+                    kotlin.math.abs(((a shr 8) and 255) - ((b shr 8) and 255)) >= 3 ||
+                    kotlin.math.abs((a and 255) - (b and 255)) >= 3) return true
+            }
+        }
+        return false
+    }
     private var geoFor: Req? = null
     private var geoQ = 0
     private var geoSw = 0
@@ -267,11 +294,19 @@ private class GlassBake(private val backdrop: GlassBackdrop, private val edge: B
             // 海信實測：每片玻璃每秒重算 15 次完整的折射，主畫面上十幾片加起來要吃掉兩個多 CPU 核心
             val g0 = geo
             val reuse = g0 != null && r.sameGeo(geoFor) && g0.n == bw * bh && geoQ == nq && geoSw == sw && geoSh == sh
+            // 形狀沒變、這片玻璃後面的背景和上次烘的時候差不到 3 階：看不出差別，不烘（差異會累積，超過門檻才烘下一張）。
+            // 慢慢流動的背景，大部分的更新都是這種
+            if (reuse && !backdropChanged(r, sx, sy, sw, sh)) {
+                bakedFor = r
+                gate?.baked = true
+                continue
+            }
             withContext(Dispatchers.Default) {
                 val g = if (reuse) g0!! else Geo(bw * bh).also { buildGeo(it, bw, bh, nq, r, sx, sy, sw, sh, edge) }
                 shade(out, g, bw, bh)
                 if (!reuse) { geo = g; geoFor = r; geoQ = nq; geoSw = sw; geoSh = sh }
             }
+            rememberBackdrop()
             var b = bitmap
             if (b == null || b.width != bw || b.height != bh) {
                 b = android.graphics.Bitmap.createBitmap(bw, bh, android.graphics.Bitmap.Config.ARGB_8888)
