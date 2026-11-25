@@ -64,6 +64,11 @@ internal object GlStyles {
             put(out, 12, st.col(4f, .9f, .80f))    // 淡（Paper 預設 #ffd1d1）
             put(out, 16, st.col(0f, .95f, .62f))   // 中（#ff8a8a）
             put(out, 20, st.col(-6f, .9f, .21f))   // 深（#660000）
+            // 中心那個洞的邊界：原本是 pow(l, 扭轉) 跟 0.2／0.23／0.36 比，半精度的 pow 誤差讓邊緣起毛；
+            // 改成在 CPU 換算成半徑 l 的門檻（l＝門檻^(1／扭轉)），著色器直接拿半徑比
+            val tw = 3.0 * out[1]
+            out[24] = Math.pow(.2, 1.0 / tw).toFloat(); out[25] = Math.pow(.23, 1.0 / tw).toFloat()
+            out[26] = Math.pow(.2 + .8 * out[2], 1.0 / tw).toFloat(); out[27] = 0f
         }
 
         // v_q：畫面座標（寬高比校正、×0.8，跟 Paper 的尺度一樣）；中心在片段著色器裡依半徑在內外兩個中心之間內插
@@ -96,8 +101,7 @@ void main() {
   float shape = fract(pow(l, -twist) + atan(v_p.y, v_p.x) * 0.63661977 + u_p[0].x);
   shape = 1.0 - abs(2.0 * shape - 1.0);
   shape += 0.2 * (2.0 * gt(v_p * 2.4, vec2(7.0)) - 1.0);
-  float lt = pow(l, twist);
-  shape *= smoothstep(0.2, 0.2 + 0.8 * u_p[0].z, lt);
+  shape *= smoothstep(u_p[6].x, u_p[6].z, l);
   float mixer = shape * 3.0;
   // 柔邊（代替 fwidth）：mixer 每個繪製像素大約變 4.8·(0.64＋扭轉)／(解析度·半徑)，柔邊取約 0.7 個像素——邊緣銳利但不鋸齒
   float soft = clamp(3.4 * (0.64 + twist) / (u_res.y * l), 0.011, 0.3);
@@ -105,7 +109,7 @@ void main() {
   float m2 = smoothstep(0.5 - soft, 0.5 + soft, clamp(mixer - 1.0, 0.0, 1.0));
   float m3 = smoothstep(0.5 - soft, 0.5 + soft, clamp(mixer - 2.0, 0.0, 1.0));
   vec3 grad = mix(mix(u_p[3].rgb, u_p[4].rgb, m2), u_p[5].rgb, m3);
-  float outer = m1 * smoothstep(0.2, 0.23, lt);
+  float outer = m1 * smoothstep(u_p[6].x, max(u_p[6].y, u_p[6].x + 1.5 * 0.8 / u_res.y), l);
   vec3 col = mix(u_p[2].rgb, grad, outer);
   """ + DITHER + """
   gl_FragColor = vec4(col, 1.0);

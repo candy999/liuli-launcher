@@ -264,7 +264,8 @@ varying vec3 v_m;
 vec3 band(float y, float x, float k, float y0, float w, float th, float m, float amp) {
   float d = y - (y0 + w);
   float glow = exp(-d * d / (th * th));
-  float tail = exp(-max(-d, 0.0) * 5.0) * step(d, 0.0) * 0.35;
+  // 光幕的下緣：柔化約 1.5 個像素（以前是 step 硬邊，解析度提高後看得到一階一階）
+  float tail = exp(-max(-d, 0.0) * 5.0) * (1.0 - smoothstep(-1.5 / u_res.y, 1.5 / u_res.y, d)) * 0.35;
   float rays = 0.8 + 0.2 * sin(x * 70.0 + k * 3.0);
   vec3 c = mix(u_p[4].rgb, u_p[5].rgb, m);
   return c * (glow * 0.6 + tail * rays) * amp;
