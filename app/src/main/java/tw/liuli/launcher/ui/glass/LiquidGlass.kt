@@ -207,11 +207,15 @@ private object BakeStats {
     }
 }
 
-/** 一片玻璃的幾何快取（每個像素七個數）。 */
+/**
+ * 一片玻璃的幾何快取（每個像素七個整數，定點數：電視的 CPU 上整數運算比浮點快得多）：
+ * [idx] 背景小圖取樣的左上角索引、[w] 雙線性權重（x、y 各 0～256，打包成一個數）、
+ * [gw]／[xw] 白霧底值與受光（×65536）、[sh] 明暗（×256）、[tr] 透光比例（×256）、[rf] 反射進來的白光＋抖色（×256）。
+ */
 private class Geo(val n: Int) {
-    val su = FloatArray(n); val sv = FloatArray(n)
-    val gw = FloatArray(n); val xw = FloatArray(n); val sh = FloatArray(n)
-    val tr = FloatArray(n); val rf = FloatArray(n)
+    val idx = IntArray(n); val w = IntArray(n)
+    val gw = IntArray(n); val xw = IntArray(n); val sh = IntArray(n)
+    val tr = IntArray(n); val rf = IntArray(n)
 }
 
 /** 一片玻璃的烘焙：參數改變時在背景執行緒重算，算好寫回點陣圖。 */
@@ -458,9 +462,12 @@ private class GlassBake(private val backdrop: GlassBackdrop, private val edge: B
                     }
                     val k = row + x
                     val u1 = u + nx * dG * sx; val v1 = v + ny * dG * sy
-                    geo.su[k] = if (u1 < 0f) 0f else if (u1 > maxX) maxX else u1
-                    geo.sv[k] = if (v1 < 0f) 0f else if (v1 > maxY) maxY else v1
-                    geo.gw[k] = g
+                    val uu = if (u1 < 0f) 0f else if (u1 > maxX) maxX else u1
+                    val vv = if (v1 < 0f) 0f else if (v1 > maxY) maxY else v1
+                    val ix = uu.toInt(); val iy = vv.toInt()
+                    geo.idx[k] = iy * sw + ix
+                    geo.w[k] = ((uu - ix) * 256f).toInt() or (((vv - iy) * 256f).toInt() shl 16)
+                    geo.gw[k] = (g * 65536f).toInt()
                     var extra = 0f
                     var shade = 1f
                     if (r.lx >= 0f) {
@@ -473,11 +480,13 @@ private class GlassBake(private val backdrop: GlassBackdrop, private val edge: B
                         if (dd2 < 4f) { val kk = 1f - dd2 / 4f; extra += .13f * kk * kk * kk }
                         shade = 1f - .22f * ty * sqrt(ty)
                     }
-                    geo.xw[k] = extra
-                    geo.sh[k] = shade
+                    geo.xw[k] = (extra * 65536f).toInt()
+                    geo.sh[k] = (shade * 256f).toInt()
                     // 能量守恆：反射掉的部分不再透過來；反射進來的是白光（沒有顏色）
-                    geo.tr[k] = 1f - fres
-                    geo.rf[k] = 255f * fres * env
+                    geo.tr[k] = ((1f - fres) * 256f).toInt()
+                    // 抖色：寫成 8 位元之前加不到一階的規則噪點，大面積的緩漸層不會斷成一條一條
+                    val dn = (((x * 5 + y * 11) and 15) + .5f) / 16f
+                    geo.rf[k] = ((255f * fres * env + dn) * 256f).toInt()
                 }
             }
         }
@@ -486,37 +495,35 @@ private class GlassBake(private val backdrop: GlassBackdrop, private val edge: B
         fun shade(out: IntArray, geo: Geo, bw: Int, bh: Int) {
             val src = BackdropPixels.px; val sw = BackdropPixels.w
             if (src.isEmpty() || sw < 2) return
-            for (y in 0 until bh) {
-                val row = y * bw
-                for (x in 0 until bw) {
-                    val k = row + x
-                    val uu = geo.su[k]; val vv = geo.sv[k]
-                    val x0 = uu.toInt(); val y0 = vv.toInt(); val fx = uu - x0; val fy = vv - y0
-                    val i = y0 * sw + x0
-                    val a = src[i]; val b = src[i + 1]; val c = src[i + sw]; val dd = src[i + sw + 1]
-                    val w00 = (1f - fx) * (1f - fy); val w10 = fx * (1f - fy); val w01 = (1f - fx) * fy; val w11 = fx * fy
-                    var cr = ((a shr 16) and 255) * w00 + ((b shr 16) and 255) * w10 + ((c shr 16) and 255) * w01 + ((dd shr 16) and 255) * w11
-                    var cg = ((a shr 8) and 255) * w00 + ((b shr 8) and 255) * w10 + ((c shr 8) and 255) * w01 + ((dd shr 8) and 255) * w11
-                    var cb = (a and 255) * w00 + (b and 255) * w10 + (c and 255) * w01 + (dd and 255) * w11
-                    // 玻璃本身的一點白霧：背景越亮加得越少（亮背景上不會整片發白）
-                    val lum = (cr.toInt() * 3 + cg.toInt() * 6 + cb.toInt()) / 2550f
-                    var white = geo.gw[k] * (1f - .5f * lum) + geo.xw[k]
-                    val shd = geo.sh[k]
-                    cr = (cr.toInt() * shd); cg = (cg.toInt() * shd); cb = (cb.toInt() * shd)
-                    if (white > 1f) white = 1f
-                    // 白霧用 screen 疊上去：1-(1-c)(1-white)
-                    val inv = 1f - white
-                    val tr = geo.tr[k]; val rf = geo.rf[k]
-                    // 抖色：寫成 8 位元之前加不到一階的規則噪點，大面積的緩漸層不會斷成一條一條
-                    val dn = (((x * 5 + y * 11) and 15) + .5f) / 16f
-                    val rr = (255f - (255f - cr.toInt()) * inv) * tr + rf + dn
-                    val gg = (255f - (255f - cg.toInt()) * inv) * tr + rf + dn
-                    val bb = (255f - (255f - cb.toInt()) * inv) * tr + rf + dn
-                    val ri = if (rr < 0f) 0 else if (rr > 255f) 255 else rr.toInt()
-                    val gi = if (gg < 0f) 0 else if (gg > 255f) 255 else gg.toInt()
-                    val bi = if (bb < 0f) 0 else if (bb > 255f) 255 else bb.toInt()
-                    out[k] = (255 shl 24) or (ri shl 16) or (gi shl 8) or bi
-                }
+            val idx = geo.idx; val wv = geo.w; val gw = geo.gw; val xw = geo.xw; val sh = geo.sh; val trA = geo.tr; val rfA = geo.rf
+            val n = bw * bh
+            for (k in 0 until n) {
+                val i = idx[k]
+                val wp = wv[k]
+                val wx = wp and 0xFFFF; val wy = wp ushr 16
+                val ix = 256 - wx; val iy = 256 - wy
+                val a = src[i]; val b = src[i + 1]; val c = src[i + sw]; val d = src[i + sw + 1]
+                // 雙線性取樣（定點數，權重 0～256）
+                val cr = ((((a shr 16) and 255) * ix + ((b shr 16) and 255) * wx) * iy + (((c shr 16) and 255) * ix + ((d shr 16) and 255) * wx) * wy) ushr 16
+                val cg = ((((a shr 8) and 255) * ix + ((b shr 8) and 255) * wx) * iy + (((c shr 8) and 255) * ix + ((d shr 8) and 255) * wx) * wy) ushr 16
+                val cb = (((a and 255) * ix + (b and 255) * wx) * iy + ((c and 255) * ix + (d and 255) * wx) * wy) ushr 16
+                // 玻璃本身的一點白霧：背景越亮加得越少（亮背景上不會整片發白）；white 是 ×65536 的定點數
+                val lum = (cr * 3 + cg * 6 + cb) * 6554 ushr 16          // ÷10
+                var white = ((gw[k].toLong() * (65536 - lum * 128)) ushr 16).toInt() + xw[k]
+                if (white > 65536) white = 65536
+                val shd = sh[k]
+                val r0 = cr * shd ushr 8; val g0 = cg * shd ushr 8; val b0 = cb * shd ushr 8
+                // 白霧用 screen 疊上去：255−(255−c)(1−white)；再乘透光比例、加反射的白光（×256 的定點數）
+                val inv = (65536 - white) ushr 8                          // 0～256
+                val tr = trA[k]; val rf = rfA[k]
+                var rr = ((65280 - (255 - r0) * inv) * tr ushr 8) + rf
+                var gg = ((65280 - (255 - g0) * inv) * tr ushr 8) + rf
+                var bb = ((65280 - (255 - b0) * inv) * tr ushr 8) + rf
+                rr = rr shr 8; gg = gg shr 8; bb = bb shr 8
+                if (rr > 255) rr = 255 else if (rr < 0) rr = 0
+                if (gg > 255) gg = 255 else if (gg < 0) gg = 0
+                if (bb > 255) bb = 255 else if (bb < 0) bb = 0
+                out[k] = (255 shl 24) or (rr shl 16) or (gg shl 8) or bb
             }
         }
     }
