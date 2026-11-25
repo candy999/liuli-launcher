@@ -583,6 +583,7 @@ fun HomeScreen(
             },
             focusIndex = if (random) 0 else before.ordinal + 1,
             onCancel = { engine.applyStyle(before) },
+            key = STYLE_SHEET_KEY,
         ), gearReq)
     }
 
@@ -1108,6 +1109,7 @@ fun HomeScreen(
                     "clock" -> clockSheet()
                     "color" -> colorSheet()
                     "appearance" -> appearanceSheet()
+                    "style" -> styleSheet()
                     "about" -> aboutSheet()
                     "minimal" -> minimalSheet()
                     "advanced" -> advancedSheet()
@@ -1272,10 +1274,13 @@ fun HomeScreen(
     var overlaySeen by remember { mutableStateOf(false) }
     LaunchedEffect(drawerOpen, sheet?.spec, picking) {
         overlayChangedAt[0] = android.os.SystemClock.uptimeMillis()
-        engine.covered = overlay
+        // 「背景樣式」清單是在預覽背景：不算被蓋住、不壓暗，背景照平常的解析度與清晰度畫——
+        // 不然預覽時永遠是 ÷3 又壓暗 22% 的版本，會誤以為樣式很醜
+        val previewing = sheet?.spec?.id == STYLE_SHEET_KEY
+        engine.covered = overlay && !previewing
         tw.liuli.launcher.geek.WeakGpu.init()
         // 設定面板開著：背景壓暗（以前是全螢幕疊一層半透明黑，每格多混一整個螢幕）
-        engine.dim = if (sheet != null) 0.22f else 0f
+        engine.dim = if (sheet != null && !previewing) 0.22f else 0f
         if (overlaySeen || overlay) engine.holdForUi(UI_SLIDE_HOLD_MS)
         overlaySeen = true
     }
@@ -1686,3 +1691,6 @@ private const val ENTRANCE_MS = 90f * 7 + 340f
 
 /** 常用列第一次出現的總時間（毫秒）：每個間隔 55ms、淡入 280ms。 */
 private const val DOCK_REVEAL_MS = 55f * 12 + 280f
+
+/** 「背景樣式」清單的面板 key（開著時背景不算被蓋住、不壓暗：使用者正在預覽背景）。 */
+private const val STYLE_SHEET_KEY = "bgStyle"
