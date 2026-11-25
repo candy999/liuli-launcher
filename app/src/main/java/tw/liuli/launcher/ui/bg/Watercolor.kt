@@ -6,23 +6,30 @@ import kotlin.math.min
 import kotlin.math.roundToInt
 
 /**
- * 水彩暈染（琉璃原創）：焦點換到哪，就在那裡滴下一滴那個 App 主色的顏料，在紙上慢慢暈開；
+ * 水彩暈染（琉璃原創）：焦點換到哪，就在那裡滴下一滴那個 App 主色的顏料，在水裡慢慢暈開；
  * 焦點不動時，每隔幾秒在附近自己滴一滴鄰近色。
  *
- * 畫法（全部是低頻、柔邊的運算，480×270 放大也不會有鋸齒）：
+ * 畫法（全部是低頻、柔邊的運算，320×180 放大也不會有鋸齒）：
  * - 每一滴：半徑先快後慢地長大（1 − e^(−t/τ)，之後還會非常緩慢地蔓延），邊界用低頻雜訊扭成不規則的花瓣形
- *   （雜訊座標跟著半徑縮放，暈開時形狀不變、只是變大）
+ * - 水的擾動：整張紙底下有一層緩慢流動的水流場（隨時間漂移的雜訊位移），水滴的邊界和裡面的顏料跟著漂移、變形；
+ *   邊界的花瓣形也會隨時間慢慢起伏
  * - 顏料用「相乘」疊在紙上（顏料是濾光片：紙色 × 顏料的透光色），兩滴重疊的地方自然變深
  * - 水痕：顏料往邊緣堆積、乾掉後邊緣較深——邊緣附近加一圈寬而柔的深色，不是細線
- * - 內部有低頻的濃淡起伏（顏料不均勻）、紙張有淡淡的紋理
- * - 每一滴活 [LIFE] 秒，最後慢慢淡掉；同時最多 [N] 滴，新的一滴取代最淡的那一滴
+ * - 稀釋：顏料越暈越開越淡（約 30 秒內淡到 45%），活到 [LIFE] 秒的最後三分之一再完全淡掉——水不會越來越濁
+ * - 同時最多 [ACTIVE] 滴「活躍」的顏料：再滴下一滴時，最老的那一滴在 [RETIRE] 秒內快速淡出（不會突然消失）
  *
- * 參數：u_p[0]＝(紙 rgb, 畫面寬高比)；第 i 滴：u_p[1+2i]＝(x, y, 半徑, 濃度)、u_p[2+2i]＝(顏料透光色 rgb, 雜訊種子)。
+ * 參數：u_p[0]＝(紙 rgb, 畫面寬高比)；第 i 滴：u_p[1+2i]＝(x, y, 半徑, 濃度)、u_p[2+2i]＝(顏料透光色 rgb, 雜訊種子)；
+ * u_p[13]＝水流的四個時間相位（取模 64，雜訊以 64 格為週期，接得起來）。
  */
 internal object Watercolor {
-    const val N = 5
+    /** 著色器裡的位置數（含正在退場的）。 */
+    const val N = 6
+    /** 同時最多幾滴活躍的顏料。 */
+    private const val ACTIVE = 4
+    /** 被擠掉的那一滴淡出要多久（秒）。 */
+    private const val RETIRE = 1.5f
     /** 一滴存在多久（秒，用背景的動畫時鐘 [BgState.at]）。 */
-    private const val LIFE = 42f
+    private const val LIFE = 38f
     /** 長大的時間常數（秒）：大約三倍這麼久就接近最大半徑。 */
     private const val GROW_TAU = 2.6f
     /** 焦點不動時，多久自己滴一滴（秒，加上隨機的 0～4 秒）。 */
@@ -37,19 +44,46 @@ internal object Watercolor {
     private val rmax = FloatArray(N)
     private val seed = FloatArray(N)
     private val birth = FloatArray(N) { -1e6f }
+    /** 開始退場的時間（被新的一滴擠掉）；還沒退場＝很大的數。 */
+    private val retireAt = FloatArray(N) { 1e9f }
     private var lastRipple = Int.MIN_VALUE
     private var lastSpawnAt = -1e6f
     private var nextAmbient = 0f
     private val rnd = java.util.Random(0x5EED)
 
+    /** 這一滴目前的濃度（0＝看不到）：淡入 × 稀釋 × 壽命尾聲的淡出 × 被擠掉時的快速淡出。 */
+    private fun density(i: Int, at: Float): Float {
+        val age = at - birth[i]
+        if (age < 0f || age > LIFE) return 0f
+        val fadeIn = min(1f, age / .3f)
+        val dilute = 1f - .55f * smoothstep(0f, 30f, age)
+        val end = 1f - smoothstep(LIFE * .68f, LIFE, age)
+        val retire = 1f - ((at - retireAt[i]) / RETIRE).coerceIn(0f, 1f)
+        return fadeIn * dilute * end * retire
+    }
+
+    /** 還算「活躍」：活著、還沒進入壽命尾聲、沒被擠掉。 */
+    private fun active(i: Int, at: Float): Boolean {
+        val age = at - birth[i]
+        return age >= 0f && age < LIFE * .68f && retireAt[i] > at
+    }
+
     private fun spawn(at: Float, px: Float, py: Float, h: Float, s: Float, big: Boolean) {
-        // 取代最淡（最老）的那一滴
-        var k = 0
-        for (i in 1 until N) if (birth[i] < birth[k]) k = i
+        // 活躍的已經滿了：最老的那一滴開始快速淡出
+        var n = 0; var oldest = -1
+        for (i in 0 until N) if (active(i, at)) { n++; if (oldest < 0 || birth[i] < birth[oldest]) oldest = i }
+        if (n >= ACTIVE && oldest >= 0) retireAt[oldest] = at
+        // 放進目前最淡的位置（通常是已經淡完的；真的都還看得到，就取代最淡的那一滴）
+        var k = 0; var best = Float.MAX_VALUE
+        for (i in 0 until N) {
+            val d = if (active(i, at)) 2f + density(i, at) else density(i, at)
+            if (d < best) { best = d; k = i }
+        }
         x[k] = px; y[k] = py; hue[k] = h; sat[k] = s
         rmax[k] = (if (big) .26f else .16f) + rnd.nextFloat() * .1f
         seed[k] = rnd.nextFloat() * 50f
         birth[k] = at
+        retireAt[k] = 1e9f
         lastSpawnAt = at
     }
 
@@ -59,7 +93,7 @@ internal object Watercolor {
         if (lastRipple == Int.MIN_VALUE || at < lastSpawnAt - 1f) {
             // 第一次（或時鐘重來）：在焦點滴一滴大的，之後才開始自己滴
             lastRipple = rip
-            for (i in 0 until N) birth[i] = -1e6f
+            for (i in 0 until N) { birth[i] = -1e6f; retireAt[i] = 1e9f }
             spawn(at, st.fx, st.fy, st.h, st.s, big = true)
             nextAmbient = at + AMBIENT_EVERY
         } else if (rip != lastRipple && at - lastSpawnAt >= MIN_GAP) {
@@ -83,11 +117,10 @@ internal object Watercolor {
         for (i in 0 until N) {
             val age = at - birth[i]
             val o = 4 + i * 8
-            if (age < 0f || age > LIFE) { out[o + 3] = 0f; out[o + 2] = .001f; continue }
+            val a = density(i, at)
+            if (a <= 0f) { out[o + 3] = 0f; out[o + 2] = .001f; continue }
             // 半徑：先快後慢長大，之後每秒再蔓延一點點；焦點脈動時剛滴下的那一滴多鼓起一點
             val r = rmax[i] * (1f - exp(-age / GROW_TAU)) + .0025f * age + (if (age < 3f) .02f * st.pulse else 0f)
-            // 濃度：滴下的瞬間淡入（0.3 秒），活到最後三分之一開始淡出
-            val a = min(1f, age / .3f) * (1f - smoothstep(LIFE * .62f, LIFE, age))
             out[o] = x[i]; out[o + 1] = y[i]; out[o + 2] = max(r, .001f); out[o + 3] = a
             // 顏料的透光色：越飽和、越暗的濾光片，疊上去顏色越重
             val c = androidx.compose.ui.graphics.Color.hsl(
@@ -95,6 +128,10 @@ internal object Watercolor {
             )
             out[o + 4] = c.red; out[o + 5] = c.green; out[o + 6] = c.blue; out[o + 7] = seed[i]
         }
+        // 水流的時間相位（雙精度算、取模 64）
+        val t = at.toDouble()
+        out[52] = ((t * .05) % 64.0).toFloat(); out[53] = ((t * .043) % 64.0).toFloat()
+        out[54] = ((t * .03) % 64.0).toFloat(); out[55] = ((t * .02) % 64.0).toFloat()
     }
 
     /** 紙的亮度：水彩是畫在淺色的紙上，但主畫面上有白字，所以紙調暗到中間調。 */
@@ -111,7 +148,7 @@ internal object Watercolor {
 precision mediump float;
 uniform sampler2D u_noise;
 uniform sampler2D u_noiseL;
-uniform vec4 u_p[12];
+uniform vec4 u_p[14];
 varying vec2 v_uv;
 
 float g(vec2 p) {
@@ -127,26 +164,32 @@ vec3 drop(vec3 col, vec2 uv, vec4 a, vec4 b) {
   // 這一滴碰不到的像素（或已經淡掉）：直接跳過，省下雜訊取樣
   if (a.w < 0.004 || dist > a.z * 1.45) return col;
   vec2 q = d / a.z;
-  float n = g(q * 1.3 + b.w);
+  // 邊界的花瓣形隨時間慢慢起伏（水還沒乾）
+  float n = g(q * 1.3 + b.w + vec2(u_p[13].w, 0.0));
   float r = a.z * (0.8 + 0.38 * n);
   float e = (dist - r) / a.z;
   // 邊緣與水痕要比 320×180 的一格寬很多（放大六倍），不然會變成鋸齒：柔邊約 0.08 個半徑、水痕約 0.07 個半徑寬
   float inside = 1.0 - smoothstep(-0.05, 0.04, e);
   float rim = exp(-(e + 0.06) * (e + 0.06) * 110.0);
-  float body = 0.34 + 0.26 * g(q * 1.9 + b.w + 31.0);
+  // 顏料在水裡不均勻，而且跟著水流慢慢漂
+  float body = 0.34 + 0.26 * g(q * 1.9 + b.w + 31.0 + vec2(0.0, u_p[13].z));
   float k = a.w * inside * clamp(body + rim * 0.55, 0.0, 1.0);
   return col * mix(vec3(1.0), b.rgb, k);
 }
 
 void main() {
-  vec2 uv = v_uv;
-  vec3 col = u_p[0].rgb * (0.95 + 0.07 * g(uv * vec2(28.0, 16.0)));
+  vec2 uv0 = v_uv;
+  vec3 col = u_p[0].rgb * (0.95 + 0.07 * g(uv0 * vec2(28.0, 16.0)));
+  // 水的擾動：緩慢流動的位移場（兩層雜訊各自漂移），顏料跟著水輕輕漂移、變形；紙紋不動
+  vec2 s = uv0 * vec2(u_p[0].w, 1.0) * 2.2;
+  vec2 uv = uv0 + (vec2(g(s + vec2(u_p[13].x, 3.0)), g(s + vec2(11.0, u_p[13].y))) - 0.5) * 0.045;
   col = drop(col, uv, u_p[1], u_p[2]);
   col = drop(col, uv, u_p[3], u_p[4]);
   col = drop(col, uv, u_p[5], u_p[6]);
   col = drop(col, uv, u_p[7], u_p[8]);
   col = drop(col, uv, u_p[9], u_p[10]);
-  vec2 v = uv - 0.5;
+  col = drop(col, uv, u_p[11], u_p[12]);
+  vec2 v = uv0 - 0.5;
   col *= 1.0 - 0.35 * dot(v, v);
   col += (texture2D(u_noise, gl_FragCoord.xy / 64.0).rgb - 0.5) / 255.0;
   gl_FragColor = vec4(col, 1.0);

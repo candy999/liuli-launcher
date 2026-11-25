@@ -34,7 +34,7 @@ precision mediump float;
 uniform sampler2D u_noise;
 uniform sampler2D u_noiseL;
 uniform vec2 u_res;
-uniform vec4 u_p[12];
+uniform vec4 u_p[14];
 varying vec2 v_uv;
 float g(vec2 p) {
   vec2 i = floor(p);

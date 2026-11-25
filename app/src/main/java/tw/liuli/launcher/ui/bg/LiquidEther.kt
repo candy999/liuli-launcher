@@ -143,7 +143,7 @@ internal object LiquidEther {
 precision mediump float;
 uniform sampler2D u_noise;
 uniform sampler2D u_data;
-uniform vec4 u_p[12];
+uniform vec4 u_p[14];
 varying vec2 v_uv;
 void main() {
   vec4 s = texture2D(u_data, v_uv);

@@ -36,8 +36,8 @@ import java.nio.FloatBuffer
  */
 object GlBackground {
     private const val TAG = "LiuliGl"
-    /** 樣式參數的數量（著色器裡是 vec4 u_p[PARAMS／4]；ES 2.0 片段著色器保證至少 16 個 vec4 uniform，這裡用 12 個）。 */
-    const val PARAMS = 48
+    /** 樣式參數的數量（著色器裡是 vec4 u_p[PARAMS／4]；ES 2.0 片段著色器保證至少 16 個 vec4 uniform，這裡用 14 個）。 */
+    const val PARAMS = 56
 
     /** EGL 或著色器編譯失敗：改用 CPU 的備援畫法，不再嘗試。 */
     @Volatile var failed = false
