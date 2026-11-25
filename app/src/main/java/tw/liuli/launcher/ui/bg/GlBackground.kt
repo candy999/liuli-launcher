@@ -64,10 +64,13 @@ object GlBackground {
     @Volatile var debugLevel = -1
 
     /** 水彩暈染整片都是柔邊，320×180 放大看不出差別（海信 480×270 一格約 30ms）。 */
-    private fun startLevel(style: BgStyle) = if (style == BgStyle.WATERCOLOR) 1 else 0
+    private fun startLevel(style: BgStyle) = when (style) {
+        BgStyle.WATERCOLOR, BgStyle.CURTAIN -> 1   // 極光簾：三層、每層六次雜訊取樣
+        else -> 0
+    }
 
     /** 每幾次要求才真的畫一張：水彩暈開得很慢（剛滴下的前一兩秒以外），每秒 15 格就夠。 */
-    private fun every(style: BgStyle) = if (style == BgStyle.WATERCOLOR) 2 else 1
+    private fun every(style: BgStyle) = if (style == BgStyle.WATERCOLOR || style == BgStyle.CURTAIN) 2 else 1
     private var reqN = 0
     private var measuredStyle: BgStyle? = null
     private val SIZES = arrayOf(intArrayOf(480, 270), intArrayOf(320, 180))
@@ -199,6 +202,7 @@ object GlBackground {
         releasePending = false
         synchronized(lock) {
             pend.copyInto(work)
+            if (pendStyle == BgStyle.LIQUID) LiquidEther.snapshot()
             workStyle = pendStyle
             hasPending = false
         }
@@ -235,12 +239,36 @@ object GlBackground {
         GLES20.glDrawElements(GLES20.GL_TRIANGLES, GRID_X * GRID_Y * 6, GLES20.GL_UNSIGNED_SHORT, gridIdx!!)
     }
 
+    private var dataTex = 0
+
+    /** 液態以太：CPU 模擬的結果（96×54 RGBA）上傳到第 2 個貼圖單元。 */
+    private fun uploadData(style: BgStyle) {
+        if (style != BgStyle.LIQUID) return
+        if (dataTex == 0) {
+            val ids = IntArray(1)
+            GLES20.glGenTextures(1, ids, 0)
+            dataTex = ids[0]
+            GLES20.glActiveTexture(GLES20.GL_TEXTURE2)
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, dataTex)
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
+        }
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE2)
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, dataTex)
+        LiquidEther.glData.position(0)
+        GLES20.glTexImage2D(GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, LiquidEther.W, LiquidEther.H, 0, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, LiquidEther.glData)
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+    }
+
     private fun draw(style: BgStyle): Bitmap? {
         if (levels[style.ordinal] < 0) levels[style.ordinal] = startLevel(style)
         val lv = if (debugLevel in SIZES.indices) debugLevel else levels[style.ordinal]
         var w = SIZES[lv][0]
         var h = SIZES[lv][1]
         val t = tex
+        if (ctx != EGL14.EGL_NO_CONTEXT) uploadData(style)
         if (t != null && windowOk) {
             // 直接顯示：全螢幕那張畫進 TextureView（交換緩衝），玻璃另外畫一張 120×68 的小圖讀回
             ensureGl(BackgroundEngine.GLASS_W, BackgroundEngine.GLASS_H)
@@ -427,6 +455,7 @@ object GlBackground {
         programs.clear()
         noiseTex = 0
         noiseTexL = 0
+        dataTex = 0
         readBuf = null
         if (dpy != EGL14.EGL_NO_DISPLAY) {
             EGL14.eglMakeCurrent(dpy, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_CONTEXT)
@@ -456,6 +485,7 @@ object GlBackground {
         private val uFy: Int
         private val uV1: Int
         private val uNoiseL: Int
+        private val uData: Int
 
         init {
             val vs = compile(GLES20.GL_VERTEX_SHADER, vert)
@@ -475,6 +505,7 @@ object GlBackground {
             uFy = GLES20.glGetUniformLocation(id, "u_fy")
             uV1 = GLES20.glGetUniformLocation(id, "u_v1")
             uNoiseL = GLES20.glGetUniformLocation(id, "u_noiseL")
+            uData = GLES20.glGetUniformLocation(id, "u_data")
         }
 
         fun bind(w: Int, h: Int, p: FloatArray, quad: FloatBuffer, flipY: Boolean) {
@@ -487,6 +518,7 @@ object GlBackground {
             if (uW >= 0) GLES20.glUniform4fv(uW, 1, p, 0)
             if (uV1 >= 0) GLES20.glUniform4fv(uV1, 1, p, 4)
             if (uNoiseL >= 0) GLES20.glUniform1i(uNoiseL, 1)
+            if (uData >= 0) GLES20.glUniform1i(uData, 2)
             GLES20.glEnableVertexAttribArray(aPos)
             GLES20.glVertexAttribPointer(aPos, 2, GLES20.GL_FLOAT, false, 0, quad)
         }
@@ -522,6 +554,13 @@ internal fun BgStyle.glShader(): String = when (this) {
     BgStyle.MESH -> MeshGradient.SHADER
     BgStyle.SWIRL -> GlStyles.Swirl.SHADER
     BgStyle.WATERCOLOR -> Watercolor.SHADER
+    BgStyle.SIMPLEX -> GlStyles2.Simplex.SHADER
+    BgStyle.WARP -> GlStyles2.Warp.SHADER
+    BgStyle.SOFTAURORA -> GlStyles2.SoftAurora.SHADER
+    BgStyle.CURTAIN -> GlStyles2.Curtain.SHADER
+    BgStyle.LIQUID -> LiquidEther.SHADER
+    BgStyle.SPIRAL -> GlStyles2.Spiral.SHADER
+    BgStyle.TRUCHET -> GlStyles2.Truchet.SHADER
     BgStyle.BLINDS -> GlStyles.Blinds.SHADER
     else -> error("不是著色器樣式：$id")
 }
@@ -531,6 +570,13 @@ internal fun BgStyle.glParams(st: BgState, out: FloatArray) = when (this) {
     BgStyle.MESH -> MeshGradient.params(st, out)
     BgStyle.SWIRL -> GlStyles.Swirl.params(st, out)
     BgStyle.WATERCOLOR -> Watercolor.params(st, out)
+    BgStyle.SIMPLEX -> GlStyles2.Simplex.params(st, out)
+    BgStyle.WARP -> GlStyles2.Warp.params(st, out)
+    BgStyle.SOFTAURORA -> GlStyles2.SoftAurora.params(st, out)
+    BgStyle.CURTAIN -> GlStyles2.Curtain.params(st, out)
+    BgStyle.LIQUID -> LiquidEther.params(st, out)
+    BgStyle.SPIRAL -> GlStyles2.Spiral.params(st, out)
+    BgStyle.TRUCHET -> GlStyles2.Truchet.params(st, out)
     BgStyle.BLINDS -> GlStyles.Blinds.params(st, out)
     else -> Unit
 }

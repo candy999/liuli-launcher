@@ -257,8 +257,7 @@ internal fun BgStyle.prepareAssets(): Boolean = when (this) {
         YushanRidge.nativeReady && YushanRidge.trails != null && YushanRidge.trailsHi != null
     }
     BgStyle.GALAXY -> { MilkyWay.request(); MilkyWay.image != null }
-    BgStyle.MESH, BgStyle.WATERCOLOR, BgStyle.SWIRL, BgStyle.BLINDS -> BackgroundEngine.active?.let { GlBackground.ready(this, it.st) } ?: true
-    else -> true
+    else -> if (gl) BackgroundEngine.active?.let { GlBackground.ready(this, it.st) } ?: true else true
 }
 
 private const val REVEAL_MS = 1400

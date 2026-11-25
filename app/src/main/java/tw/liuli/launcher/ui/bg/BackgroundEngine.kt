@@ -49,6 +49,13 @@ enum class BgStyle(val id: String, val label: String, val note: String, val ambi
     MESH("mesh", "網格漸層", "幾團顏色沿著各自的軌跡緩緩流動、互相暈染，最亮的那團跟著焦點", ambient = true, gl = true),
     WATERCOLOR("watercolor", "水彩暈染", "焦點換到哪，就在那裡滴下一滴顏料慢慢暈開；邊緣柔，乾掉的水痕顏色較深", ambient = true, gl = true),
     SWIRL("swirl", "漩渦", "幾條色帶繞著焦點緩緩旋轉，越靠近中心扭得越緊", ambient = true, gl = true),
+    SIMPLEX("simplex", "色塊雜訊", "幾種顏色像地圖色塊一樣分層，慢慢流動", ambient = true, gl = true),
+    WARP("warp", "扭曲色帶", "棋盤圖樣被一層層漩渦扭成流動的絲狀色帶", ambient = true, gl = true),
+    SOFTAURORA("softaurora", "柔極光", "暗色天空上三條柔和的極光帶起伏飄動", ambient = true, gl = true),
+    CURTAIN("curtain", "極光簾", "極光的簾腳彎曲起伏，往上透出帶細絲的光幕，夜空有零星星星", ambient = true, gl = true),
+    LIQUID("liquid", "液態以太", "流體模擬：焦點移動時把彩色的流體推開，閒置時輕輕攪動", ambient = true, gl = true),
+    SPIRAL("spiral", "螺旋", "一條螺旋線繞著焦點慢慢轉", ambient = true, gl = true),
+    TRUCHET("truchet", "特魯謝緞帶", "隨機拼接的圓弧連成蜿蜒的緞帶，整片慢慢捲動", ambient = true, gl = true),
     BLINDS("blinds", "漸層百葉", "一排直立的百葉片，朝向焦點的那一側亮起，焦點處聚光", gl = true),
     SOLID("solid", "純色", "雙色漸層純色"),
     BLACK("black", "純黑（OLED）", "幾乎全黑，焦點下方一抹主色");

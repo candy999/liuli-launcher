@@ -148,7 +148,7 @@ private fun DrawScope.drawStyleRaw(style: BgStyle, st: BgState, skipFront: Boole
         BgStyle.BEAMS -> beams(st)
         BgStyle.SOLID -> solid(st)
         BgStyle.BLACK -> black(st)
-        BgStyle.MESH, BgStyle.WATERCOLOR, BgStyle.SWIRL, BgStyle.BLINDS -> glStyle(style, st)
+        else -> if (style.gl) glStyle(style, st)
     }
 }
 

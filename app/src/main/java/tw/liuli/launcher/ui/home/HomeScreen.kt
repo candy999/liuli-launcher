@@ -1035,7 +1035,9 @@ fun HomeScreen(
             listOf(
                 SheetItem("Paper Shaders", subtitle = "Apache License 2.0・github.com/paper-design/shaders") { },
                 SheetItem("Powered by Paper Shaders", subtitle = "https://shaders.paper.design") { },
-                SheetItem("Paper 改寫的部分", subtitle = "「網格漸層」「漩渦」背景：改寫成 OpenGL ES 2.0、時間與軌跡改在 CPU 計算、顏色跟著主色。授權全文附在 App 裡（assets/licenses）") { },
+                SheetItem("Paper 改寫的部分", subtitle = "「網格漸層」「漩渦」「色塊雜訊」「扭曲色帶」「螺旋」背景：改寫成 OpenGL ES 2.0、時間與軌跡改在 CPU 計算、雜訊改成查貼圖、顏色跟著主色。授權全文附在 App 裡（assets/licenses）") { },
+                SheetItem("Subframe（aurora-curtain、truchet-ribbon）", subtitle = "MIT License・Copyright (c) 2026 Subframe") { },
+                SheetItem("Subframe 改寫的部分", subtitle = "「極光簾」「特魯謝緞帶」背景：雜湊改成查雜訊貼圖、細節加粗配合低解析度、顏色跟著主色") { },
             ),
             key = "licenses", reopen = { licenseSheet() },
         ), gearReq)
@@ -1056,7 +1058,7 @@ fun HomeScreen(
                 ) { Updater.press(context) },
                 SheetItem("專案網址", subtitle = "github.com/candy999/liuli-launcher") { },
                 SheetItem("授權", "MIT・開源") { },
-                SheetItem("第三方授權", "部分背景改寫自 Paper Shaders") { licenseSheet() },
+                SheetItem("第三方授權", "部分背景改寫自 Paper Shaders、Subframe") { licenseSheet() },
             ),
             key = "about", reopen = { aboutSheet() },
             header = { AboutHeader(Updater.PROJECT_URL) },
