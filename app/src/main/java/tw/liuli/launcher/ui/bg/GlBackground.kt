@@ -59,39 +59,41 @@ object GlBackground {
         private set
 
     /**
-     * 解析度檔位（每個樣式各自一個）：[SIZES] 的索引，0＝1920×1080 … 5＝320×180。起始檔位見 [startLevel]；
-     * 連續三窗平均超過 [SLOW_MS] 就降一檔（最多比起始檔位低兩檔）。量到的 GPU 耗時含「排在介面後面等 GPU」的時間（海信實測同一個樣式 4～12ms 都有），
+     * 解析度檔位（每個樣式各自一個）：[SIZES] 的索引，0＝1920×1080 … 6＝320×180。起始檔位見 [startLevel]；
+     * 連續三窗平均超過 [SLOW_MS] 就降一檔（最多比起始檔位低一檔）。量到的 GPU 耗時含「排在介面後面等 GPU」的時間（海信實測同一個樣式 4～12ms 都有），
      * 所以門檻放寬，只抓真的付不起的樣式。[debugLevel]（adb ACTION=glres:1）強制檔位，-1＝自動。
      */
     private val levels = IntArray(BgStyle.entries.size) { -1 }
     @Volatile var debugLevel = -1
 
     /**
-     * 起始檔位（[SIZES] 的索引）。海信 Mali-470 離屏實測（ACTION=glbench，一張的 GPU 時間）：960×540 約是 480×270 的 3.5 倍、1080p 全部付不起（25～250ms）。
-     * - 960×540（放大兩倍，邊緣清楚）：漩渦 17ms、螺旋 14ms、特魯謝緞帶 18ms、漸層百葉 19ms（每秒 15 格或只在換焦點時畫）、液態以太 7ms
-     * - 640×360：色塊雜訊（960 要 45ms）、扭曲色帶（32ms）、水彩暈染（45ms），每秒 15 格
-     * - 480×270：網格漸層（本來就是柔和的漸層）、柔極光（960 要 51ms）
-     * - 320×180：極光簾（480×270 就要 25ms；光幕本來就柔）
+     * 起始檔位（[SIZES] 的索引；0＝1920×1080、2＝960×540、3＝800×450、4＝640×360、5＝480×270、6＝320×180）。
+     * 全部每秒 30 格（以前有些樣式每秒 15 格換解析度，流動看得出卡），解析度照 30 格的 GPU 預算（一張 20ms 以內）挑。
+     * 海信 Mali-470 實測（一張的 GPU 時間）：螺旋 960 約 9ms、特魯謝緞帶 14ms、液態以太 13ms、漩渦 960 要 21ms → 800；
+     * 色塊雜訊、扭曲色帶 640 約 12～14ms；水彩 640 要 33ms → 480；極光簾 320 約 18ms。
      */
     private fun startLevel(style: BgStyle) = when (style) {
-        BgStyle.SWIRL, BgStyle.SPIRAL, BgStyle.TRUCHET, BgStyle.BLINDS, BgStyle.LIQUID -> 2
-        BgStyle.SIMPLEX, BgStyle.WARP, BgStyle.WATERCOLOR -> 3
-        BgStyle.CURTAIN -> 5
-        else -> 4
+        BgStyle.SPIRAL, BgStyle.TRUCHET, BgStyle.BLINDS, BgStyle.LIQUID -> 2
+        BgStyle.SWIRL -> 3
+        BgStyle.SIMPLEX, BgStyle.WARP, BgStyle.SOFTAURORA -> 4
+        BgStyle.CURTAIN -> 6
+        else -> 5
     }
 
-    /** 每幾次要求才真的畫一張：流動得慢的樣式每秒 15 格看不出一格一格，GPU 與合成的工作減半。 */
-    fun every(style: BgStyle) = when (style) {
-        BgStyle.WATERCOLOR, BgStyle.CURTAIN, BgStyle.SIMPLEX, BgStyle.WARP, BgStyle.TRUCHET, BgStyle.SOFTAURORA,
-        BgStyle.SWIRL, BgStyle.SPIRAL -> 2
-        else -> 1
-    }
+    /** 每幾次要求才真的畫一張：現在全部每秒 30 格（保留這個介面給量測與儀表）。 */
+    @Suppress("UNUSED_PARAMETER")
+    fun every(style: BgStyle) = 1
+
+    /** 這個樣式一張要畫很久（量到 12ms 以上）：操作中讓路（每兩格才畫一張），輕的樣式操作中照常每秒 30 格。 */
+    @Volatile var heavy = true
+        private set
+
     private var reqN = 0
     private var measuredStyle: BgStyle? = null
     private var slowWins = 0
     /** 解析度檔位：越後面越小。放大到 1080p 時，畫面上有銳利邊緣的樣式（色帶、線條）要 960×540 以上才不糊。 */
-    private val SIZES = arrayOf(intArrayOf(1920, 1080), intArrayOf(1280, 720), intArrayOf(960, 540), intArrayOf(640, 360), intArrayOf(480, 270), intArrayOf(320, 180))
-    private const val SLOW_MS = 20f
+    private val SIZES = arrayOf(intArrayOf(1920, 1080), intArrayOf(1280, 720), intArrayOf(960, 540), intArrayOf(800, 450), intArrayOf(640, 360), intArrayOf(480, 270), intArrayOf(320, 180))
+    private const val SLOW_MS = 22f
 
     private val main = Handler(Looper.getMainLooper())
     private var handler: Handler? = null
@@ -362,7 +364,7 @@ object GlBackground {
             }
         }
         // 讀回模式（沒有 TextureView）：大圖讀回付不起，最多 480×270
-        if (lv < 4) { w = SIZES[4][0]; h = SIZES[4][1] }
+        if (lv < 5) { w = SIZES[5][0]; h = SIZES[5][1] }
         if (!ensureGl(w, h)) return null
         if (!EGL14.eglMakeCurrent(dpy, surf, surf, ctx)) throw IllegalStateException("eglMakeCurrent")
         val prog = programs.getOrPut(style) { Program(style) }
@@ -406,7 +408,7 @@ object GlBackground {
 
     /** [read]：讀回（直接顯示時＝交換緩衝）；[copy]：直接顯示時＝玻璃小圖（畫＋讀回）。 */
     private fun measure(style: BgStyle, lv: Int, w: Int, h: Int, gpu: Long, read: Long, copy: Long, direct: Boolean) {
-        if (style != measuredStyle) { measuredStyle = style; warm = 10; nFrames = 0; sumGpu = 0; sumRead = 0; sumCopy = 0; slowWins = 0 }
+        if (style != measuredStyle) { measuredStyle = style; heavy = true; warm = 10; nFrames = 0; sumGpu = 0; sumRead = 0; sumCopy = 0; slowWins = 0 }
         if (warm < 20) { warm++; return } // 剛建好 context、編譯著色器、換樣式的前幾格特別慢
         sumGpu += gpu; sumRead += read; sumCopy += copy
         if (++nFrames < 30) return
@@ -415,9 +417,11 @@ object GlBackground {
         nFrames = 0; sumGpu = 0; sumRead = 0; sumCopy = 0
         // 每兩格才畫一張的樣式（每秒 15 格），一張可以花比較久：門檻跟著放寬（GPU 佔用的比例一樣）。
         // 要連續三窗（約 12 秒）都慢才降：冷啟動、開抽屜那幾秒 GPU 被介面佔住，量到的會暫時偏高（海信上網格漸層曾因此被永久降成 320×180）
-        val slow = g > (if (every(style) > 1) SLOW_MS * 2f else SLOW_MS)
+        heavy = g > 12f
+        val slow = g > SLOW_MS
         slowWins = if (slow) slowWins + 1 else 0
-        if (debugLevel < 0 && lv < SIZES.size - 1 && lv < startLevel(style) + 2 && slowWins >= 3) {
+        // 最多比起始檔位低一檔（再低就糊了）
+        if (debugLevel < 0 && lv < SIZES.size - 1 && lv < startLevel(style) + 1 && slowWins >= 3) {
             slowWins = 0
             levels[style.ordinal] = lv + 1
             warm = 10
@@ -704,6 +708,7 @@ internal fun BgStyle.glVertex(): String = when (this) {
     BgStyle.SIMPLEX -> GlStyles2.Simplex.VERTEX
     BgStyle.WARP -> GlStyles2.Warp.VERTEX
     BgStyle.WATERCOLOR -> Watercolor.VERTEX
+    BgStyle.SOFTAURORA -> GlStyles2.SoftAurora.VERTEX
     else -> GlBackground.VERTEX
 }
 

@@ -229,22 +229,50 @@ void main() {
             put(out, 20, c(st, 55f, .9f, .42f))
         }
 
+        /**
+         * 帶子的高低起伏、厚薄、顏色只跟水平位置有關：在頂點著色器算（全精度；32 欄的網格，起伏最細的一項一個週期也有 26 個點），
+         * 片段著色器只剩每條帶子兩個指數。以前全部在片段著色器，480×270 一張要 29ms。
+         */
+        const val VERTEX = """
+attribute vec2 a_pos;
+uniform float u_fy;
+uniform vec4 u_w;
+uniform vec4 u_v1;
+varying vec2 v_uv;
+varying vec3 v_wv;
+varying vec3 v_th;
+varying vec3 v_m;
+""" + GlBackground.VNOISE + """
+void main() {
+  v_uv = a_pos * 0.5 + 0.5;
+  float x = v_uv.x * u_w.x;
+  float t = u_vt.x + u_vf.x;
+  vec3 k = vec3(0.0, 1.0, 2.0);
+  v_wv = 0.06 * sin(x * 2.1 + u_v1.x + k * 1.7) + 0.035 * sin(x * 4.3 - u_v1.y * 1.3 + k * 2.9)
+       + 0.1 * (vec3(gv(vec2(x * 1.1, t)), gv(vec2(x * 1.1 + 7.0, t)), gv(vec2(x * 1.1 + 14.0, t))) - 0.5);
+  v_th = 0.03 + 0.03 * vec3(gv(vec2(x * 1.7 + 20.0, t)), gv(vec2(x * 1.7 + 25.0, t)), gv(vec2(x * 1.7 + 30.0, t)));
+  v_m = 0.5 + 0.5 * sin(x * 1.3 + k * 2.0 + u_v1.w);
+  gl_Position = vec4(a_pos.x, a_pos.y * u_fy, 0.0, 1.0);
+}
+"""
+
         const val SHADER = HEAD + """
-vec3 band(vec2 uv, float k, float y0, float amp) {
-  float x = uv.x * u_p[0].x;
-  float w = 0.06 * sin(x * 2.1 + u_p[1].x + k * 1.7) + 0.035 * sin(x * 4.3 - u_p[1].y * 1.3 + k * 2.9)
-          + 0.1 * (gt(vec2(x * 1.1, u_p[15].x), vec2(k * 7.0, u_p[14].x)) - 0.5);
-  float d = uv.y - (y0 + w);
-  float th = 0.03 + 0.03 * gt(vec2(x * 1.7, u_p[15].x), vec2(k * 5.0 + 20.0, u_p[14].x));
+varying vec3 v_wv;
+varying vec3 v_th;
+varying vec3 v_m;
+vec3 band(float y, float x, float k, float y0, float w, float th, float m, float amp) {
+  float d = y - (y0 + w);
   float glow = exp(-d * d / (th * th));
   float tail = exp(-max(-d, 0.0) * 5.0) * step(d, 0.0) * 0.35;
   float rays = 0.8 + 0.2 * sin(x * 70.0 + k * 3.0);
-  vec3 c = mix(u_p[4].rgb, u_p[5].rgb, 0.5 + 0.5 * sin(x * 1.3 + k * 2.0 + u_p[1].w));
+  vec3 c = mix(u_p[4].rgb, u_p[5].rgb, m);
   return c * (glow * 0.6 + tail * rays) * amp;
 }
 void main() {
   vec2 uv = v_uv;
-  vec3 light = band(uv, 0.0, 0.36, 1.0) + band(uv, 1.0, 0.50, 0.7) + band(uv, 2.0, 0.27, 0.45);
+  float x = uv.x * u_p[0].x;
+  vec3 light = band(uv.y, x, 0.0, 0.36, v_wv.x, v_th.x, v_m.x, 1.0) + band(uv.y, x, 1.0, 0.50, v_wv.y, v_th.y, v_m.y, 0.7)
+             + band(uv.y, x, 2.0, 0.27, v_wv.z, v_th.z, v_m.z, 0.45);
   vec3 sky = mix(u_p[3].rgb, u_p[2].rgb, uv.y);
   vec3 col = sky + (1.0 - exp(-light * 1.1));
   """ + DITHER + """
