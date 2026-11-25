@@ -627,7 +627,8 @@ class BackgroundEngine {
                     if (holdMs > 0) { holdUntil = t + holdMs; holdMs = 0 }
                     stepBounce(t)
                     // 持續動畫的樣式（星空、深海、光束）與簡潔模式的彈跳點：追上目標也不停
-                    done = step(t) && t > holdUntil && !style.ambient && !bounce
+                    val settled = step(t)
+                    done = settled && t > holdUntil && !style.ambient && !bounce
                     if (done) snapToTarget()
                     // 累加用雙精度（單精度一路加上去，幾個小時後每一格加的量會被捨入吃掉一部分，流動就不均勻）
                     if (lastAmbT != 0L) { atD += min(t - lastAmbT, 100L) / 1000.0; st.at = atD.toFloat() }
@@ -673,7 +674,10 @@ class BackgroundEngine {
                     // 玻璃（畫小張背景＋高斯模糊）在背景執行緒做，主執行緒只送出要求；忙的話自動合併成一次
                     // 著色器樣式：用這一格的狀態排一張 GL 小圖（畫好才重畫全螢幕背景）
                     if (style.gl) GlBackground.request(style, st)
-                    if (done || bgTicks++ % (if (fast) 4 else 2) == 0) requestGlass()
+                    // 持續動畫的樣式、焦點轉場已經結束（只剩樣式自己慢慢流動）：玻璃每秒更新 7.5 次就夠（玻璃後面是模糊的背景，
+                    // 慢慢流動的顏色看不出差別）；轉場中照舊每秒 15 次。每更新一次，畫面上每一片液態玻璃都要重新取色
+                    val glassEvery = if (fast || (settled && style.ambient && !bounce)) 4 else 2
+                    if (done || bgTicks++ % glassEvery == 0) requestGlass()
                     if (blur) blurReq.trySend(Unit)
                     if (glassDirty) { glassDirty = false; glassVersion++ }
                     // 這一格的實際耗時稍後由 FrameMetrics 送回；只採計「穩定在同一檔、不在操作中」的格
