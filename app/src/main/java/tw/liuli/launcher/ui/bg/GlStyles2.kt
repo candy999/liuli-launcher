@@ -222,7 +222,7 @@ void main() {
         fun params(st: BgState, out: FloatArray) {
             head(st, out)
             val t = st.at.toDouble()
-            out[4] = wrap(t * .21, TAU); out[5] = wrap(t * .13, TAU); out[7] = wrap(t * .09, TAU); GlBackground.putTimes(out, t * .05)
+            out[4] = wrap(t * .21, TAU); out[5] = wrap(t * .13, TAU); out[6] = wrap(t * .035, TAU); out[7] = wrap(t * .09, TAU); GlBackground.putTimes(out, t * .05)
             put(out, 8, c(st, 20f, .6f, .025f))
             put(out, 12, c(st, 30f, .5f, .09f))
             put(out, 16, c(st, 0f, .95f, .42f))
@@ -250,7 +250,8 @@ void main() {
   vec3 k = vec3(0.0, 1.0, 2.0);
   v_wv = 0.06 * sin(x * 2.1 + u_v1.x + k * 1.7) + 0.035 * sin(x * 4.3 - u_v1.y * 1.3 + k * 2.9)
        + 0.1 * (vec3(gv(vec2(x * 1.1, t)), gv(vec2(x * 1.1 + 7.0, t)), gv(vec2(x * 1.1 + 14.0, t))) - 0.5);
-  v_th = 0.03 + 0.03 * vec3(gv(vec2(x * 1.7 + 20.0, t)), gv(vec2(x * 1.7 + 25.0, t)), gv(vec2(x * 1.7 + 30.0, t)));
+  // 厚薄用兩個 sin（Mali-400 的頂點著色器最多 512 個指令，六次雜訊放不下）
+  v_th = 0.03 + 0.03 * (0.5 + 0.3 * sin(x * 1.9 + k * 5.0 + u_v1.z) + 0.2 * sin(x * 3.7 - k * 2.3 - u_v1.z * 1.4));
   v_m = 0.5 + 0.5 * sin(x * 1.3 + k * 2.0 + u_v1.w);
   gl_Position = vec4(a_pos.x, a_pos.y * u_fy, 0.0, 1.0);
 }

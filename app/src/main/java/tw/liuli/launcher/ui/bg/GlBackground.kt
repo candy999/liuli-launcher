@@ -46,6 +46,12 @@ object GlBackground {
     @Volatile var failed = false
         private set
 
+    /** 著色器編譯／連結失敗的樣式（例如超過這顆 GPU 的指令數上限）：只有這些樣式改用 CPU 備援，其他著色器樣式照常。 */
+    private val badStyles = java.util.Collections.newSetFromMap(java.util.concurrent.ConcurrentHashMap<BgStyle, Boolean>())
+
+    /** 這個樣式要用 CPU 備援（GL 整個失敗，或這個樣式的著色器編不起來）。 */
+    fun failedFor(style: BgStyle) = failed || style in badStyles
+
     /** 最新的一張結果（主執行緒寫入）。 */
     @Volatile var current: Bitmap? = null
         private set
@@ -177,14 +183,14 @@ object GlBackground {
 
     /** 這個樣式付得出畫面了（第一張圖好了，或 GL 失敗改用 CPU 備援）。會順便觸發第一張。 */
     fun ready(style: BgStyle, st: BgState): Boolean {
-        if (failed) return true
+        if (failedFor(style)) return true
         if (current == null) request(style, st)
         return current != null
     }
 
     /** 背景推進了一格：用目前的狀態排一張新圖（主執行緒呼叫）。 */
     fun request(style: BgStyle, st: BgState) {
-        if (failed) return
+        if (failedFor(style)) return
         if (every(style) > 1 && reqN++ % every(style) != 0 && currentStyle == style && current != null) return
         synchronized(lock) {
             style.glParams(st, pend)
@@ -261,16 +267,22 @@ object GlBackground {
                 out = draw(style)
                 shown = win != EGL14.EGL_NO_SURFACE
             } catch (t: Throwable) {
-                Log.w(TAG, "GL 背景失敗，改用 CPU 畫法", t)
-                failed = true
-                runCatching { destroyGl() }
+                val msg = t.message ?: ""
+                if (t is IllegalStateException && (msg.startsWith("compile") || msg.startsWith("link"))) {
+                    Log.w(TAG, "${style.id} 的著色器編不起來，這個樣式改用 CPU 畫法：$msg")
+                    badStyles.add(style)
+                } else {
+                    Log.w(TAG, "GL 背景失敗，改用 CPU 畫法", t)
+                    failed = true
+                    runCatching { destroyGl() }
+                }
             }
         }
         main.post {
             if (out != null) { current = out; currentStyle = style; version++ }
             if (shown && !directShown) directShown = true
-            if (failed) version++
-            val again = synchronized(lock) { if (hasPending && !failed) true else { inFlight = false; false } }
+            if (failed || (style != null && style in badStyles)) version++
+            val again = synchronized(lock) { if (hasPending && !failed && pendStyle !in badStyles) true else { inFlight = false; false } }
             if (again) handler?.post(render)
         }
     }

@@ -132,7 +132,7 @@ fun BackgroundLayer(engine: BackgroundEngine, blurred: () -> Float, modifier: Mo
         // 山稜：小圖只畫到天空最低點（再往下一定被原生解析度的山蓋住），合成時少貼一大塊
         val h = if (ridgeNative) ((YushanRidge.skyBottom / BackgroundEngine.LOGICAL_H * fullH).toInt() + d - 1) / d
             else (fullH + d - 1) / d
-        if (engine.style.gl && !GlBackground.failed && GlBackground.directOk) {
+        if (engine.style.gl && !GlBackground.failedFor(engine.style) && GlBackground.directOk) {
             // 著色器樣式：GL 直接畫進 TextureView（低解析度的緩衝，系統合成時雙線性放大），不經過 CPU
             if (!GlBackground.directShown) Canvas(Modifier.fillMaxSize()) {
                 // 第一張還沒到：CPU 備援墊著（不然切換樣式那一下會閃黑）
@@ -159,7 +159,7 @@ fun BackgroundLayer(engine: BackgroundEngine, blurred: () -> Float, modifier: Mo
         ) {
             Canvas(Modifier.fillMaxSize()) {
                 // 訂閱：引擎每推進一幀就重畫；著色器樣式改成 GL 小圖每來一張才重畫（引擎推進的那一格圖還沒好，重畫也是舊圖）
-                @Suppress("UNUSED_VARIABLE") val f = if (engine.style.gl && !GlBackground.failed) GlBackground.version else engine.frame
+                @Suppress("UNUSED_VARIABLE") val f = if (engine.style.gl && !GlBackground.failedFor(engine.style)) GlBackground.version else engine.frame
                 // 以「原生 ÷ d」的精確比例縮放（不是進位後的 w×h），進位多出的一點點只是延伸畫面、會被裁掉
                 val sx = fullW / d.toFloat() / BackgroundEngine.LOGICAL_W
                 val sy = fullH / d.toFloat() / BackgroundEngine.LOGICAL_H

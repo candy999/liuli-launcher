@@ -162,7 +162,7 @@ private fun DrawScope.drawStyleRaw(style: BgStyle, st: BgState, skipFront: Boole
 
 private fun DrawScope.glStyle(style: BgStyle, st: BgState) {
     // 小圖要是這個樣式畫的才用（剛切換樣式時 current 還是上一個樣式的）
-    val bmp = if (GlBackground.failed || GlBackground.currentStyle != style) null else GlBackground.current
+    val bmp = if (GlBackground.failedFor(style) || GlBackground.currentStyle != style) null else GlBackground.current
     when {
         bmp != null -> drawRect(MeshGradient.brush(bmp), size = FULL)
         style == BgStyle.MESH -> with(MeshGradient) { fallback(st, W, H) }
