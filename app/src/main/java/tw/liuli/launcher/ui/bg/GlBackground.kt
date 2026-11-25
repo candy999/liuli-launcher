@@ -91,6 +91,7 @@ object GlBackground {
     private var nFrames = 0
     private var sumGpu = 0L
     private var sumCopy = 0L
+    private var sumRead = 0L
     private var warm = 0
 
     @Volatile private var releasePending = false
@@ -176,7 +177,8 @@ object GlBackground {
         GLES20.glDrawElements(GLES20.GL_TRIANGLES, GRID_X * GRID_Y * 6, GLES20.GL_UNSIGNED_SHORT, gridIdx!!)
         val buf = readBuf.let { if (it == null || it.capacity() < w * h * 4) ByteBuffer.allocateDirect(w * h * 4).order(ByteOrder.nativeOrder()).also { b -> readBuf = b } else it }
         buf.clear()
-        // 讀回會等 GPU 畫完：這段時間＝GPU 成本＋讀回
+        GLES20.glFinish()
+        val tg = SystemClock.elapsedRealtimeNanos()
         GLES20.glReadPixels(0, 0, w, h, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buf)
         val err = GLES20.glGetError()
         if (err != GLES20.GL_NO_ERROR) throw IllegalStateException("glReadPixels 0x${Integer.toHexString(err)}")
@@ -191,18 +193,17 @@ object GlBackground {
         // gl_FragCoord.y＝0 的那一列先讀出來，正好是圖的第一列（著色器裡 y 往下＝畫面往下），不用翻轉
         bmp!!.copyPixelsFromBuffer(buf)
         val t2 = SystemClock.elapsedRealtimeNanos()
-        measure(style, lv, w, h, t1 - t0, t2 - t1)
+        measure(style, lv, w, h, tg - t0, t1 - tg, t2 - t1)
         return bmp
     }
 
-    private fun measure(style: BgStyle, lv: Int, w: Int, h: Int, gpu: Long, copy: Long) {
+    private fun measure(style: BgStyle, lv: Int, w: Int, h: Int, gpu: Long, read: Long, copy: Long) {
         if (warm < 20) { warm++; return } // 剛建好 context、編譯著色器的前幾格特別慢
-        sumGpu += gpu; sumCopy += copy
+        sumGpu += gpu; sumRead += read; sumCopy += copy
         if (++nFrames < 60) return
-        val g = sumGpu / nFrames / 1e6f
-        val c = sumCopy / nFrames / 1e6f
-        Log.i(TAG, "${style.id} ${w}x$h: gpu+read %.1fms, copy %.1fms".format(g, c))
-        nFrames = 0; sumGpu = 0; sumCopy = 0
+        val g = (sumGpu + sumRead) / nFrames / 1e6f
+        Log.i(TAG, "${style.id} ${w}x$h: gpu %.1fms + read %.1fms, copy %.1fms".format(sumGpu / nFrames / 1e6f, sumRead / nFrames / 1e6f, sumCopy / nFrames / 1e6f))
+        nFrames = 0; sumGpu = 0; sumRead = 0; sumCopy = 0
         if (debugLevel < 0 && lv == 0 && g > SLOW_MS) {
             level = 1
             warm = 10
