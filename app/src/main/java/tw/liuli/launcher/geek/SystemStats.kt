@@ -352,8 +352,8 @@ object Rocket {
 private fun bgFpsNow(): Int {
     val e = tw.liuli.launcher.ui.bg.BackgroundEngine.active ?: return -1
     if (!e.moving) return 0
-    // 著色器樣式有些每兩格才畫一張（流動得慢的樣式）：顯示實際畫的格數
+    // 著色器樣式：顯示 GL 實際交出畫面的格數（GPU 跟不上時會比引擎的節拍少）
     val s = e.style
-    return if (s.gl) tw.liuli.launcher.ui.bg.BackgroundEngine.bgFps / tw.liuli.launcher.ui.bg.GlBackground.every(s)
+    return if (s.gl && !tw.liuli.launcher.ui.bg.GlBackground.failedFor(s)) (1000f / tw.liuli.launcher.ui.bg.GlBackground.frameMs + .5f).toInt()
     else tw.liuli.launcher.ui.bg.BackgroundEngine.bgFps
 }

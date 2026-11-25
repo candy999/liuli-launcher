@@ -65,12 +65,40 @@ object GlBackground {
         private set
 
     /**
-     * 解析度檔位（每個樣式各自一個）：[SIZES] 的索引，0＝1920×1080 … 6＝320×180。起始檔位見 [startLevel]；
-     * 連續三窗平均超過 [SLOW_MS] 就降一檔（最多比起始檔位低一檔）。量到的 GPU 耗時含「排在介面後面等 GPU」的時間（海信實測同一個樣式 4～12ms 都有），
-     * 所以門檻放寬，只抓真的付不起的樣式。[debugLevel]（adb ACTION=glres:1）強制檔位，-1＝自動。
+     * 動態解析度（規則和 CPU 樣式的背景引擎一樣，見 BackgroundEngine.run 的排程原則）：
+     * - 每個樣式記住一個「學到的檔位」（[SIZES] 的索引，0＝原生 1920×1080 … 6＝320×180），起點見 [startLevel]
+     * - 每約 1 秒一窗（每 3 張量一次 GPU 時間、取 10 次的中位數）：超過 [SLOW_MS] 連續兩窗（或超過 [VERY_SLOW_MS] 一窗）降一檔；
+     *   升檔前先推估上一檔的成本（約 70% 跟像素數成正比），推估在 [UP_MS] 以內、連續兩窗才升；剛升就變慢＝試探失敗，退避時間加倍。
+     *   上限是原生解析度：GPU 夠強的電視會一路升到 1080p
+     * - 操作中、面板／抽屜開著：降到 640×360（[BUSY_LEVEL]），每秒 30 格不變；便宜的樣式（一張 [CHEAP_MS] 以內）不降。
+     *   操作結束每 [RAMP_STEP_MS] 拉回一檔
+     * - 只在轉場時動的樣式（漸層百葉）停下來、遙控器閒置一下之後，補畫一張原生解析度（[request] 的 still）
+     * [debugLevel]（adb ACTION=glres:N）強制檔位，-1＝自動。
      */
     private val levels = IntArray(BgStyle.entries.size) { -1 }
     @Volatile var debugLevel = -1
+    /** 每個樣式最近在學到的檔位量到的 GPU 時間（毫秒；-1＝還沒量）：判斷「便宜的樣式不降」。 */
+    private val lastCost = FloatArray(BgStyle.entries.size) { -1f }
+    private const val BUSY_LEVEL = 4
+    private const val CHEAP_MS = 12f
+    private const val UP_MS = 16f
+    private const val VERY_SLOW_MS = 36f
+    private const val RAMP_STEP_MS = 200L
+    // 主執行緒：目前顯示的檔位（操作中降下去、結束後逐檔拉回）
+    private var shownLevel = -1
+    private var shownStyle: BgStyle? = null
+    private var nextRampMs = 0L
+    // GL 執行緒：升降檔的判斷
+    private var fastWins = 0
+    private var lastUpMs = 0L
+    private var upBlockedUntil = 0L
+    private var upBackoff = 3000L
+    private val winBuf = FloatArray(10)
+
+    /** 實際交出畫面的間隔（毫秒，平滑過）：引擎拿來決定動畫速度（跟不上每秒 30 格時放慢，每格的變化量才不會變大）。 */
+    @Volatile var frameMs = 33.3f
+        private set
+    private var lastShowMs = 0L
 
     /**
      * 起始檔位（[SIZES] 的索引；0＝1920×1080、2＝960×540、3＝800×450、4＝640×360、5＝480×270、6＝320×180）。
@@ -90,16 +118,12 @@ object GlBackground {
     @Suppress("UNUSED_PARAMETER")
     fun every(style: BgStyle) = 1
 
-    /** 這個樣式一張要畫很久（量到 12ms 以上）：操作中讓路（每兩格才畫一張），輕的樣式操作中照常每秒 30 格。 */
-    @Volatile var heavy = true
-        private set
-
     private var reqN = 0
     private var measuredStyle: BgStyle? = null
     private var slowWins = 0
     /** 解析度檔位：越後面越小。放大到 1080p 時，畫面上有銳利邊緣的樣式（色帶、線條）要 960×540 以上才不糊。 */
     private val SIZES = arrayOf(intArrayOf(1920, 1080), intArrayOf(1280, 720), intArrayOf(960, 540), intArrayOf(800, 450), intArrayOf(640, 360), intArrayOf(480, 270), intArrayOf(320, 180))
-    private const val SLOW_MS = 22f
+    private const val SLOW_MS = 24f
 
     private val main = Handler(Looper.getMainLooper())
     private var handler: Handler? = null
@@ -133,8 +157,10 @@ object GlBackground {
     private var winLevel = -1
     private var windowOk = true
     private var workStyle: BgStyle? = null
-    private var pendBusy = false
-    private var workBusy = false
+    private var pendLevel = 4
+    private var workLevel = 4
+    private var pendStable = false
+    private var workStable = false
     private var lastGlassNs = 0L
 
     // 量測
@@ -193,14 +219,30 @@ object GlBackground {
 
     /**
      * 背景推進了一格：用目前的狀態排一張新圖（主執行緒呼叫）。
-     * [busy]＝操作中或面板／抽屜開著：重的樣式降一檔解析度、更新率不變（和 CPU 樣式的「讓路」一樣：降解析度換流暢，不降格數）。
+     * [busy]＝操作中或面板／抽屜開著：降到 640×360、每秒 30 格不變（便宜的樣式不降）；結束後逐檔拉回。
+     * [still]＝停下來閒置之後補一張原生解析度（只在轉場時動的樣式）。
      */
-    fun request(style: BgStyle, st: BgState, busy: Boolean = false) {
+    fun request(style: BgStyle, st: BgState, busy: Boolean = false, still: Boolean = false) {
         if (failedFor(style)) return
         if (every(style) > 1 && reqN++ % every(style) != 0 && currentStyle == style && current != null) return
+        val si = style.ordinal
+        if (levels[si] < 0) levels[si] = startLevel(style)
+        val learned = levels[si]
+        val cheap = lastCost[si] in 0f..CHEAP_MS
+        val target = if (busy && !cheap) maxOf(learned, BUSY_LEVEL) else learned
+        val now = SystemClock.uptimeMillis()
+        if (style != shownStyle || shownLevel < 0) { shownStyle = style; shownLevel = target; frameMs = 33.3f; lastShowMs = 0L }
+        if (target > shownLevel) shownLevel = target   // 降解析度立即生效（在動，看不出切換）
+        else if (target < shownLevel && now >= nextRampMs) { shownLevel--; nextRampMs = now + RAMP_STEP_MS }
+        val lv = when {
+            debugLevel in SIZES.indices -> debugLevel
+            still -> 0
+            else -> shownLevel
+        }
         synchronized(lock) {
             style.glParams(st, pend)
-            pendBusy = busy && heavy
+            pendLevel = lv
+            pendStable = !still && debugLevel < 0 && lv == learned
             pendStyle = style
             hasPending = true
             if (inFlight) return
@@ -264,7 +306,8 @@ object GlBackground {
             pend.copyInto(work)
             if (pendStyle == BgStyle.LIQUID) LiquidEther.snapshot()
             workStyle = pendStyle
-            workBusy = pendBusy
+            workLevel = pendLevel
+            workStable = pendStable
             hasPending = false
         }
         val style = workStyle
@@ -287,6 +330,11 @@ object GlBackground {
             }
         }
         main.post {
+            // 連續交出畫面的間隔（停下來之後的第一張不算）
+            val nowMs = SystemClock.uptimeMillis()
+            val d = nowMs - lastShowMs
+            if (lastShowMs != 0L && d in 1L..150L) frameMs += (d - frameMs) * .15f
+            lastShowMs = nowMs
             if (out != null) { current = out; currentStyle = style; version++ }
             if (shown && !directShown) directShown = true
             if (failed || (style != null && style in badStyles)) version++
@@ -360,9 +408,7 @@ object GlBackground {
 
     private fun draw(style: BgStyle): Bitmap? {
         if (levels[style.ordinal] < 0) levels[style.ordinal] = startLevel(style)
-        // 操作中（重的樣式）：降一檔，每秒 30 格不變；操作結束下一張就回到原本的檔位
-        val lv = if (debugLevel in SIZES.indices) debugLevel
-            else (levels[style.ordinal] + if (workBusy) 1 else 0).coerceAtMost(SIZES.size - 1)
+        val lv = workLevel.coerceIn(0, SIZES.size - 1)
         var w = SIZES[lv][0]
         var h = SIZES[lv][1]
         val t = tex
@@ -389,9 +435,9 @@ object GlBackground {
                 if (winLevel != lv) { t.setDefaultBufferSize(w, h); winLevel = lv }
                 if (!EGL14.eglMakeCurrent(dpy, win, win, ctx)) throw IllegalStateException("eglMakeCurrent(window)")
                 val prog = programs.getOrPut(style) { Program(style) }
-                // 每 4 格量一次 GPU 耗時（glFinish 會讓 CPU 等 GPU，平常不用）；玻璃小圖每 2 格更新一次（玻璃很模糊，看不出差別）
+                // 每 3 張量一次 GPU 耗時（glFinish 會讓這條執行緒等 GPU，平常不用）；只量「穩定在學到的檔位」的張
                 val n = frameNo++
-                val timed = n % 4 == 0L
+                val timed = workStable && n % 3 == 0L
                 val t0 = SystemClock.elapsedRealtimeNanos()
                 pass(prog, w, h, flipY = true)
                 if (timed) GLES20.glFinish()
@@ -410,7 +456,7 @@ object GlBackground {
                     pass(prog, BackgroundEngine.GLASS_W, BackgroundEngine.GLASS_H, flipY = false)
                     bmp = readBack(BackgroundEngine.GLASS_W, BackgroundEngine.GLASS_H)
                 }
-                if (timed && !workBusy) measure(style, lv, w, h, tg - t0, t1 - tg, SystemClock.elapsedRealtimeNanos() - t1, direct = true)
+                if (timed) measure(style, lv, w, h, tg - t0, t1 - tg, SystemClock.elapsedRealtimeNanos() - t1, direct = true)
                 return bmp
             }
         }
@@ -425,7 +471,7 @@ object GlBackground {
         val tg = SystemClock.elapsedRealtimeNanos()
         val bmp = readBack(w, h)
         val t1 = SystemClock.elapsedRealtimeNanos()
-        measure(style, lv, w, h, tg - t0, t1 - tg, 0L, direct = false)
+        if (workStable) measure(style, lv, w, h, tg - t0, t1 - tg, 0L, direct = false)
         return bmp
     }
 
@@ -457,28 +503,58 @@ object GlBackground {
         winLevel = -1
     }
 
-    /** [read]：讀回（直接顯示時＝交換緩衝）；[copy]：直接顯示時＝玻璃小圖（畫＋讀回）。 */
+    /** [read]：讀回（直接顯示時＝交換緩衝）；[copy]：直接顯示時＝玻璃小圖（畫＋讀回）。升降檔的判斷見 [levels]。 */
     private fun measure(style: BgStyle, lv: Int, w: Int, h: Int, gpu: Long, read: Long, copy: Long, direct: Boolean) {
-        if (style != measuredStyle) { measuredStyle = style; heavy = true; warm = 10; nFrames = 0; sumGpu = 0; sumRead = 0; sumCopy = 0; slowWins = 0 }
-        if (warm < 20) { warm++; return } // 剛建好 context、編譯著色器、換樣式的前幾格特別慢
+        val si = style.ordinal
+        if (style != measuredStyle || lv != measuredLevel) {
+            // 換樣式、換檔位：重新量（剛換的前幾張特別慢：編譯著色器、配置緩衝）
+            if (style != measuredStyle) { slowWins = 0; fastWins = 0 }
+            measuredStyle = style; measuredLevel = lv; warm = 17; nFrames = 0; sumGpu = 0; sumRead = 0; sumCopy = 0
+        }
+        if (warm < 20) { warm++; return }
+        val g1 = (if (direct) gpu else gpu + read) / 1e6f
+        winBuf[nFrames] = g1
         sumGpu += gpu; sumRead += read; sumCopy += copy
-        if (++nFrames < 30) return
-        val g = (if (direct) sumGpu else sumGpu + sumRead) / nFrames / 1e6f
-        if (verbose || reports++ < 3) Log.i(TAG, "${style.id} ${w}x$h ${if (direct) "direct: gpu %.1fms + swap %.1fms, glass %.1fms" else "readback: gpu %.1fms + read %.1fms, -%.0f"}".format(sumGpu / nFrames / 1e6f, sumRead / nFrames / 1e6f, sumCopy / nFrames / 1e6f))
+        if (++nFrames < winBuf.size) return
+        val sorted = winBuf.copyOf(); sorted.sort()
+        val g = (sorted[sorted.size / 2 - 1] + sorted[sorted.size / 2]) / 2f   // 中位數：偶爾排在介面後面等 GPU 的那幾張不算
+        if (verbose || reports++ < 3) Log.i(TAG, "${style.id} ${w}x$h ${if (direct) "direct: gpu %.1fms + swap %.1fms, glass %.1fms" else "readback: gpu %.1fms + read %.1fms, -%.0f"}, %.1f fps".format(g, sumRead / nFrames / 1e6f, sumCopy / nFrames / 1e6f, 1000f / frameMs))
         nFrames = 0; sumGpu = 0; sumRead = 0; sumCopy = 0
-        // 每兩格才畫一張的樣式（每秒 15 格），一張可以花比較久：門檻跟著放寬（GPU 佔用的比例一樣）。
-        // 要連續三窗（約 12 秒）都慢才降：冷啟動、開抽屜那幾秒 GPU 被介面佔住，量到的會暫時偏高（海信上網格漸層曾因此被永久降成 320×180）
-        heavy = g > 12f
+        lastCost[si] = g
+        if (debugLevel >= 0) return
+        val now = SystemClock.uptimeMillis()
         val slow = g > SLOW_MS
-        slowWins = if (slow) slowWins + 1 else 0
-        // 最多比起始檔位低一檔（再低就糊了）
-        if (debugLevel < 0 && lv < SIZES.size - 1 && lv < startLevel(style) + 1 && slowWins >= 3) {
-            slowWins = 0
-            levels[style.ordinal] = lv + 1
-            warm = 10
-            Log.i(TAG, "太慢（%.1fms），改用 ${SIZES[lv + 1][0]}x${SIZES[lv + 1][1]}".format(g))
+        val verySlow = g > VERY_SLOW_MS
+        // 升檔要「推估」付得起：約 30% 是固定成本、70% 跟像素數成正比
+        val canUp = lv > 0 && g * (.3f + .7f * px(lv - 1) / px(lv)) <= UP_MS
+        when {
+            slow -> {
+                fastWins = 0
+                if ((++slowWins >= 2 || verySlow) && lv < SIZES.size - 1) {
+                    slowWins = 0
+                    levels[si] = lv + 1
+                    lastCost[si] = -1f
+                    upBackoff = if (now - lastUpMs < 1500) minOf(upBackoff * 2, 60_000L) else 3000L
+                    upBlockedUntil = now + upBackoff
+                    Log.i(TAG, "${style.id} 太慢（%.1fms），降到 ${SIZES[lv + 1][0]}x${SIZES[lv + 1][1]}".format(g))
+                }
+            }
+            canUp -> {
+                slowWins = 0
+                if (++fastWins >= 2 && now >= upBlockedUntil) {
+                    fastWins = 0
+                    levels[si] = lv - 1
+                    lastCost[si] = -1f
+                    lastUpMs = now
+                    Log.i(TAG, "${style.id} 付得起（%.1fms），升到 ${SIZES[lv - 1][0]}x${SIZES[lv - 1][1]}".format(g))
+                }
+            }
+            else -> { slowWins = 0; fastWins = 0 }
         }
     }
+
+    private var measuredLevel = -1
+    private fun px(lv: Int) = (SIZES[lv][0] * SIZES[lv][1]).toFloat()
 
     // ───────────── EGL ─────────────
 

@@ -309,6 +309,8 @@ class BackgroundEngine {
     private var glassDirty = false
     /** 目前播放速度（1＝正常；GPU 跟不上時 <1）。 */
     private var speed = 1f
+    /** 背景節拍的間隔（毫秒，平滑過）。 */
+    private var tickMs = 33.3f
     /** 最後一次按鍵的時間（靜止後補畫昂貴的原生解析度幀要避開操作）。 */
     @Volatile private var inputAt = 0L
 
@@ -560,6 +562,7 @@ class BackgroundEngine {
             pending = false
             lastT = 0L
             speed = 1f
+            tickMs = 33.3f
             moving = true
             val si = style.ordinal
             var div = learnedDiv[si]
@@ -643,7 +646,8 @@ class BackgroundEngine {
                     done = settled && t > holdUntil && !style.ambient && !bounce
                     if (done) snapToTarget()
                     // 累加用雙精度（單精度一路加上去，幾個小時後每一格加的量會被捨入吃掉一部分，流動就不均勻）
-                    if (lastAmbT != 0L) { atD += min(t - lastAmbT, 100L) / 1000.0; st.at = atD.toFloat() }
+                    // 持續流動也跟著播放速度（跟不上每秒 30 格時放慢，每格的變化量不變大）
+                    if (lastAmbT != 0L) { atD += min(t - lastAmbT, 100L) / 1000.0 * speed; st.at = atD.toFloat() }
                     lastAmbT = t
                     st.nowMs = t
                     st.record(t)
@@ -813,6 +817,19 @@ class BackgroundEngine {
             if (glassDirty) { glassDirty = false; glassVersion++ }
             frame++
             if (blurOn) continue
+            // 著色器樣式（只在轉場時動的）：停下來、遙控器閒置一下之後補畫一張原生解析度（和 CPU 樣式靜止後補原生一樣）
+            if (style.gl && !style.ambient && !GlBackground.failedFor(style)) {
+                val stoppedAt = android.os.SystemClock.uptimeMillis()
+                var interrupted = false
+                while (true) {
+                    val wait = max(inputAt, stoppedAt) + STATIC_IDLE_MS - android.os.SystemClock.uptimeMillis()
+                    if (wait <= 0) break
+                    if (withTimeoutOrNull(wait) { wake.receive() } != null) { interrupted = true; break }
+                }
+                if (interrupted) { pending = true; continue }
+                GlBackground.request(style, st, still = true)
+                continue
+            }
             // 靜止後逐檔升回原生解析度。這台機器付不起的檔位（轉場中用不到的）要等遙控器閒置
             // [STATIC_IDLE_MS] 才畫——只畫一幀，但弱機上這一幀可能要 0.1 秒，不能剛好擋到按鍵。新的焦點變化一來就中斷。
             val afford = if (forced) 1 else affordableDiv(si, interval)
@@ -891,10 +908,14 @@ class BackgroundEngine {
     }
 
     private fun step(t: Long): Boolean {
-        // 慢速播放：每格最多推進 1/15 秒；速度變慢立即生效、變快則慢慢加速
+        // 播放速度：每格的變化量要跟每秒 30 格時一樣——實際畫面的間隔（平滑過）超過 1/30 秒（容許一點抖動）就等比放慢，最慢 [SPEED_MIN]；
+        // 著色器樣式看 GL 實際交出畫面的間隔（引擎的節拍正常，GPU 卻可能跟不上）。單一格太久（>1/15 秒）也照舊限制推進量。
+        // 速度變慢立即生效、變快則慢慢加速
         val raw = if (lastT == 0L) 16.7f else (t - lastT).toFloat().coerceAtLeast(1f)
         lastT = t
-        val targetSpeed = min(1f, MAX_STEP_MS / raw)
+        tickMs += (raw.coerceAtMost(100f) - tickMs) * .15f
+        val eff = if (style.gl && !GlBackground.failedFor(style)) max(tickMs, GlBackground.frameMs) else tickMs
+        val targetSpeed = min(min(1f, max(SPEED_MIN, SPEED_REF_MS / eff)), MAX_STEP_MS / raw)
         speed = if (targetSpeed < speed) targetSpeed else speed + (targetSpeed - speed) * rc(TAU_SPEED, raw)
         val dt = raw * speed
         val a1 = rc(TAU1, dt)
@@ -1188,6 +1209,10 @@ class BackgroundEngine {
         private const val MAX_BACKOFF_MS = 6000L
         /** 每一格背景最多推進的動畫時間（1/15 秒）。 */
         private const val MAX_STEP_MS = 66.7f
+        /** 播放速度的基準：實際畫面間隔超過這個（每秒 30 格＋一點抖動的容許）就等比放慢。 */
+        private const val SPEED_REF_MS = 36f
+        /** 播放速度下限：再慢就像停住了。 */
+        private const val SPEED_MIN = .5f
         /** 播放速度回升的時間常數（越大越慢）。 */
         private const val TAU_SPEED = 800f
         /** 按鍵後背景省力的時間。 */
