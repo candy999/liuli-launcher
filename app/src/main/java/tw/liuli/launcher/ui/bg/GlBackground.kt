@@ -81,7 +81,7 @@ object GlBackground {
     private fun startLevel(style: BgStyle) = when (style) {
         BgStyle.SPIRAL, BgStyle.TRUCHET, BgStyle.BLINDS, BgStyle.LIQUID -> 2
         BgStyle.SWIRL -> 3
-        BgStyle.SIMPLEX, BgStyle.WARP, BgStyle.SOFTAURORA -> 4
+        BgStyle.SIMPLEX, BgStyle.WARP, BgStyle.SOFTAURORA, BgStyle.WATERCOLOR -> 4
         BgStyle.CURTAIN -> 6
         else -> 5
     }
@@ -298,6 +298,33 @@ object GlBackground {
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, noiseTex)
         prog.bind(w, h, work, prog.grid, flipY)
         GLES20.glDrawElements(GLES20.GL_TRIANGLES, prog.gridN, GLES20.GL_UNSIGNED_SHORT, prog.gridIdx)
+        if (workStyle == BgStyle.WATERCOLOR) drawDrops(w, h, flipY)
+    }
+
+    private var dropProg: Program? = null
+    private var dropLoc = IntArray(3)
+
+    /** 水彩：每一滴顏料各畫一塊只蓋住自己的網格，乘法混色疊在紙上（見 [Watercolor]）。 */
+    private fun drawDrops(w: Int, h: Int, flipY: Boolean) {
+        val p = dropProg ?: Program(Watercolor.DROP_VERTEX, Watercolor.DROP_SHADER, 8, 8).also { pr ->
+            dropProg = pr
+            dropLoc = intArrayOf(
+                GLES20.glGetUniformLocation(pr.id, "u_va"), GLES20.glGetUniformLocation(pr.id, "u_a"), GLES20.glGetUniformLocation(pr.id, "u_b"),
+            )
+        }
+        GLES20.glUseProgram(p.id)
+        p.bind(w, h, work, p.grid, flipY)
+        GLES20.glEnable(GLES20.GL_BLEND)
+        GLES20.glBlendFunc(GLES20.GL_DST_COLOR, GLES20.GL_ZERO)
+        for (i in 0 until 6) {
+            val o = 4 + i * 8
+            if (work[o + 3] < .004f) continue
+            GLES20.glUniform4fv(dropLoc[0], 1, work, o)
+            GLES20.glUniform4fv(dropLoc[1], 1, work, o)
+            GLES20.glUniform4fv(dropLoc[2], 1, work, o + 4)
+            GLES20.glDrawElements(GLES20.GL_TRIANGLES, p.gridN, GLES20.GL_UNSIGNED_SHORT, p.gridIdx)
+        }
+        GLES20.glDisable(GLES20.GL_BLEND)
     }
 
     private var dataTex = 0
@@ -526,6 +553,7 @@ object GlBackground {
     private fun destroyGl() {
         destroyWindow()
         programs.clear()
+        dropProg = null
         noiseTex = 0
         noiseTexL = 0
         noiseTexQ = 0
@@ -719,7 +747,6 @@ internal fun BgStyle.glVertex(): String = when (this) {
     BgStyle.SWIRL -> GlStyles.Swirl.VERTEX
     BgStyle.SIMPLEX -> GlStyles2.Simplex.VERTEX
     BgStyle.WARP -> GlStyles2.Warp.VERTEX
-    BgStyle.WATERCOLOR -> Watercolor.VERTEX
     BgStyle.SOFTAURORA -> GlStyles2.SoftAurora.VERTEX
     else -> GlBackground.VERTEX
 }

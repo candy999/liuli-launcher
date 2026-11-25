@@ -141,49 +141,69 @@ internal object Watercolor {
         return t * t * (3f - 2f * t)
     }
 
-    /** 水的擾動（緩慢流動的位移場）在頂點著色器算（全精度、低頻，內插誤差看不出來），片段著色器省兩次雜訊取樣。 */
-    const val VERTEX = """
+    /**
+     * 畫法：先畫一層紙（全螢幕，便宜），每一滴顏料再各自畫一塊只蓋住自己範圍的網格（8×8），用乘法混色（GL_DST_COLOR × 片段顏色）疊上去。
+     * 以前六滴全部在同一個全螢幕著色器裡算：這顆 GPU 的分支幾乎省不了事，每個像素都把六滴（12 次雜訊）算完，480×270 一張要 22ms。
+     * 水的擾動（緩慢流動的位移場）在每一滴網格的頂點算（全精度、低頻，內插誤差看不出來）。
+     */
+    const val SHADER = """
+precision mediump float;
+uniform sampler2D u_noise;
+uniform vec4 u_p[16];
+varying vec2 v_uv;
+""" + GlBackground.NOISE + """
+void main() {
+  vec2 uv0 = v_uv;
+  vec3 col = u_p[0].rgb * (0.95 + 0.07 * g(uv0 * vec2(28.0, 16.0)));
+  vec2 v = uv0 - 0.5;
+  col *= 1.0 - 0.35 * dot(v, v);
+  col += (texture2D(u_noise, gl_FragCoord.xy / 64.0).rgb - 0.5) / 255.0;
+  gl_FragColor = vec4(col, 1.0);
+}
+"""
+
+    /** 一滴的網格：u_va＝(x, y, 半徑, 濃度)；蓋住 1.45 個半徑（加上水流位移的餘裕）。 */
+    const val DROP_VERTEX = """
 attribute vec2 a_pos;
 uniform float u_fy;
 uniform vec4 u_w;
-varying vec2 v_uv;
+uniform vec4 u_va;
 varying vec2 v_wv;
 """ + GlBackground.VNOISE + """
 void main() {
-  v_uv = a_pos * 0.5 + 0.5;
-  vec2 s = v_uv * vec2(u_w.w, 1.0) * 2.2;
+  vec2 hs = vec2(u_va.z * 1.45 / u_w.w, u_va.z * 1.45) + 0.03;
+  vec2 uv = u_va.xy + a_pos * hs;
+  vec2 s = uv * vec2(u_w.w, 1.0) * 2.2;
   float t1 = u_vt.x + u_vf.x;
   float t2 = u_vt.y + u_vf.y;
-  v_wv = v_uv + (vec2(gv(s + vec2(t1, 3.0)), gv(s + vec2(11.0, t2))) - 0.5) * 0.045;
-  gl_Position = vec4(a_pos.x, a_pos.y * u_fy, 0.0, 1.0);
+  v_wv = uv + (vec2(gv(s + vec2(t1, 3.0)), gv(s + vec2(11.0, t2))) - 0.5) * 0.045;
+  vec2 c = uv * 2.0 - 1.0;
+  gl_Position = vec4(c.x, c.y * u_fy, 0.0, 1.0);
 }
 """
 
     // 每一滴：d＝到中心的距離（寬高比校正）；邊界半徑被低頻雜訊推擠（花瓣形），內部濃淡不均，邊緣一圈寬柔的水痕。
-    // 顏料以相乘疊上去：col *= mix(1, 透光色, 濃度)
-    const val SHADER = """
+    // 輸出相乘的係數：mix(1, 透光色, 濃度)
+    const val DROP_SHADER = """
 precision mediump float;
 uniform sampler2D u_noise;
-uniform sampler2D u_noiseL;
 uniform vec2 u_res;
 uniform vec4 u_p[16];
-varying vec2 v_uv;
+uniform vec4 u_a;
+uniform vec4 u_b;
 varying vec2 v_wv;
-
-"""+ GlBackground.NOISE + """
-
-vec3 drop(vec3 col, vec2 uv, vec4 a, vec4 b) {
-  vec2 d = (uv - a.xy) * vec2(u_p[0].w, 1.0);
+""" + GlBackground.NOISE + """
+void main() {
+  vec4 a = u_a;
+  vec4 b = u_b;
+  vec2 d = (v_wv - a.xy) * vec2(u_p[0].w, 1.0);
   float dist = length(d);
-  // 這一滴碰不到的像素（或已經淡掉）：直接跳過，省下雜訊取樣
-  if (a.w < 0.004 || dist > a.z * 1.45) return col;
   vec2 q = d / a.z;
   // 邊界的花瓣形隨時間慢慢起伏（水還沒乾）
   float n = gt(q * 1.3 + vec2(u_p[15].w, 0.0), vec2(b.w + u_p[14].w, b.w));
   float r = a.z * (0.8 + 0.38 * n);
   float e = (dist - r) / a.z;
-  // 邊緣：水彩的邊是乾掉時顏料聚在邊上形成的，本來就清楚——柔邊約 0.02 個半徑，但至少 1.5 個繪製像素（換算成這一滴半徑的比例）才不會鋸齒；
-  // 水痕（邊上那圈較深的顏料）約 0.06 個半徑寬
+  // 邊緣：水彩的邊是乾掉時顏料聚在邊上形成的，本來就清楚——柔邊約 0.02 個半徑，但至少 1.5 個繪製像素才不會鋸齒；水痕約 0.06 個半徑寬
   float px = 1.0 / (u_res.y * a.z);
   float soft = max(0.02, 1.5 * px);
   float inside = 1.0 - smoothstep(-soft, soft * 0.8, e);
@@ -193,24 +213,7 @@ vec3 drop(vec3 col, vec2 uv, vec4 a, vec4 b) {
   // 顏料在水裡不均勻，而且跟著水流慢慢漂
   float body = 0.34 + 0.26 * gt(q * 1.9 + vec2(0.0, u_p[15].z), vec2(b.w + 31.0, b.w + 31.0 + u_p[14].z));
   float k = a.w * inside * clamp(body + rim * 0.55, 0.0, 1.0);
-  return col * mix(vec3(1.0), b.rgb, k);
-}
-
-void main() {
-  vec2 uv0 = v_uv;
-  vec3 col = u_p[0].rgb * (0.95 + 0.07 * g(uv0 * vec2(28.0, 16.0)));
-  // 水的擾動：緩慢流動的位移場（兩層雜訊各自漂移），顏料跟著水輕輕漂移、變形；紙紋不動
-  vec2 uv = v_wv;
-  col = drop(col, uv, u_p[1], u_p[2]);
-  col = drop(col, uv, u_p[3], u_p[4]);
-  col = drop(col, uv, u_p[5], u_p[6]);
-  col = drop(col, uv, u_p[7], u_p[8]);
-  col = drop(col, uv, u_p[9], u_p[10]);
-  col = drop(col, uv, u_p[11], u_p[12]);
-  vec2 v = uv0 - 0.5;
-  col *= 1.0 - 0.35 * dot(v, v);
-  col += (texture2D(u_noise, gl_FragCoord.xy / 64.0).rgb - 0.5) / 255.0;
-  gl_FragColor = vec4(col, 1.0);
+  gl_FragColor = vec4(mix(vec3(1.0), b.rgb, k), 1.0);
 }
 """
 }
