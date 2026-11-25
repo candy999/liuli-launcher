@@ -130,8 +130,9 @@ vec3 drop(vec3 col, vec2 uv, vec4 a, vec4 b) {
   float n = g(q * 1.3 + b.w);
   float r = a.z * (0.8 + 0.38 * n);
   float e = (dist - r) / a.z;
-  float inside = 1.0 - smoothstep(-0.03, 0.02, e);
-  float rim = exp(-(e + 0.04) * (e + 0.04) * 380.0);
+  // 邊緣與水痕要比 320×180 的一格寬很多（放大六倍），不然會變成鋸齒：柔邊約 0.08 個半徑、水痕約 0.07 個半徑寬
+  float inside = 1.0 - smoothstep(-0.05, 0.04, e);
+  float rim = exp(-(e + 0.06) * (e + 0.06) * 110.0);
   float body = 0.34 + 0.26 * g(q * 1.9 + b.w + 31.0);
   float k = a.w * inside * clamp(body + rim * 0.55, 0.0, 1.0);
   return col * mix(vec3(1.0), b.rgb, k);
