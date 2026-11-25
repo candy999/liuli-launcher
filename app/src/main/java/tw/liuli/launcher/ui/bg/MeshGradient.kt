@@ -89,11 +89,15 @@ internal object MeshGradient {
         }
     }
 
-    /** 把 GL 畫好的小圖拉伸到 w×h（雙線性；外面的 DitherScope 會在原生解析度再抖一次色）。 */
+    /**
+     * 把 GL 畫好的小圖拉伸到整個邏輯畫面（480×270；雙線性，外面的 DitherScope 會在原生解析度再抖一次色）。
+     * 不能用 createShader 傳進來的 size：那是畫布的實際大小（玻璃是 120×68），樣式卻是在縮放過的 480×270 座標裡畫——
+     * 以前照 size 拉伸，玻璃取到的是放大的左上角，顏色對不上背景。
+     */
     fun brush(bmp: android.graphics.Bitmap): Brush = object : ShaderBrush() {
         override fun createShader(size: Size): android.graphics.Shader {
             val s = android.graphics.BitmapShader(bmp, android.graphics.Shader.TileMode.CLAMP, android.graphics.Shader.TileMode.CLAMP)
-            s.setLocalMatrix(android.graphics.Matrix().apply { setScale(size.width / bmp.width, size.height / bmp.height) })
+            s.setLocalMatrix(android.graphics.Matrix().apply { setScale(BackgroundEngine.LOGICAL_W / bmp.width, BackgroundEngine.LOGICAL_H / bmp.height) })
             return s
         }
     }

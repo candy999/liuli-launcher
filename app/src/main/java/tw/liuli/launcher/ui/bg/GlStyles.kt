@@ -1,10 +1,10 @@
 package tw.liuli.launcher.ui.bg
 
 import androidx.compose.ui.graphics.Color
-import kotlin.math.sin
 
 /**
- * 第二批著色器樣式：墨流（Subframe ink-current，MIT）、漩渦（Paper Shaders swirl，Apache-2.0）、漸層百葉（琉璃自己寫）。
+ * 第二批著色器樣式：漩渦（Paper Shaders swirl，Apache-2.0）、漸層百葉（琉璃自己寫）。
+ * （墨流 Subframe ink-current 試過拿掉了：它好看在原生解析度的細墨邊，Mali-470 只付得起 480×270，放大後邊界變成一格一格的方塊。）
  * 共同規則見 [GlBackground]：時間在 CPU 端算好取模、低頻的座標變換放在頂點著色器（全精度），片段著色器只用 mediump、
  * 亂數一律查雜訊貼圖（u_noise：最近鄰，抖色用；u_noiseL：線性內插，當作 value noise 用）。
  */
@@ -21,74 +21,6 @@ internal object GlStyles {
 
     /** 共用的抖色：±½ 階雜訊（最近鄰貼圖）。 */
     private const val DITHER = "col += (texture2D(u_noise, gl_FragCoord.xy / 64.0).rgb - 0.5) / 255.0;"
-
-    // ───────────── 墨流（Subframe ink-current） ─────────────
-
-    /**
-     * 墨流：多層 value noise 互相扭曲，墨色以流線狀的邊界在水裡擴散；焦點附近的水會輕輕旋轉。
-     *
-     * 改寫自 Subframe 的 ink-current（Copyright (c) 2026 Subframe，MIT License，全文見 assets/licenses/subframe-LICENSE.txt）。改動：
-     * - fract(sin(x)·43719) 雜湊改成查 64×64 雜訊貼圖（線性內插＋smoothstep 座標，一次取樣就是一格 value noise）
-     * - 疊加的旋轉矩陣改成整數 (2,1;-1,2)：雜訊以 64 格為週期，時間漂移取模 64 後接得起來，不會跳
-     * - 顏色：原版是米白紙＋深藍墨；這裡改成主色系的「中間調紙＋深色墨＋亮色邊」（白字在上面才看得清楚），明暗關係不變
-     * - 細節多、每像素十六次取樣：480×270、每秒 10 格（流動本來就很慢，看不出一格一格）
-     * - 漩渦中心跟著焦點（原本是滑桿），焦點脈動時多轉一點
-     */
-    object Ink {
-        fun params(st: BgState, out: FloatArray) {
-            val t = st.at.toDouble()
-            out[0] = (0.8 * sin(t * .13)).toFloat() + .9f * st.pulse
-            out[1] = ((t * .018) % 64.0).toFloat()
-            out[2] = 16f / 9f
-            out[3] = 0f
-            out[4] = st.fx; out[5] = st.fy
-            put(out, 8, st.col(0f, .35f, .19f))
-            put(out, 12, st.col(-10f, .8f, .04f))
-            put(out, 16, st.col(20f, .9f, .34f))
-        }
-
-        const val SHADER = """
-precision mediump float;
-uniform sampler2D u_noise;
-uniform sampler2D u_noiseL;
-uniform vec4 u_p[10];
-varying vec2 v_uv;
-
-float g(vec2 p) {
-  vec2 i = floor(p);
-  vec2 f = fract(p);
-  f = f * f * (3.0 - 2.0 * f);
-  return texture2D(u_noiseL, (i + f + 0.5) / 64.0).r;
-}
-float L(vec2 p) {
-  mat2 m = mat2(2.0, -1.0, 1.0, 2.0);
-  float v = 0.54 * g(p);
-  p = m * p + 1.7; v += 0.254 * g(p);
-  p = m * p + 1.7; v += 0.119 * g(p);
-  p = m * p + 1.7; v += 0.056 * g(p);
-  return v;
-}
-void main() {
-  float asp = u_p[0].z;
-  vec2 p = (v_uv - 0.5) * vec2(asp, 1.0);
-  vec2 c = (u_p[1].xy - 0.5) * vec2(asp, 1.0);
-  vec2 d = p - c;
-  float a = u_p[0].x * exp(-dot(d, d) * 4.0);
-  float sa = sin(a);
-  float ca = cos(a);
-  vec2 q = c + vec2(ca * d.x - sa * d.y, sa * d.x + ca * d.y);
-  float n = L(q * 3.0 + vec2(u_p[0].y, 0.0));
-  q += vec2(L(q * 3.7 + 4.0), L(q * 3.3 + 11.0)) * 0.6;
-  float flow = L(q * 6.0);
-  float ink = smoothstep(0.48, 0.64, flow + 0.14 * sin(q.x * 5.0 + n * 8.0));
-  float edge = exp(-abs(flow - 0.49) * 65.0);
-  vec3 col = mix(u_p[2].rgb, u_p[3].rgb, ink);
-  col = mix(col, u_p[4].rgb, edge * 0.5);
-  """ + DITHER + """
-  gl_FragColor = vec4(col, 1.0);
-}
-"""
-    }
 
     // ───────────── 漩渦（Paper swirl） ─────────────
 

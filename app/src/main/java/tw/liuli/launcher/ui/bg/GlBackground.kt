@@ -63,11 +63,7 @@ object GlBackground {
     @Volatile var debugLevel = -1
 
     /** 起始檔位（全部從 480×270 開始，付不起再降）。 */
-    private fun startLevel(style: BgStyle) = 0
-
-    /** 每幾次要求才真的畫一張：墨流細節多、流動很慢，每秒 10 格就夠（GPU 只花三分之一）。 */
-    private fun every(style: BgStyle) = if (style == BgStyle.INK) 3 else 1
-    private var reqN = 0
+    private fun startLevel(@Suppress("UNUSED_PARAMETER") style: BgStyle) = 0
     private var measuredStyle: BgStyle? = null
     private val SIZES = arrayOf(intArrayOf(480, 270), intArrayOf(320, 180))
     private const val SLOW_MS = 20f
@@ -163,7 +159,6 @@ object GlBackground {
     /** 背景推進了一格：用目前的狀態排一張新圖（主執行緒呼叫）。 */
     fun request(style: BgStyle, st: BgState) {
         if (failed) return
-        if (every(style) > 1 && reqN++ % every(style) != 0 && currentStyle == style && current != null) return
         synchronized(lock) {
             style.glParams(st, pend)
             pendStyle = style
@@ -519,7 +514,6 @@ internal fun BgStyle.glVertex(): String = when (this) {
 /** 著色器樣式的片段著色器原始碼。 */
 internal fun BgStyle.glShader(): String = when (this) {
     BgStyle.MESH -> MeshGradient.SHADER
-    BgStyle.INK -> GlStyles.Ink.SHADER
     BgStyle.SWIRL -> GlStyles.Swirl.SHADER
     BgStyle.BLINDS -> GlStyles.Blinds.SHADER
     else -> error("不是著色器樣式：$id")
@@ -528,7 +522,6 @@ internal fun BgStyle.glShader(): String = when (this) {
 /** 著色器樣式的參數（主執行緒每格算一次：時間相位取模、色點軌跡、調色盤）。 */
 internal fun BgStyle.glParams(st: BgState, out: FloatArray) = when (this) {
     BgStyle.MESH -> MeshGradient.params(st, out)
-    BgStyle.INK -> GlStyles.Ink.params(st, out)
     BgStyle.SWIRL -> GlStyles.Swirl.params(st, out)
     BgStyle.BLINDS -> GlStyles.Blinds.params(st, out)
     else -> Unit
