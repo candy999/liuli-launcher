@@ -66,7 +66,7 @@ void main() {
 precision mediump float;
 uniform sampler2D u_noise;
 uniform sampler2D u_noiseL;
-uniform vec4 u_p[10];
+uniform vec4 u_p[12];
 varying vec2 v_p;
 float g(vec2 p) {
   vec2 i = floor(p);
@@ -117,7 +117,7 @@ void main() {
         const val SHADER = """
 precision mediump float;
 uniform sampler2D u_noise;
-uniform vec4 u_p[10];
+uniform vec4 u_p[12];
 varying vec2 v_uv;
 void main() {
   vec2 p = (v_uv - u_p[0].xy) * vec2(u_p[0].z, 1.0);

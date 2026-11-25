@@ -36,7 +36,8 @@ import java.nio.FloatBuffer
  */
 object GlBackground {
     private const val TAG = "LiuliGl"
-    const val PARAMS = 40
+    /** 樣式參數的數量（著色器裡是 vec4 u_p[PARAMS／4]；ES 2.0 片段著色器保證至少 16 個 vec4 uniform，這裡用 12 個）。 */
+    const val PARAMS = 48
 
     /** EGL 或著色器編譯失敗：改用 CPU 的備援畫法，不再嘗試。 */
     @Volatile var failed = false
@@ -515,6 +516,7 @@ internal fun BgStyle.glVertex(): String = when (this) {
 internal fun BgStyle.glShader(): String = when (this) {
     BgStyle.MESH -> MeshGradient.SHADER
     BgStyle.SWIRL -> GlStyles.Swirl.SHADER
+    BgStyle.WATERCOLOR -> Watercolor.SHADER
     BgStyle.BLINDS -> GlStyles.Blinds.SHADER
     else -> error("不是著色器樣式：$id")
 }
@@ -523,6 +525,7 @@ internal fun BgStyle.glShader(): String = when (this) {
 internal fun BgStyle.glParams(st: BgState, out: FloatArray) = when (this) {
     BgStyle.MESH -> MeshGradient.params(st, out)
     BgStyle.SWIRL -> GlStyles.Swirl.params(st, out)
+    BgStyle.WATERCOLOR -> Watercolor.params(st, out)
     BgStyle.BLINDS -> GlStyles.Blinds.params(st, out)
     else -> Unit
 }
