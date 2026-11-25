@@ -63,8 +63,12 @@ object GlBackground {
     private val levels = IntArray(BgStyle.entries.size) { -1 }
     @Volatile var debugLevel = -1
 
-    /** 起始檔位（全部從 480×270 開始，付不起再降）。 */
-    private fun startLevel(@Suppress("UNUSED_PARAMETER") style: BgStyle) = 0
+    /** 水彩暈染整片都是柔邊，320×180 放大看不出差別（海信 480×270 一格約 30ms）。 */
+    private fun startLevel(style: BgStyle) = if (style == BgStyle.WATERCOLOR) 1 else 0
+
+    /** 每幾次要求才真的畫一張：水彩暈開得很慢（剛滴下的前一兩秒以外），每秒 15 格就夠。 */
+    private fun every(style: BgStyle) = if (style == BgStyle.WATERCOLOR) 2 else 1
+    private var reqN = 0
     private var measuredStyle: BgStyle? = null
     private val SIZES = arrayOf(intArrayOf(480, 270), intArrayOf(320, 180))
     private const val SLOW_MS = 20f
@@ -160,6 +164,7 @@ object GlBackground {
     /** 背景推進了一格：用目前的狀態排一張新圖（主執行緒呼叫）。 */
     fun request(style: BgStyle, st: BgState) {
         if (failed) return
+        if (every(style) > 1 && reqN++ % every(style) != 0 && currentStyle == style && current != null) return
         synchronized(lock) {
             style.glParams(st, pend)
             pendStyle = style

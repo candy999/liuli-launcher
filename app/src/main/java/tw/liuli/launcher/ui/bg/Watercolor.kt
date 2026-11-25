@@ -11,6 +11,7 @@ import kotlin.math.roundToInt
  *
  * 畫法（全部是低頻、柔邊的運算，480×270 放大也不會有鋸齒）：
  * - 每一滴：半徑先快後慢地長大（1 − e^(−t/τ)，之後還會非常緩慢地蔓延），邊界用低頻雜訊扭成不規則的花瓣形
+ *   （雜訊座標跟著半徑縮放，暈開時形狀不變、只是變大）
  * - 顏料用「相乘」疊在紙上（顏料是濾光片：紙色 × 顏料的透光色），兩滴重疊的地方自然變深
  * - 水痕：顏料往邊緣堆積、乾掉後邊緣較深——邊緣附近加一圈寬而柔的深色，不是細線
  * - 內部有低頻的濃淡起伏（顏料不均勻）、紙張有淡淡的紋理
@@ -76,7 +77,8 @@ internal object Watercolor {
             nextAmbient = at + AMBIENT_EVERY + rnd.nextFloat() * 4f
         }
 
-        val paper = GlStyles.hsl(st, 32f, .22f, PAPER_L)
+        // 紙是固定的暖灰色（不跟著 App 主色變）：顏色只來自滴上去的顏料
+        val paper = androidx.compose.ui.graphics.Color.hsl(36f, .16f, PAPER_L)
         out[0] = paper.red; out[1] = paper.green; out[2] = paper.blue; out[3] = 16f / 9f
         for (i in 0 until N) {
             val age = at - birth[i]
@@ -122,15 +124,16 @@ float g(vec2 p) {
 vec3 drop(vec3 col, vec2 uv, vec4 a, vec4 b) {
   vec2 d = (uv - a.xy) * vec2(u_p[0].w, 1.0);
   float dist = length(d);
+  // 這一滴碰不到的像素（或已經淡掉）：直接跳過，省下雜訊取樣
+  if (a.w < 0.004 || dist > a.z * 1.45) return col;
   vec2 q = d / a.z;
-  float n = g(q * 1.6 + b.w);
-  float n2 = g(q * 3.4 + b.w + 17.0);
-  float r = a.z * (0.82 + 0.3 * n + 0.08 * n2);
+  float n = g(q * 1.3 + b.w);
+  float r = a.z * (0.8 + 0.38 * n);
   float e = (dist - r) / a.z;
-  float inside = 1.0 - smoothstep(-0.06, 0.05, e);
-  float rim = exp(-(e + 0.07) * (e + 0.07) * 90.0);
-  float body = 0.5 + 0.22 * g(q * 2.3 + b.w + 31.0) - 0.12 * (1.0 - smoothstep(-0.8, 0.0, e));
-  float k = a.w * clamp(inside * body + rim * 0.38, 0.0, 1.0);
+  float inside = 1.0 - smoothstep(-0.03, 0.02, e);
+  float rim = exp(-(e + 0.04) * (e + 0.04) * 380.0);
+  float body = 0.34 + 0.26 * g(q * 1.9 + b.w + 31.0);
+  float k = a.w * inside * clamp(body + rim * 0.55, 0.0, 1.0);
   return col * mix(vec3(1.0), b.rgb, k);
 }
 
