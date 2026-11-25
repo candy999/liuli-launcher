@@ -588,11 +588,15 @@ fun AppDrawer(
         }
     }
 
+    val drawerGlassHidden: () -> Boolean = remember { { !openNow.value && !shown } }
+
     // 滑入中：焦點效果直接到位（整塊抽屜是一張離屏圖，第一格的焦點彈簧會讓整張圖每格重畫）
     androidx.compose.runtime.CompositionLocalProvider(
         tw.liuli.launcher.ui.components.LocalFocusSnap provides { slide.value > 0.001f || asLayer },
         tw.liuli.launcher.ui.components.LocalTileShadow provides { 1f },
-        tw.liuli.launcher.ui.glass.LocalGlassHidden provides { false },
+        // 收起來的抽屜（透明度 0、一直擺著）：玻璃當成看不見——不然背景每換一次色，抽屜的玻璃就跟著重畫、重錄繪圖指令
+        // （海信實測：主畫面上背景在動時，每一格主執行緒都在重錄這一片 1840×976 的玻璃）
+        tw.liuli.launcher.ui.glass.LocalGlassHidden provides drawerGlassHidden,
     ) {
     Box(
         Modifier

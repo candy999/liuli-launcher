@@ -126,6 +126,7 @@ fun Modifier.liquidGlass(
                 if (tw.liuli.launcher.ui.bg.PerfProbe.noGlass) return@onDrawBehind
                 if (hidden()) return@onDrawBehind   // 先讀這個：看不到的時候不訂閱背景版本，背景怎麼變都不會被叫起來重畫
                 if (tw.liuli.launcher.ui.bg.UiTrace.enabled) tw.liuli.launcher.ui.bg.UiTrace.hit("glassDraw${size.width.toInt()}x${size.height.toInt()}")
+                val tq = System.nanoTime()
                 val v = backdrop.version() // 背景換色時跟著重烘
                 @Suppress("UNUSED_VARIABLE") val t = bake.tick // 烘好一張就重畫
                 val hl = highlight()
@@ -165,6 +166,7 @@ fun Modifier.liquidGlass(
                     it.nativeCanvas.drawPath(androidPath, rough)
                     drawPath(path, Color.White.copy(alpha = (tint + .05f).coerceIn(0f, 1f)))
                 }
+                tw.liuli.launcher.ui.bg.UiTrace.time("glass", System.nanoTime() - tq)
             }
         }
 }

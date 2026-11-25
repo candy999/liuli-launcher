@@ -158,11 +158,20 @@ object UiTrace {
     private var tPre = 0L
     private var what = ""
     fun hit(name: String) { if (enabled && android.os.Looper.myLooper() === android.os.Looper.getMainLooper()) counts[name] = (counts[name] ?: 0) + 1 }
+    /** 量測：主執行緒上某段繪圖花的時間（奈秒），uitrace:0 時印出每一項的總時間與平均。 */
+    private val times = java.util.TreeMap<String, LongArray>()
+    fun time(name: String, ns: Long) {
+        if (!enabled || android.os.Looper.myLooper() !== android.os.Looper.getMainLooper()) return
+        val a = times.getOrPut(name) { LongArray(2) }
+        a[0] += ns; a[1]++
+    }
     // 取樣：訊息跑超過 6ms 之後，每 3ms 看一次主執行緒停在哪（堆疊最上面 10 層），uitrace:0 時把次數最多的印出來
     private val stacks = HashMap<String, Int>()
     @Volatile private var running = false
     @Volatile private var kind = ""
     private fun dump() {
+        for ((k, a) in times) Log.i("LiuliUi", "time $k: total %.0fms, n=${a[1]}, avg %.2fms".format(a[0] / 1e6f, a[0] / 1e6f / a[1].coerceAtLeast(1)))
+        times.clear()
         val top = synchronized(stacks) { val l = stacks.entries.sortedByDescending { it.value }.take(40).map { it.value to it.key }; stacks.clear(); l }
         for ((n, k) in top) Log.i("LiuliUi", "stack x$n $k")
     }

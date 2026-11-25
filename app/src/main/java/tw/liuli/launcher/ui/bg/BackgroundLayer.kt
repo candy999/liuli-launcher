@@ -163,6 +163,7 @@ fun BackgroundLayer(engine: BackgroundEngine, blurred: () -> Float, modifier: Mo
                 // 以「原生 ÷ d」的精確比例縮放（不是進位後的 w×h），進位多出的一點點只是延伸畫面、會被裁掉
                 val sx = fullW / d.toFloat() / BackgroundEngine.LOGICAL_W
                 val sy = fullH / d.toFloat() / BackgroundEngine.LOGICAL_H
+                val tq = System.nanoTime()
                 scale(sx, sy, pivot = Offset.Zero) {
                     // 抖色噪點：實體螢幕上固定 2 像素一格（畫布是 ÷d，所以一格＝2／d 個畫布像素），跟著焦點平滑視差
                     drawStyle(
@@ -170,6 +171,7 @@ fun BackgroundLayer(engine: BackgroundEngine, blurred: () -> Float, modifier: Mo
                         skipFront = ridgeNative,
                     )
                 }
+                UiTrace.time("bg ${engine.style.id}", System.nanoTime() - tq)
                 // 設定面板開著時壓暗：畫在 ÷d 的小圖裡，成本只有全螢幕的 1／d²
                 if (engine.dim > 0f) drawRect(Color.Black, alpha = engine.dim)
             }
@@ -231,7 +233,9 @@ fun BackgroundLayer(engine: BackgroundEngine, blurred: () -> Float, modifier: Mo
             ) { scale(sx, sy, pivot = Offset.Zero) { galaxyFieldStars() } }
             Canvas(Modifier.fillMaxSize()) {
                 @Suppress("UNUSED_VARIABLE") val f = engine.frame
+                val tq = System.nanoTime()
                 scale(sx, sy, pivot = Offset.Zero) { galaxyBrightStars(engine.st) }
+                UiTrace.time("galaxyBright", System.nanoTime() - tq)
             }
         }
         // 子頁面的模糊桌布畫在背景圖層「外面」：淡入淡出時每格只多貼一張小圖，背景本身維持快取不用重畫
