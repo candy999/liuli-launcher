@@ -183,6 +183,35 @@ object GlBackground {
         ensureThread().post(render)
     }
 
+    /**
+     * 量測用（adb ACTION=glbench）：目前的樣式在離屏 pbuffer 畫 480×270、960×540、1920×1080 各 8 張（每張 glFinish），印出中位數。
+     * 平常量到的 GPU 時間混了「排在介面後面等」的時間，這個比較接近著色器本身的成本。
+     */
+    fun bench() {
+        ensureThread().post {
+            val style = workStyle ?: return@post
+            try {
+                val res = StringBuilder()
+                for (sz in arrayOf(intArrayOf(480, 270), intArrayOf(960, 540), intArrayOf(1920, 1080))) {
+                    ensureGl(sz[0], sz[1])
+                    if (!EGL14.eglMakeCurrent(dpy, surf, surf, ctx)) continue
+                    val prog = programs.getOrPut(style) { Program(style.glVertex(), style.glShader()) }
+                    pass(prog, sz[0], sz[1], false); GLES20.glFinish()
+                    val ts = LongArray(8)
+                    for (i in ts.indices) {
+                        val t0 = SystemClock.elapsedRealtimeNanos()
+                        pass(prog, sz[0], sz[1], false); GLES20.glFinish()
+                        ts[i] = SystemClock.elapsedRealtimeNanos() - t0
+                    }
+                    ts.sort()
+                    res.append(" ${sz[0]}x${sz[1]}=%.1fms".format(ts[3] / 1e6f))
+                }
+                ensureGl(BackgroundEngine.GLASS_W, BackgroundEngine.GLASS_H)
+                Log.i(TAG, "bench ${style.id}:$res")
+            } catch (t: Throwable) { Log.w(TAG, "bench", t) }
+        }
+    }
+
     /** 離開琉璃：GL 資源與輸出圖全部放掉，下一次要求時重建。 */
     fun release() {
         val h = handler ?: return
