@@ -63,9 +63,9 @@ object GlBackground {
     private val levels = IntArray(BgStyle.entries.size) { -1 }
     @Volatile var debugLevel = -1
 
-    /** 水彩暈染整片都是柔邊，320×180 放大看不出差別（海信 480×270 一格約 30ms）。 */
+    /** 起始檔位：重的樣式直接從 320×180 開始。水彩暈染在 320×180 邊緣會有細微的鋸齒，用 480×270（每秒只畫 15 格，海信一格約 23ms）。 */
     private fun startLevel(style: BgStyle) = when (style) {
-        BgStyle.WATERCOLOR, BgStyle.CURTAIN, BgStyle.SOFTAURORA -> 1   // 極光簾：三層、每層六次雜訊取樣；柔極光：三條帶、海信 480×270 要 60ms
+        BgStyle.CURTAIN, BgStyle.SOFTAURORA -> 1   // 極光簾：三層、每層六次雜訊取樣；柔極光：三條帶、海信 480×270 要 60ms
         else -> 0
     }
 
@@ -361,7 +361,8 @@ object GlBackground {
         val g = (if (direct) sumGpu else sumGpu + sumRead) / nFrames / 1e6f
         if (verbose || reports++ < 3) Log.i(TAG, "${style.id} ${w}x$h ${if (direct) "direct: gpu %.1fms + swap %.1fms, glass %.1fms" else "readback: gpu %.1fms + read %.1fms, -%.0f"}".format(sumGpu / nFrames / 1e6f, sumRead / nFrames / 1e6f, sumCopy / nFrames / 1e6f))
         nFrames = 0; sumGpu = 0; sumRead = 0; sumCopy = 0
-        if (debugLevel < 0 && lv == 0 && g > SLOW_MS) {
+        // 每兩格才畫一張的樣式（每秒 15 格），一張可以花比較久：門檻跟著放寬（GPU 佔用的比例一樣）
+        if (debugLevel < 0 && lv == 0 && g > SLOW_MS * kotlin.math.sqrt(every(style).toFloat())) {
             levels[style.ordinal] = 1
             warm = 10
             Log.i(TAG, "太慢（%.1fms），改用 ${SIZES[1][0]}x${SIZES[1][1]}".format(g))
