@@ -194,6 +194,7 @@ private object BakeStats {
     private var px = 0L
     private val why = HashMap<String, Int>()
     private var since = 0L
+    @Volatile var ns = 0L
     fun note(kind: Int, pixels: Int, reason: String? = null) {
         if (!tw.liuli.launcher.ui.bg.GlBackground.verbose) return
         if (since == 0L) since = android.os.SystemClock.uptimeMillis()
@@ -201,8 +202,8 @@ private object BakeStats {
         if (reason != null) why[reason] = (why[reason] ?: 0) + 1
         if (n.sum() >= 200) {
             val s = (android.os.SystemClock.uptimeMillis() - since) / 1000f
-            android.util.Log.i("LiuliGlass", "%.1fs: skip ${n[0]} color ${n[1]} full ${n[2]}, %.0fk px/s, why $why".format(s, px / s / 1000f))
-            n.fill(0); px = 0; why.clear(); since = 0L
+            android.util.Log.i("LiuliGlass", "%.1fs: skip ${n[0]} color ${n[1]} full ${n[2]}, %.0fk px/s, cpu %.0fms/s, why $why".format(s, px / s / 1000f, ns / 1e6f / s))
+            n.fill(0); px = 0; why.clear(); since = 0L; ns = 0L
         }
     }
 }
@@ -340,8 +341,10 @@ private class GlassBake(private val backdrop: GlassBackdrop, private val edge: B
             }
             BakeStats.note(if (reuse) 1 else 2, bw * bh, if (reuse) null else whyNew(r))
             withContext(Dispatchers.Default) {
+                val t0 = android.os.SystemClock.currentThreadTimeMillis()
                 val g = if (reuse) g0!! else Geo(bw * bh).also { buildGeo(it, bw, bh, nq, r, sx, sy, sw, sh, edge) }
                 shade(out, g, bw, bh)
+                BakeStats.ns += (android.os.SystemClock.currentThreadTimeMillis() - t0) * 1_000_000L
                 if (!reuse) { geo = g; geoFor = r; geoQ = nq; geoSw = sw; geoSh = sh }
             }
             rememberBackdrop()
