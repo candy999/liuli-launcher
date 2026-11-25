@@ -14,12 +14,13 @@ import kotlin.math.sqrt
  * 一小格真的流體模擬（Jos Stam 的 stable fluids：半拉格朗日平流＋Jacobi 壓力投影），焦點移動時沿著移動方向推一把、
  * 注入顏料；焦點不動時有一個看不見的指標慢慢繞圈，讓流體一直輕輕流動。GPU 只負責上色：依流速在三個顏色之間取色。
  *
- * 為什麼在 CPU 算：流體要好幾張浮點貼圖來回渲染，Mali-470 沒有浮點渲染目標；96×54 的格子在 CPU 上一步不到 1 毫秒。
- * 模擬在 GL 執行緒推進（[simulate]；主執行緒只交出焦點位置與時鐘），結果寫成一張 96×54 的 RGBA 小圖、上傳成貼圖。
+ * 為什麼在 CPU 算：流體要好幾張浮點貼圖來回渲染，Mali-470 沒有浮點渲染目標；80×45 的格子在 CPU 上一步不到 1 毫秒。
+ * 模擬在 GL 執行緒推進（[simulate]；主執行緒只交出焦點位置與時鐘），結果寫成一張 80×45 的 RGBA 小圖、上傳成貼圖。
  */
 internal object LiquidEther {
-    const val W = 96
-    const val H = 54
+    // 格子：海信上 80×45、14 次壓力迭代一步要 12ms（GL 執行緒 37%）；流體本來就是低頻的，80×45、10 次看不出差別
+    const val W = 80
+    const val H = 45
     private const val N = W * H
     private var u = FloatArray(N); private var v = FloatArray(N)
     private var u0 = FloatArray(N); private var v0 = FloatArray(N)
@@ -30,7 +31,7 @@ internal object LiquidEther {
     private var lastFx = Float.NaN
     private var lastFy = Float.NaN
 
-    /** GL 執行緒算好、上傳用的小圖（96×54 RGBA：R＝流速、G＝顏料濃度）。 */
+    /** GL 執行緒算好、上傳用的小圖（80×45 RGBA：R＝流速、G＝顏料濃度）。 */
     val glData: ByteBuffer = ByteBuffer.allocateDirect(N * 4).order(ByteOrder.nativeOrder())
 
     // 主執行緒每格寫入的輸入（焦點位置、動畫時鐘），在 GlBackground 的鎖裡交給 GL 執行緒
@@ -75,7 +76,7 @@ internal object LiquidEther {
             div[i] = -.5f * (u[i + 1] - u[i - 1] + v[i + W] - v[i - W])
             p[i] = 0f
         }
-        repeat(14) {
+        repeat(10) {
             for (y in 1 until H - 1) for (x in 1 until W - 1) {
                 val i = idx(x, y)
                 p[i] = (div[i] + p[i - 1] + p[i + 1] + p[i - W] + p[i + W]) * .25f
