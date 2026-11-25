@@ -48,7 +48,7 @@ varying vec2 v_uv;
         fun params(st: BgState, out: FloatArray) {
             head(st, out)
             val t = st.at * .1                          // Paper：0.2 × u_time × speed 0.5
-            GlBackground.putTimes(out, .3 * t, .32 * t)
+            out[4] = wrap(.3 * t, 64.0); out[5] = wrap(.32 * t, 64.0)
             put(out, 8, c(st, -150f, .6f, .45f))
             put(out, 12, c(st, 10f, .9f, .78f))
             put(out, 16, c(st, 0f, .95f, .58f))
@@ -56,7 +56,42 @@ varying vec2 v_uv;
             put(out, 24, c(st, 0f, .25f, .8f))
         }
 
+        /**
+         * 雜訊在頂點著色器算（全精度；網格 64×36，雜訊很低頻，線性內插的誤差不到 0.2 個像素），片段著色器只分色階。
+         * 以前在片段著色器（半精度）算：兩層雜訊疊起來再放大五倍分色階，誤差也跟著放大，色塊邊緣一根根地抖（毛邊）。
+         * 頂點著色器不能讀貼圖（Mali-400 系列），梯度用雜湊算（全精度下 fract(sin) 沒問題）。
+         */
+        const val VERTEX = """
+attribute vec2 a_pos;
+uniform float u_fy;
+uniform vec4 u_w;
+uniform vec4 u_v1;
+varying vec2 v_uv;
+varying float v_n;
+vec2 hg(vec2 i) {
+  float a = fract(sin(dot(i, vec2(127.1, 311.7))) * 43758.5453) * 6.2831853;
+  return vec2(cos(a), sin(a));
+}
+float gnv(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = p - i;
+  vec2 u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+  float a = dot(hg(i), f);
+  float b = dot(hg(i + vec2(1.0, 0.0)), f - vec2(1.0, 0.0));
+  float c = dot(hg(i + vec2(0.0, 1.0)), f - vec2(0.0, 1.0));
+  float d = dot(hg(i + vec2(1.0, 1.0)), f - vec2(1.0, 1.0));
+  return 1.45 * mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
+void main() {
+  v_uv = a_pos * 0.5 + 0.5;
+  vec2 s = (v_uv - 0.5) * vec2(u_w.x, 1.0) * 0.75;
+  v_n = 0.5 * gnv(s - vec2(0.0, u_v1.x)) + 0.5 * gnv(2.0 * s + vec2(0.0, u_v1.y));
+  gl_Position = vec4(a_pos.x, a_pos.y * u_fy, 0.0, 1.0);
+}
+"""
+
         const val SHADER = HEAD + """
+varying float v_n;
 float ss(float m) {
   float st = floor(m * 2.0) / 2.0;
   float f = m * 2.0 - floor(m * 2.0);
@@ -65,9 +100,7 @@ float ss(float m) {
   return st + smoothstep(0.5 - hw, 0.5 + hw, f) / 2.0;
 }
 void main() {
-  vec2 s = (v_uv - 0.5) * vec2(u_p[0].x, 1.0) * 0.75;
-  float n = 0.5 * gnt(s - vec2(0.0, u_p[15].x), vec2(0.0, -u_p[14].x)) + 0.5 * gnt(2.0 * s + vec2(0.0, u_p[15].y), vec2(0.0, u_p[14].y));
-  float shape = 0.5 + 0.5 * n;
+  float shape = 0.5 + 0.5 * v_n;
   float mixer = (shape - 0.1) * 5.0;
   vec3 col = u_p[2].rgb;
   col = mix(col, u_p[3].rgb, ss(clamp(mixer, 0.0, 1.0)));

@@ -416,7 +416,7 @@ object GlBackground {
         nFrames = 0; sumGpu = 0; sumRead = 0; sumCopy = 0
         // 每兩格才畫一張的樣式（每秒 15 格），一張可以花比較久：門檻跟著放寬（GPU 佔用的比例一樣）。
         // 要連續三窗（約 12 秒）都慢才降：冷啟動、開抽屜那幾秒 GPU 被介面佔住，量到的會暫時偏高（海信上網格漸層曾因此被永久降成 320×180）
-        val slow = g > SLOW_MS * kotlin.math.sqrt(every(style).toFloat())
+        val slow = g > (if (every(style) > 1) SLOW_MS * 2f else SLOW_MS)
         slowWins = if (slow) slowWins + 1 else 0
         if (debugLevel < 0 && lv < SIZES.size - 1 && lv < startLevel(style) + 2 && slowWins >= 3) {
             slowWins = 0
@@ -466,7 +466,7 @@ object GlBackground {
 
     private fun initResources() {
         // 全螢幕網格（不是一個四邊形）：低頻的座標扭曲、漩渦放在頂點著色器算（Mali-470 的頂點處理器是全精度，
-        // 而且只有 33×19 個頂點），片段著色器拿內插好的座標，每個像素省下所有三角函數
+        // 而且只有 65×37 個頂點），片段著色器拿內插好的座標，每個像素省下所有三角函數
         val g = ByteBuffer.allocateDirect((GRID_X + 1) * (GRID_Y + 1) * 2 * 4).order(ByteOrder.nativeOrder()).asFloatBuffer()
         for (j in 0..GRID_Y) for (i in 0..GRID_X) { g.put(i * 2f / GRID_X - 1f); g.put(j * 2f / GRID_Y - 1f) }
         g.position(0)
@@ -542,8 +542,9 @@ object GlBackground {
         surfW = 0; surfH = 0; warm = 0; nFrames = 0; sumGpu = 0; sumCopy = 0
     }
 
-    private const val GRID_X = 32
-    private const val GRID_Y = 18
+    // 64×36：頂點著色器裡算的低頻量（色塊雜訊）線性內插的誤差要小到看不出折角
+    private const val GRID_X = 64
+    private const val GRID_Y = 36
 
     /**
      * 一個著色器樣式：全螢幕網格＋頂點／片段著色器。uniform：u_res（像素）、u_noise（雜訊貼圖）、
@@ -671,6 +672,7 @@ void main() { v_uv = a_pos * 0.5 + 0.5; gl_Position = vec4(a_pos.x, a_pos.y * u_
 /** 著色器樣式的頂點著色器。 */
 internal fun BgStyle.glVertex(): String = when (this) {
     BgStyle.SWIRL -> GlStyles.Swirl.VERTEX
+    BgStyle.SIMPLEX -> GlStyles2.Simplex.VERTEX
     else -> GlBackground.VERTEX
 }
 

@@ -95,7 +95,7 @@ void main() {
   float twist = 3.0 * u_p[0].y;
   float shape = fract(pow(l, -twist) + atan(v_p.y, v_p.x) * 0.63661977 + u_p[0].x);
   shape = 1.0 - abs(2.0 * shape - 1.0);
-  shape += 0.2 * (2.0 * g(v_p * 2.4 + 7.0) - 1.0);
+  shape += 0.2 * (2.0 * gt(v_p * 2.4, vec2(7.0)) - 1.0);
   float lt = pow(l, twist);
   shape *= smoothstep(0.2, 0.2 + 0.8 * u_p[0].z, lt);
   float mixer = shape * 3.0;
