@@ -104,6 +104,7 @@ internal object MeshGradient {
     const val VERTEX = """
 attribute vec2 a_pos;
 uniform vec4 u_w;
+uniform float u_fy;
 varying vec2 v_r;
 
 vec2 rot(vec2 v, float a) {
@@ -130,7 +131,7 @@ void main() {
   uv.y += dist * center * 0.5 * cos(t + 4.0 * sx);
 
   v_r = rot(uv - 0.5, -3.0 * u_w.z * radius) + 0.5;
-  gl_Position = vec4(a_pos, 0.0, 1.0);
+  gl_Position = vec4(a_pos.x, a_pos.y * u_fy, 0.0, 1.0);
 }
 """
 

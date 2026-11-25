@@ -132,7 +132,19 @@ fun BackgroundLayer(engine: BackgroundEngine, blurred: () -> Float, modifier: Mo
         // 山稜：小圖只畫到天空最低點（再往下一定被原生解析度的山蓋住），合成時少貼一大塊
         val h = if (ridgeNative) ((YushanRidge.skyBottom / BackgroundEngine.LOGICAL_H * fullH).toInt() + d - 1) / d
             else (fullH + d - 1) / d
-        Box(
+        if (engine.style.gl && !GlBackground.failed && GlBackground.directOk) {
+            // 著色器樣式：GL 直接畫進 TextureView（低解析度的緩衝，系統合成時雙線性放大），不經過 CPU
+            if (!GlBackground.directShown) Canvas(Modifier.fillMaxSize()) {
+                // 第一張還沒到：CPU 備援墊著（不然切換樣式那一下會閃黑）
+                @Suppress("UNUSED_VARIABLE") val f = engine.frame
+                scale(fullW / BackgroundEngine.LOGICAL_W, fullH / BackgroundEngine.LOGICAL_H, pivot = Offset.Zero) { drawStyle(engine.style, engine.st) }
+            }
+            androidx.compose.ui.viewinterop.AndroidView(
+                factory = { ctx -> android.view.TextureView(ctx).apply { isOpaque = false; surfaceTextureListener = GlBackground.textureListener } },
+                modifier = Modifier.fillMaxSize(),
+            )
+            if (engine.dim > 0f) Canvas(Modifier.fillMaxSize()) { drawRect(Color.Black, alpha = engine.dim) }
+        } else Box(
             Modifier
                 .layout { measurable, _ ->
                     val p = measurable.measure(Constraints.fixed(w, h))

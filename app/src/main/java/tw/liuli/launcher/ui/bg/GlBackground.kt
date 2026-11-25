@@ -85,6 +85,12 @@ object GlBackground {
     private val ring = arrayOfNulls<Bitmap>(3)
     private var ringI = 0
     private val work = FloatArray(PARAMS)
+    // 直接顯示（TextureView）：GL 畫進它的 SurfaceTexture，系統合成時當貼圖用——不用讀回 CPU、也不用再上傳一次
+    private var tex: android.graphics.SurfaceTexture? = null
+    private var texSurface: android.view.Surface? = null
+    private var win: EGLSurface = EGL14.EGL_NO_SURFACE
+    private var winLevel = -1
+    private var windowOk = true
     private var workStyle: BgStyle? = null
 
     // 量測
@@ -95,6 +101,34 @@ object GlBackground {
     private var warm = 0
 
     @Volatile private var releasePending = false
+
+    /**
+     * 直接顯示可以用（EGL 設定支援 window surface，而且還沒失敗過）：全螢幕背景放一個 TextureView 讓 GL 直接畫進去。
+     * 不行就退回「畫小圖、讀回、當點陣圖貼」。
+     */
+    @Volatile var directOk = true
+        private set
+
+    /** TextureView 已經收到第一張（主執行緒寫入；在那之前背景先用 CPU 備援墊著）。 */
+    var directShown by androidx.compose.runtime.mutableStateOf(false)
+        private set
+
+    /** 給 TextureView 用的監聽器：SurfaceTexture 準備好就交給 GL 執行緒，銷毀時等 GL 放掉才回傳。 */
+    val textureListener = object : android.view.TextureView.SurfaceTextureListener {
+        override fun onSurfaceTextureAvailable(st: android.graphics.SurfaceTexture, w: Int, h: Int) {
+            ensureThread().post { destroyWindow(); tex = st; winLevel = -1 }
+        }
+        override fun onSurfaceTextureDestroyed(st: android.graphics.SurfaceTexture): Boolean {
+            directShown = false
+            val h = handler ?: return true
+            val latch = java.util.concurrent.CountDownLatch(1)
+            h.post { if (tex === st) { destroyWindow(); tex = null }; latch.countDown() }
+            latch.await(500, java.util.concurrent.TimeUnit.MILLISECONDS)
+            return true
+        }
+        override fun onSurfaceTextureSizeChanged(st: android.graphics.SurfaceTexture, w: Int, h: Int) {}
+        override fun onSurfaceTextureUpdated(st: android.graphics.SurfaceTexture) {}
+    }
 
     /** 這個樣式付得出畫面了（第一張圖好了，或 GL 失敗改用 CPU 備援）。會順便觸發第一張。 */
     fun ready(style: BgStyle, st: BgState): Boolean {
@@ -145,9 +179,11 @@ object GlBackground {
         }
         val style = workStyle
         var out: Bitmap? = null
+        var shown = false
         if (style != null) {
             try {
                 out = draw(style)
+                shown = win != EGL14.EGL_NO_SURFACE
             } catch (t: Throwable) {
                 Log.w(TAG, "GL 背景失敗，改用 CPU 畫法", t)
                 failed = true
@@ -156,33 +192,81 @@ object GlBackground {
         }
         main.post {
             if (out != null) { current = out; version++ }
+            if (shown && !directShown) directShown = true
             if (failed) version++
             val again = synchronized(lock) { if (hasPending && !failed) true else { inFlight = false; false } }
             if (again) handler?.post(render)
         }
     }
 
-    private fun draw(style: BgStyle): Bitmap? {
-        val lv = if (debugLevel in SIZES.indices) debugLevel else level
-        val w = SIZES[lv][0]
-        val h = SIZES[lv][1]
-        if (!ensureGl(w, h)) return null
-        val prog = programs.getOrPut(style) { Program(style.glVertex(), style.glShader()) }
-        val t0 = SystemClock.elapsedRealtimeNanos()
+    private fun pass(prog: Program, w: Int, h: Int, flipY: Boolean) {
         GLES20.glViewport(0, 0, w, h)
         GLES20.glUseProgram(prog.id)
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, noiseTex)
-        prog.bind(w, h, work, grid!!)
+        prog.bind(w, h, work, grid!!, flipY)
         GLES20.glDrawElements(GLES20.GL_TRIANGLES, GRID_X * GRID_Y * 6, GLES20.GL_UNSIGNED_SHORT, gridIdx!!)
-        val buf = readBuf.let { if (it == null || it.capacity() < w * h * 4) ByteBuffer.allocateDirect(w * h * 4).order(ByteOrder.nativeOrder()).also { b -> readBuf = b } else it }
-        buf.clear()
+    }
+
+    private fun draw(style: BgStyle): Bitmap? {
+        val lv = if (debugLevel in SIZES.indices) debugLevel else level
+        var w = SIZES[lv][0]
+        var h = SIZES[lv][1]
+        val t = tex
+        if (t != null && windowOk) {
+            // 直接顯示：全螢幕那張畫進 TextureView（交換緩衝），玻璃另外畫一張 120×68 的小圖讀回
+            ensureGl(BackgroundEngine.GLASS_W, BackgroundEngine.GLASS_H)
+            if (win == EGL14.EGL_NO_SURFACE) {
+                val sf = android.view.Surface(t)
+                win = EGL14.eglCreateWindowSurface(dpy, config, sf, intArrayOf(EGL14.EGL_NONE), 0)
+                if (win == EGL14.EGL_NO_SURFACE) {
+                    sf.release()
+                    windowOk = false; directOk = false
+                    Log.w(TAG, "eglCreateWindowSurface 0x${Integer.toHexString(EGL14.eglGetError())}，改用讀回")
+                } else texSurface = sf
+            }
+            if (win != EGL14.EGL_NO_SURFACE) {
+                if (winLevel != lv) { t.setDefaultBufferSize(w, h); winLevel = lv }
+                if (!EGL14.eglMakeCurrent(dpy, win, win, ctx)) throw IllegalStateException("eglMakeCurrent(window)")
+                EGL14.eglSwapInterval(dpy, 0)
+                val prog = programs.getOrPut(style) { Program(style.glVertex(), style.glShader()) }
+                val t0 = SystemClock.elapsedRealtimeNanos()
+                pass(prog, w, h, flipY = true)
+                GLES20.glFinish()
+                val tg = SystemClock.elapsedRealtimeNanos()
+                if (!EGL14.eglSwapBuffers(dpy, win)) {
+                    Log.w(TAG, "eglSwapBuffers 0x${Integer.toHexString(EGL14.eglGetError())}")
+                    destroyWindow()
+                }
+                val t1 = SystemClock.elapsedRealtimeNanos()
+                if (!EGL14.eglMakeCurrent(dpy, surf, surf, ctx)) throw IllegalStateException("eglMakeCurrent(pbuffer)")
+                w = BackgroundEngine.GLASS_W; h = BackgroundEngine.GLASS_H
+                pass(prog, w, h, flipY = false)
+                val bmp = readBack(w, h)
+                measure(style, lv, SIZES[lv][0], SIZES[lv][1], tg - t0, t1 - tg, SystemClock.elapsedRealtimeNanos() - t1, direct = true)
+                return bmp
+            }
+        }
+        if (!ensureGl(w, h)) return null
+        if (!EGL14.eglMakeCurrent(dpy, surf, surf, ctx)) throw IllegalStateException("eglMakeCurrent")
+        val prog = programs.getOrPut(style) { Program(style.glVertex(), style.glShader()) }
+        val t0 = SystemClock.elapsedRealtimeNanos()
+        pass(prog, w, h, flipY = false)
         GLES20.glFinish()
         val tg = SystemClock.elapsedRealtimeNanos()
+        val bmp = readBack(w, h)
+        val t1 = SystemClock.elapsedRealtimeNanos()
+        measure(style, lv, w, h, tg - t0, t1 - tg, 0L, direct = false)
+        return bmp
+    }
+
+    /** 讀回目前的 pbuffer（w×h）到輪替的點陣圖。gl_FragCoord.y＝0 的那一列先讀出來，正好是圖的第一列（y 往下），不用翻轉。 */
+    private fun readBack(w: Int, h: Int): Bitmap {
+        val buf = readBuf.let { if (it == null || it.capacity() < w * h * 4) ByteBuffer.allocateDirect(w * h * 4).order(ByteOrder.nativeOrder()).also { b -> readBuf = b } else it }
+        buf.clear()
         GLES20.glReadPixels(0, 0, w, h, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buf)
         val err = GLES20.glGetError()
         if (err != GLES20.GL_NO_ERROR) throw IllegalStateException("glReadPixels 0x${Integer.toHexString(err)}")
-        val t1 = SystemClock.elapsedRealtimeNanos()
         ringI = (ringI + 1) % ring.size
         var bmp = ring[ringI]
         if (bmp == null || bmp.width != w || bmp.height != h) {
@@ -190,19 +274,27 @@ object GlBackground {
             ring[ringI] = bmp
         }
         buf.rewind()
-        // gl_FragCoord.y＝0 的那一列先讀出來，正好是圖的第一列（著色器裡 y 往下＝畫面往下），不用翻轉
         bmp!!.copyPixelsFromBuffer(buf)
-        val t2 = SystemClock.elapsedRealtimeNanos()
-        measure(style, lv, w, h, tg - t0, t1 - tg, t2 - t1)
         return bmp
     }
 
-    private fun measure(style: BgStyle, lv: Int, w: Int, h: Int, gpu: Long, read: Long, copy: Long) {
+    private fun destroyWindow() {
+        if (win != EGL14.EGL_NO_SURFACE && dpy != EGL14.EGL_NO_DISPLAY) {
+            EGL14.eglMakeCurrent(dpy, surf, surf, ctx)
+            EGL14.eglDestroySurface(dpy, win)
+        }
+        win = EGL14.EGL_NO_SURFACE
+        texSurface?.release(); texSurface = null
+        winLevel = -1
+    }
+
+    /** [read]：讀回（直接顯示時＝交換緩衝）；[copy]：直接顯示時＝玻璃小圖（畫＋讀回）。 */
+    private fun measure(style: BgStyle, lv: Int, w: Int, h: Int, gpu: Long, read: Long, copy: Long, direct: Boolean) {
         if (warm < 20) { warm++; return } // 剛建好 context、編譯著色器的前幾格特別慢
         sumGpu += gpu; sumRead += read; sumCopy += copy
         if (++nFrames < 60) return
-        val g = (sumGpu + sumRead) / nFrames / 1e6f
-        Log.i(TAG, "${style.id} ${w}x$h: gpu %.1fms + read %.1fms, copy %.1fms".format(sumGpu / nFrames / 1e6f, sumRead / nFrames / 1e6f, sumCopy / nFrames / 1e6f))
+        val g = (if (direct) sumGpu else sumGpu + sumRead) / nFrames / 1e6f
+        Log.i(TAG, "${style.id} ${w}x$h ${if (direct) "direct: gpu %.1fms + swap %.1fms, glass %.1fms" else "readback: gpu %.1fms + read %.1fms, -%.0f"}".format(sumGpu / nFrames / 1e6f, sumRead / nFrames / 1e6f, sumCopy / nFrames / 1e6f))
         nFrames = 0; sumGpu = 0; sumRead = 0; sumCopy = 0
         if (debugLevel < 0 && lv == 0 && g > SLOW_MS) {
             level = 1
@@ -218,7 +310,9 @@ object GlBackground {
             dpy = EGL14.eglGetDisplay(EGL14.EGL_DEFAULT_DISPLAY)
             val ver = IntArray(2)
             if (dpy == EGL14.EGL_NO_DISPLAY || !EGL14.eglInitialize(dpy, ver, 0, ver, 1)) throw IllegalStateException("eglInitialize")
-            config = chooseConfig(8) ?: chooseConfig(0) ?: throw IllegalStateException("eglChooseConfig")
+            config = chooseConfig(8, true) ?: chooseConfig(0, true)
+            if (config == null) { windowOk = false; directOk = false }
+            config = config ?: chooseConfig(8, false) ?: chooseConfig(0, false) ?: throw IllegalStateException("eglChooseConfig")
             ctx = EGL14.eglCreateContext(dpy, config, EGL14.EGL_NO_CONTEXT, intArrayOf(EGL14.EGL_CONTEXT_CLIENT_VERSION, 2, EGL14.EGL_NONE), 0)
             if (ctx == EGL14.EGL_NO_CONTEXT) throw IllegalStateException("eglCreateContext 0x${Integer.toHexString(EGL14.eglGetError())}")
             surfW = 0; surfH = 0
@@ -237,10 +331,10 @@ object GlBackground {
         return true
     }
 
-    private fun chooseConfig(alpha: Int): EGLConfig? {
+    private fun chooseConfig(alpha: Int, window: Boolean): EGLConfig? {
         val attrs = intArrayOf(
             EGL14.EGL_RED_SIZE, 8, EGL14.EGL_GREEN_SIZE, 8, EGL14.EGL_BLUE_SIZE, 8, EGL14.EGL_ALPHA_SIZE, alpha,
-            EGL14.EGL_RENDERABLE_TYPE, EGL14.EGL_OPENGL_ES2_BIT, EGL14.EGL_SURFACE_TYPE, EGL14.EGL_PBUFFER_BIT, EGL14.EGL_NONE,
+            EGL14.EGL_RENDERABLE_TYPE, EGL14.EGL_OPENGL_ES2_BIT, EGL14.EGL_SURFACE_TYPE, EGL14.EGL_PBUFFER_BIT or (if (window) EGL14.EGL_WINDOW_BIT else 0), EGL14.EGL_NONE,
         )
         val out = arrayOfNulls<EGLConfig>(1)
         val n = IntArray(1)
@@ -287,6 +381,7 @@ object GlBackground {
     }
 
     private fun destroyGl() {
+        destroyWindow()
         programs.clear()
         noiseTex = 0
         readBuf = null
@@ -314,6 +409,7 @@ object GlBackground {
         private val uNoise: Int
         private val uP: Int
         private val uW: Int
+        private val uFy: Int
 
         init {
             val vs = compile(GLES20.GL_VERTEX_SHADER, vert)
@@ -330,10 +426,13 @@ object GlBackground {
             uNoise = GLES20.glGetUniformLocation(id, "u_noise")
             uP = GLES20.glGetUniformLocation(id, "u_p")
             uW = GLES20.glGetUniformLocation(id, "u_w")
+            uFy = GLES20.glGetUniformLocation(id, "u_fy")
         }
 
-        fun bind(w: Int, h: Int, p: FloatArray, quad: FloatBuffer) {
+        fun bind(w: Int, h: Int, p: FloatArray, quad: FloatBuffer, flipY: Boolean) {
             GLES20.glUniform2f(uRes, w.toFloat(), h.toFloat())
+            // 直接顯示時畫面的第一列在上面（GL 的 y＝0 在下面）：頂點上下翻轉；讀回時本來就對了
+            if (uFy >= 0) GLES20.glUniform1f(uFy, if (flipY) -1f else 1f)
             if (uNoise >= 0) GLES20.glUniform1i(uNoise, 0)
             // 參數以 vec4 陣列傳入（PARAMS／4 個），著色器裡用常數索引取用
             if (uP >= 0) GLES20.glUniform4fv(uP, PARAMS / 4, p, 0)
@@ -356,8 +455,9 @@ object GlBackground {
     /** 預設的頂點著色器：v_uv＝畫面座標 0～1（y 往下，和讀回的圖一致）。 */
     const val VERTEX = """
 attribute vec2 a_pos;
+uniform float u_fy;
 varying vec2 v_uv;
-void main() { v_uv = a_pos * 0.5 + 0.5; gl_Position = vec4(a_pos, 0.0, 1.0); }
+void main() { v_uv = a_pos * 0.5 + 0.5; gl_Position = vec4(a_pos.x, a_pos.y * u_fy, 0.0, 1.0); }
 """
 }
 
