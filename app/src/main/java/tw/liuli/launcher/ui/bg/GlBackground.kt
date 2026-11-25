@@ -133,6 +133,9 @@ object GlBackground {
     private var winLevel = -1
     private var windowOk = true
     private var workStyle: BgStyle? = null
+    private var pendBusy = false
+    private var workBusy = false
+    private var lastGlassNs = 0L
 
     // 量測
     private var nFrames = 0
@@ -188,12 +191,16 @@ object GlBackground {
         return current != null
     }
 
-    /** 背景推進了一格：用目前的狀態排一張新圖（主執行緒呼叫）。 */
-    fun request(style: BgStyle, st: BgState) {
+    /**
+     * 背景推進了一格：用目前的狀態排一張新圖（主執行緒呼叫）。
+     * [busy]＝操作中或面板／抽屜開著：重的樣式降一檔解析度、更新率不變（和 CPU 樣式的「讓路」一樣：降解析度換流暢，不降格數）。
+     */
+    fun request(style: BgStyle, st: BgState, busy: Boolean = false) {
         if (failedFor(style)) return
         if (every(style) > 1 && reqN++ % every(style) != 0 && currentStyle == style && current != null) return
         synchronized(lock) {
             style.glParams(st, pend)
+            pendBusy = busy && heavy
             pendStyle = style
             hasPending = true
             if (inFlight) return
@@ -257,6 +264,7 @@ object GlBackground {
             pend.copyInto(work)
             if (pendStyle == BgStyle.LIQUID) LiquidEther.snapshot()
             workStyle = pendStyle
+            workBusy = pendBusy
             hasPending = false
         }
         val style = workStyle
@@ -352,7 +360,9 @@ object GlBackground {
 
     private fun draw(style: BgStyle): Bitmap? {
         if (levels[style.ordinal] < 0) levels[style.ordinal] = startLevel(style)
-        val lv = if (debugLevel in SIZES.indices) debugLevel else levels[style.ordinal]
+        // 操作中（重的樣式）：降一檔，每秒 30 格不變；操作結束下一張就回到原本的檔位
+        val lv = if (debugLevel in SIZES.indices) debugLevel
+            else (levels[style.ordinal] + if (workBusy) 1 else 0).coerceAtMost(SIZES.size - 1)
         var w = SIZES[lv][0]
         var h = SIZES[lv][1]
         val t = tex
@@ -392,13 +402,15 @@ object GlBackground {
                 }
                 val t1 = SystemClock.elapsedRealtimeNanos()
                 var bmp: Bitmap? = null
-                // 每秒 15 格的樣式每一張都更新玻璃小圖（不然玻璃只剩每秒 7.5 次）
-                if (n % 2 == 0L || every(style) > 1 || current == null) {
+                // 玻璃小圖每秒 15 張（照時間，不照張數：操作中、每秒畫幾張都一樣），引擎每收到一張就更新玻璃
+                val now = SystemClock.elapsedRealtimeNanos()
+                if (now - lastGlassNs >= 60_000_000L || current == null) {
+                    lastGlassNs = now
                     if (!EGL14.eglMakeCurrent(dpy, surf, surf, ctx)) throw IllegalStateException("eglMakeCurrent(pbuffer)")
                     pass(prog, BackgroundEngine.GLASS_W, BackgroundEngine.GLASS_H, flipY = false)
                     bmp = readBack(BackgroundEngine.GLASS_W, BackgroundEngine.GLASS_H)
                 }
-                if (timed) measure(style, lv, w, h, tg - t0, t1 - tg, SystemClock.elapsedRealtimeNanos() - t1, direct = true)
+                if (timed && !workBusy) measure(style, lv, w, h, tg - t0, t1 - tg, SystemClock.elapsedRealtimeNanos() - t1, direct = true)
                 return bmp
             }
         }

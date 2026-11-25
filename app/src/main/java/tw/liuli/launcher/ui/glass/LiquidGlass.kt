@@ -368,11 +368,11 @@ private class GlassBake(private val backdrop: GlassBackdrop, private val edge: B
             // 背景在動時每秒最多烘十幾次：玻璃後面是模糊的背景，慢一兩格看不出來
             // 面板上的光正在移動：馬上接著烘下一張（不然光是一段一段跳過去的）
             val lightMoving = wanted?.let { it.lx != r.lx } == true
-            // 下一張只是背景換了顏色（形狀沒變）：每秒最多 7.5 張（大片 5 張）——玻璃後面是模糊的背景，每次只差幾階。
-            // （以前 5／3 張，流動快的樣式看得出玻璃裡的顏色一頓一頓）
+            // 下一張只是背景換了顏色（形狀沒變）：跟著背景小圖每秒 15 張（取色是整數運算、幾何有快取，抽屜一張約幾毫秒）。
+            // （以前限制每秒 5 張、大片 3 張，抽屜的玻璃看起來一頓一頓）
             // 海信實測：主畫面十幾片玻璃，每秒各取色 10 次要 0.4 個 CPU 核心
             val onlyColor = wanted?.sameGeo(r) == true
-            delay(if (lightMoving) 1 else if (nq >= 3) (if (onlyColor) 200 else 120) else (if (onlyColor) 133 else 66))
+            delay(if (lightMoving) 1 else if (nq >= 3 && !onlyColor) 120 else 60)
         }
     }
 

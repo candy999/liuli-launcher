@@ -585,6 +585,7 @@ class BackgroundEngine {
             var wasBusy = false
             var nextRestoreT = 0L
             var bgTicks = 0
+            var lastGlassGl = -1L
             var skipMeasure = 2
             var winSum = 0f
             var winN = 0
@@ -685,12 +686,17 @@ class BackgroundEngine {
                     // 玻璃（畫小張背景＋高斯模糊）在背景執行緒做，主執行緒只送出要求；忙的話自動合併成一次
                     // 著色器樣式：用這一格的狀態排一張 GL 小圖（畫好才重畫全螢幕背景）。
                     // 操作中（按鍵後一小段時間、面板開著）讓路：每兩格才畫一張，GPU 留給焦點動畫與捲動
-                    // （只有重的樣式讓路；輕的樣式操作中照常每秒 30 格——焦點在動的時候正是背景變化最多的時候）
-                    if (style.gl && !(busy && GlBackground.heavy && (bgTicks and 1) == 1)) GlBackground.request(style, st)
-                    // 持續動畫的樣式、焦點轉場已經結束（只剩樣式自己慢慢流動）：玻璃每秒更新 10 次（玻璃後面是模糊的背景；
-                    // 以前 7.5 次，看得出一頓一頓）；轉場中照舊每秒 15 次。每更新一次，畫面上每一片液態玻璃都要重新取色
-                    val glassEvery = if (fast) 4 else if (settled && style.ambient && !bounce) 3 else 2
-                    if (done || bgTicks++ % glassEvery == 0) requestGlass()
+                    // 讓路的方式和 CPU 樣式一樣：重的樣式降一檔解析度，每秒 30 格不變（以前是每兩格才畫一張，抽屜打開時背景只剩每秒 15 格）
+                    if (style.gl) GlBackground.request(style, st, busy)
+                    // 玻璃每秒更新 15 次（每秒 60 格的樣式每 4 格、其他每 2 格）。每更新一次，畫面上每一片液態玻璃都要重新取色。
+                    // 著色器樣式：GL 那邊每畫好一張玻璃小圖（每秒 15 張）就更新一次——以前照引擎的格數另外抽，
+                    // 和 GL 的節奏對不上，有時拿到同一張、有時跳過，實際只剩每秒 3～5 次
+                    val glassEvery = if (fast) 4 else 2
+                    if (style.gl) {
+                        val gv = GlBackground.version
+                        if (done || gv != lastGlassGl) { lastGlassGl = gv; requestGlass() }
+                        bgTicks++
+                    } else if (done || bgTicks++ % glassEvery == 0) requestGlass()
                     if (blur) blurReq.trySend(Unit)
                     if (glassDirty) { glassDirty = false; glassVersion++ }
                     // 這一格的實際耗時稍後由 FrameMetrics 送回；只採計「穩定在同一檔、不在操作中」的格
