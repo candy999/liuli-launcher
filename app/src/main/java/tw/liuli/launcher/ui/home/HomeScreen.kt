@@ -1139,6 +1139,8 @@ fun HomeScreen(
                 // 量測用（adb）：bgstyle:mesh＝這次執行先換成某個背景樣式（不存設定）；glres:0／1＝著色器背景強制 480×270／320×180，glres:-1 自動
                 "bgstyle" -> engine.applyStyle(BgStyle.byId(arg))
                 "glres" -> tw.liuli.launcher.ui.bg.GlBackground.debugLevel = arg.toIntOrNull() ?: -1
+                // gllog:1＝一直印著色器背景的 GPU 耗時（LiuliGl）與玻璃小圖的 CPU 成本（LiuliBg glass）
+                "gllog" -> tw.liuli.launcher.ui.bg.GlBackground.verbose = arg == "1"
                 "bgcap" -> tw.liuli.launcher.ui.bg.BackgroundEngine.debugNoFast = arg == "30"
                 "keylat" -> tw.liuli.launcher.ui.bg.KeyLat.enabled = arg == "1"
                 "uitrace" -> tw.liuli.launcher.ui.bg.UiTrace.set(arg == "1", traceView)

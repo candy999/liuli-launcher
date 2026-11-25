@@ -103,6 +103,10 @@ object GlBackground {
 
     @Volatile private var releasePending = false
 
+    /** 量測用（adb ACTION=gllog:1）：一直印 GL 耗時與玻璃小圖的 CPU 成本；平常只印剛開始的前三次。 */
+    @Volatile var verbose = false
+    private var reports = 0
+
     /**
      * 直接顯示可以用（EGL 設定支援 window surface，而且還沒失敗過）：全螢幕背景放一個 TextureView 讓 GL 直接畫進去。
      * 不行就退回「畫小圖、讀回、當點陣圖貼」。
@@ -303,7 +307,7 @@ object GlBackground {
         sumGpu += gpu; sumRead += read; sumCopy += copy
         if (++nFrames < 30) return
         val g = (if (direct) sumGpu else sumGpu + sumRead) / nFrames / 1e6f
-        Log.i(TAG, "${style.id} ${w}x$h ${if (direct) "direct: gpu %.1fms + swap %.1fms, glass %.1fms" else "readback: gpu %.1fms + read %.1fms, -%.0f"}".format(sumGpu / nFrames / 1e6f, sumRead / nFrames / 1e6f, sumCopy / nFrames / 1e6f))
+        if (verbose || reports++ < 3) Log.i(TAG, "${style.id} ${w}x$h ${if (direct) "direct: gpu %.1fms + swap %.1fms, glass %.1fms" else "readback: gpu %.1fms + read %.1fms, -%.0f"}".format(sumGpu / nFrames / 1e6f, sumRead / nFrames / 1e6f, sumCopy / nFrames / 1e6f))
         nFrames = 0; sumGpu = 0; sumRead = 0; sumCopy = 0
         if (debugLevel < 0 && lv == 0 && g > SLOW_MS) {
             level = 1

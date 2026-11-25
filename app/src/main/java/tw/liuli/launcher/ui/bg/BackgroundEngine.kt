@@ -929,7 +929,7 @@ class BackgroundEngine {
             if (g1 != 0L) { gDraw += g1 - g0; gRest += g2 - g1 }
             if (gN == 0) gSince = g0
             if (++gN >= 60) {
-                Log.i(TAG, "glass ${s.id}: draw %.1fms + blur %.1fms, %.1f/s".format(gDraw / 60 / 1e6f, gRest / 60 / 1e6f, 60e9f / (g2 - gSince)))
+                if (GlBackground.verbose) Log.i(TAG, "glass ${s.id}: draw %.1fms + blur %.1fms, %.1f/s".format(gDraw / 60 / 1e6f, gRest / 60 / 1e6f, 60e9f / (g2 - gSince)))
                 gN = 0; gDraw = 0; gRest = 0
             }
             glassBitmap.setPixels(px, 0, GLASS_W, 0, 0, GLASS_W, GLASS_H)
