@@ -49,6 +49,7 @@ import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
@@ -1148,7 +1149,7 @@ fun HomeScreen(
                     runCatching {
                         val dir = java.io.File(context.getExternalFilesDir(null), "shots").apply { mkdirs() }
                         tw.liuli.launcher.ui.bg.GlBackground.current?.let { b -> java.io.File(dir, "gl.png").outputStream().use { b.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) } }
-                        val g = androidx.compose.ui.graphics.asAndroidBitmap(engine.glass).copy(android.graphics.Bitmap.Config.ARGB_8888, false)
+                        val g = engine.glass.asAndroidBitmap().copy(android.graphics.Bitmap.Config.ARGB_8888, false)
                         java.io.File(dir, "glass.png").outputStream().use { g.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
                         android.util.Log.i("LiuliUi", "glassdump saved")
                     }
