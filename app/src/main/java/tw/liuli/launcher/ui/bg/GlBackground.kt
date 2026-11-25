@@ -245,7 +245,7 @@ object GlBackground {
 
     private var dataTex = 0
 
-    /** 液態以太：CPU 模擬的結果（96×54 RGBA）上傳到第 2 個貼圖單元。 */
+    /** 液態以太：CPU 模擬的結果（80×45 RGBA）上傳到第 2 個貼圖單元。 */
     private fun uploadData(style: BgStyle) {
         if (style != BgStyle.LIQUID) return
         if (dataTex == 0) {
