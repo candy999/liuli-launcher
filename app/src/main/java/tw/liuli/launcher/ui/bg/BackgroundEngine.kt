@@ -566,7 +566,9 @@ class BackgroundEngine {
             var iv = learnedIv[si]
             var interval = INTERVALS[iv]
             val forced = debugDiv in 1..MAX_DIV
-            var fast = fastOk[si] && !debugNoFast && !forced && iv == 0
+            // 著色器樣式的格數由 GlBackground 固定（每秒 30 或 15 格），不升到每秒 60 格：
+            // 引擎多跑一倍的節拍，著色器就跟著多畫一倍（海信上色塊雜訊因此從 15 格變成 30 格）
+            var fast = fastOk[si] && !debugNoFast && !forced && iv == 0 && !style.gl
             if (fast) interval = FAST_INTERVAL
             var fastUp = 0
             var fpsDrops = 0
@@ -739,7 +741,7 @@ class BackgroundEngine {
                         }
                         continue
                     }
-                    if (!debugNoFast && iv == 0 && checkDivFrom == 0f && !slow && lat >= 0f && lat <= FAST_AFFORD && avg < interval * FAST_RATIO && now >= fastBlockedUntil) {
+                    if (!debugNoFast && !style.gl && iv == 0 && checkDivFrom == 0f && !slow && lat >= 0f && lat <= FAST_AFFORD && avg < interval * FAST_RATIO && now >= fastBlockedUntil) {
                         if (++fastUp >= 2) {
                             fastUp = 0; fast = true; fastOk[si] = true; slowWins = 0; fastWins = 0
                             interval = FAST_INTERVAL; bgFps = 60; skipMeasure = 2
