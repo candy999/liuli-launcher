@@ -148,7 +148,6 @@ uniform float u_fy;
 uniform vec4 u_w;
 varying vec2 v_uv;
 varying vec2 v_wv;
-varying vec2 v_wv;
 """ + GlBackground.VNOISE + """
 void main() {
   v_uv = a_pos * 0.5 + 0.5;
@@ -169,6 +168,7 @@ uniform sampler2D u_noiseL;
 uniform vec2 u_res;
 uniform vec4 u_p[16];
 varying vec2 v_uv;
+varying vec2 v_wv;
 
 """+ GlBackground.NOISE + """
 

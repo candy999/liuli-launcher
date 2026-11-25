@@ -686,9 +686,9 @@ class BackgroundEngine {
                     // 著色器樣式：用這一格的狀態排一張 GL 小圖（畫好才重畫全螢幕背景）。
                     // 操作中（按鍵後一小段時間、面板開著）讓路：每兩格才畫一張，GPU 留給焦點動畫與捲動
                     if (style.gl && !(busy && (bgTicks and 1) == 1)) GlBackground.request(style, st)
-                    // 持續動畫的樣式、焦點轉場已經結束（只剩樣式自己慢慢流動）：玻璃每秒更新 7.5 次就夠（玻璃後面是模糊的背景，
-                    // 慢慢流動的顏色看不出差別）；轉場中照舊每秒 15 次。每更新一次，畫面上每一片液態玻璃都要重新取色
-                    val glassEvery = if (fast || (settled && style.ambient && !bounce)) 4 else 2
+                    // 持續動畫的樣式、焦點轉場已經結束（只剩樣式自己慢慢流動）：玻璃每秒更新 10 次（玻璃後面是模糊的背景；
+                    // 以前 7.5 次，看得出一頓一頓）；轉場中照舊每秒 15 次。每更新一次，畫面上每一片液態玻璃都要重新取色
+                    val glassEvery = if (fast) 4 else if (settled && style.ambient && !bounce) 3 else 2
                     if (done || bgTicks++ % glassEvery == 0) requestGlass()
                     if (blur) blurReq.trySend(Unit)
                     if (glassDirty) { glassDirty = false; glassVersion++ }

@@ -353,7 +353,8 @@ object GlBackground {
                 }
                 val t1 = SystemClock.elapsedRealtimeNanos()
                 var bmp: Bitmap? = null
-                if (n % 2 == 0L || current == null) {
+                // 每秒 15 格的樣式每一張都更新玻璃小圖（不然玻璃只剩每秒 7.5 次）
+                if (n % 2 == 0L || every(style) > 1 || current == null) {
                     if (!EGL14.eglMakeCurrent(dpy, surf, surf, ctx)) throw IllegalStateException("eglMakeCurrent(pbuffer)")
                     pass(prog, BackgroundEngine.GLASS_W, BackgroundEngine.GLASS_H, flipY = false)
                     bmp = readBack(BackgroundEngine.GLASS_W, BackgroundEngine.GLASS_H)
