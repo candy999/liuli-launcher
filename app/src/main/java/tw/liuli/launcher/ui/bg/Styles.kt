@@ -128,7 +128,13 @@ fun DrawScope.drawStyle(
     noisePx: Float = 2f, noiseShift: Offset = Offset.Zero,
     /** true＝山稜的山與霧另外以原生解析度畫（[ridgeFront]），這裡只畫天空、星軌、光暈。 */
     skipFront: Boolean = false,
+    /**
+     * false＝不抖色：玻璃取樣、背景模糊的小圖在 CPU 上畫，畫完還要模糊（模糊本身會再抖一次色），抖色沒有用，
+     * 軟體繪圖下每個漸層卻都要多合成一張噪點貼圖（海信上深海的玻璃小圖一張 36ms）。
+     */
+    dither: Boolean = true,
 ) {
+    if (!dither) { drawStyleRaw(style, st, skipFront); return }
     // 所有漸層開抖色（見 DitherScope）：8 bit 面板上的大面積暗色漸層不再一圈一圈斷開
     val sc = scratch.get()!!
     DitherScope(this, sc.ditherPaint, sc.ditherNoise, sc.ditherM, sc.ditherInv, noisePx, noiseShift).drawStyleRaw(style, st, skipFront)

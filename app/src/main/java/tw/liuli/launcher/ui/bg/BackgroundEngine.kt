@@ -928,7 +928,7 @@ class BackgroundEngine {
                 } else {
                     workScope.draw(Density(1f), LayoutDirection.Ltr, workCanvas, Size(GLASS_W.toFloat(), GLASS_H.toFloat())) {
                         scale(GLASS_W / LOGICAL_W, GLASS_H / LOGICAL_H, pivot = androidx.compose.ui.geometry.Offset.Zero) {
-                            drawStyle(s, workState)
+                            drawStyle(s, workState, dither = false)
                         }
                     }
                     workBitmap.getPixels(px, 0, GLASS_W, 0, 0, GLASS_W, GLASS_H)
@@ -1012,7 +1012,7 @@ class BackgroundEngine {
                 bmp.eraseColor(0xFF000000.toInt())
                 scope.draw(Density(1f), LayoutDirection.Ltr, c, Size(bw.toFloat(), bh.toFloat())) {
                     scale(bw / LOGICAL_W, bh / LOGICAL_H, pivot = androidx.compose.ui.geometry.Offset.Zero) {
-                        drawStyle(s, state)
+                        drawStyle(s, state, dither = false)
                     }
                 }
                 bmp.getPixels(px, 0, bw, 0, 0, bw, bh)
