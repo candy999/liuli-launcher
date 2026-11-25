@@ -497,38 +497,8 @@ private fun DrawScope.galaxy(st: BgState) {
 
 
     }
-    // 少數亮星的柔光（核心與所有星點在原生解析度另外畫）
-    for (i in 0 until 14) {
-        val x = hash01(i, 121) * W + par * W * .04f
-        val y = hash01(i, 122) * H + parY * H * .02f
-        val tw = .6f + .4f * sin(t * (.7f + 1.5f * hash01(i, 123)) + i * 2.3f)
-        val warm = if (hash01(i, 124) > .6f) 30f else 215f
-        drawRect(gaussBrush(Color.hsl(warm, .35f, .85f, .22f * tw), Offset(x, y), 2.6f), Offset(x - 2.6f, y - 2.6f), Size(5.2f, 5.2f), blendMode = BlendMode.Plus)
-    }
-
-    // 星座網：一群緩慢漂移的星點，彼此靠近時連出極細的線、遠離時淡去——網子一直在重組
-    val nx = sc.netX; val ny = sc.netY
-    for (i in 0 until NET_N) {
-        nx[i] = (hash01(i, 41) * 1.2f - .1f) * W + 22f * sin(t * (.05f + .07f * hash01(i, 43)) + i * 1.7f) + par * W * .05f
-        ny[i] = hash01(i, 42) * H + 16f * sin(t * (.04f + .06f * hash01(i, 44)) + i * 2.3f) + parY * H * .025f
-    }
-    val maxD = W * .17f
-    for (i in 0 until NET_N) {
-        for (j in i + 1 until NET_N) {
-            val dx = nx[i] - nx[j]; val dy = ny[i] - ny[j]
-            if (abs(dx) > maxD || abs(dy) > maxD) continue
-            val dist = sqrt(dx * dx + dy * dy)
-            if (dist > maxD) continue
-            val wave = .5f + .5f * sin(t * .3f + (i * 7 + j * 13) * .37f)
-            val a = (1f - dist / maxD).pow(1.6f) * .2f * wave
-            if (a < .015f) continue
-            drawLine(st.c(-6f, .35f, .8f, a), Offset(nx[i], ny[i]), Offset(nx[j], ny[j]), 1f / ppu, blendMode = BlendMode.Plus)
-        }
-    }
-    for (i in 0 until NET_N) {
-        val tw = .6f + .4f * sin(t * (.8f + hash01(i, 45)) + i)
-        drawCircle(st.c(-6f, .25f, .9f, .6f * tw), .9f / ppu, Offset(nx[i], ny[i]), blendMode = BlendMode.Plus)
-    }
+    // 亮星的柔光與星座網在原生解析度另外畫（galaxyFieldStars 的快取圖層、galaxyNet 的低頻重錄圖層）：
+    // 以前每格在這裡重畫十四團漸層與上百條線，海信上這一段每格主執行緒要 8ms
 
     // 流星：偶爾劃過一道（約每 12 秒有四分之三的機會）
     val period = 12f
@@ -548,6 +518,38 @@ private fun DrawScope.galaxy(st: BgState) {
         )
     }
     vignette(.35f)
+}
+
+/**
+ * 星座網：一群緩慢漂移的星點，彼此靠近時連出極細的線、遠離時淡去——網子一直在重組。
+ * 星點一秒只漂不到一個邏輯單位，呼叫端每秒只重錄 6 次（每次移動不到一個螢幕像素，看不出一格一格）；視差用圖層位移。
+ */
+fun DrawScope.galaxyNet(st: BgState) {
+    val t = st.at
+    val sc = scratch.get()!!
+    val ppu = pixelsPerUnit()
+    val nx = sc.netX; val ny = sc.netY
+    for (i in 0 until NET_N) {
+        nx[i] = (hash01(i, 41) * 1.2f - .1f) * W + 22f * sin(t * (.05f + .07f * hash01(i, 43)) + i * 1.7f)
+        ny[i] = hash01(i, 42) * H + 16f * sin(t * (.04f + .06f * hash01(i, 44)) + i * 2.3f)
+    }
+    val maxD = W * .17f
+    for (i in 0 until NET_N) {
+        for (j in i + 1 until NET_N) {
+            val dx = nx[i] - nx[j]; val dy = ny[i] - ny[j]
+            if (abs(dx) > maxD || abs(dy) > maxD) continue
+            val dist = sqrt(dx * dx + dy * dy)
+            if (dist > maxD) continue
+            val wave = .5f + .5f * sin(t * .3f + (i * 7 + j * 13) * .37f)
+            val a = (1f - dist / maxD).pow(1.6f) * .2f * wave
+            if (a < .015f) continue
+            drawLine(st.c(-6f, .35f, .8f, a), Offset(nx[i], ny[i]), Offset(nx[j], ny[j]), 1f / ppu, blendMode = BlendMode.Plus)
+        }
+    }
+    for (i in 0 until NET_N) {
+        val tw = .6f + .4f * sin(t * (.8f + hash01(i, 45)) + i)
+        drawCircle(st.c(-6f, .25f, .9f, .6f * tw), .9f / ppu, Offset(nx[i], ny[i]), blendMode = BlendMode.Plus)
+    }
 }
 
 /** 畫布上 1 個邏輯單位是幾個像素（星點要固定約 1 個像素，不隨背景解析度變大）。 */
@@ -581,6 +583,13 @@ fun DrawScope.galaxyFieldStars() {
     for (b in 0 until BUCKETS) {
         paint.color = Color.hsl(220f, .1f, .92f, FIELD_ALPHA[b]).toArgb()
         points(StarField.field[b], paint)
+    }
+    // 少數亮星的柔光（快取，不閃爍；閃爍的是 galaxyBrightStars 畫的核心）
+    for (i in 0 until 14) {
+        val x = hash01(i, 121) * W
+        val y = hash01(i, 122) * H
+        val warm = if (hash01(i, 124) > .6f) 30f else 215f
+        drawRect(gaussBrush(Color.hsl(warm, .35f, .85f, .17f), Offset(x, y), 2.6f), Offset(x - 2.6f, y - 2.6f), Size(5.2f, 5.2f), blendMode = BlendMode.Plus)
     }
 }
 

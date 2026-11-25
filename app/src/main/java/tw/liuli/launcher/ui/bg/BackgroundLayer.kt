@@ -216,6 +216,21 @@ fun BackgroundLayer(engine: BackgroundEngine, blurred: () -> Float, modifier: Mo
         if (engine.style == BgStyle.GALAXY) {
             val sx = fullW / BackgroundEngine.LOGICAL_W
             val sy = fullH / BackgroundEngine.LOGICAL_H
+            // 星座網：每秒只重錄 6 次（星點漂得很慢），視差用圖層位移
+            var netTick by remember { mutableIntStateOf(0) }
+            LaunchedEffect(engine) {
+                while (true) withFrameNanos { netTick = (engine.st.at * 6f).toInt() }
+            }
+            Canvas(
+                Modifier.fillMaxSize().graphicsLayer {
+                    @Suppress("UNUSED_VARIABLE") val f = engine.frame
+                    translationX = -(engine.st.fx - .5f) * fullW * .05f
+                    translationY = -(engine.st.fy - .5f) * fullH * .025f
+                },
+            ) {
+                @Suppress("UNUSED_VARIABLE") val k = netTick
+                scale(sx, sy, pivot = Offset.Zero) { galaxyNet(engine.st) }
+            }
             Canvas(
                 Modifier.fillMaxSize().graphicsLayer {
                     @Suppress("UNUSED_VARIABLE") val f = engine.frame
