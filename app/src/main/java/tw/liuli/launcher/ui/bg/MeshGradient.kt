@@ -19,16 +19,17 @@ import kotlin.math.sin
  *   （瓶頸在讀回，不在算術），所以扭曲仍然逐像素算
  * - 時間相位與色點軌跡改在 CPU 端以雙精度計算、取模後才傳進著色器（Mali-470 只有半精度）
  * - 拿掉顆粒（grain）選項，改用共用的雜訊貼圖做抖色
- * - 色點數固定 5 個、顏色由目前的主色推出；最亮的那團被焦點吸過去，焦點脈動時漩渦稍微加強
+ * - 色點數固定 5 個、顏色由目前的主色推出（照 Paper 預設的配色結構：一淡、一深、兩個飽和的鄰近色，再加一團深的互補色），
+ *   主色那團被焦點輕輕吸過去，焦點脈動時漩渦稍微加強
  */
 internal object MeshGradient {
     /** 播放速度（Paper 的 speed）：1 太快、會搶走注意力，背景用很慢的流動。 */
-    private const val SPEED = 0.22
+    private const val SPEED = 0.3
     private const val DISTORTION = 0.8f
     private const val SWIRL = 0.12f
     private const val TAU = Math.PI * 2
     /** 第一團（主色）被焦點吸過去的程度。 */
-    private const val FOCUS_PULL = 0.6f
+    private const val FOCUS_PULL = 0.35f
 
     /** u_p[0]＝(相位 t、相位 0.2t、漩渦、扭曲)；u_p[1..3]＝五個色點位置；u_p[4..8]＝五個色點顏色（rgb）。 */
     fun params(st: BgState, out: FloatArray) {
@@ -63,19 +64,17 @@ internal object MeshGradient {
         return p
     }
 
-    /** 調色盤：主色（亮）、兩個相鄰色、一個淡淡的對比色、一團接近黑色（讓背景保持暗，圖示看得清楚）。 */
-    private fun colors(st: BgState): Array<Color> {
-        val s = st.s
-        fun c(dh: Float, sat: Float, l: Float) =
-            Color.hsl((((st.h + dh) % 360f) + 360f) % 360f, (sat * s * 1.6f).coerceIn(0f, 1f), l.coerceIn(0f, 1f))
-        return arrayOf(
-            c(0f, .95f, .40f + .07f * st.pulse),
-            c(38f, .85f, .20f),
-            c(-34f, .9f, .27f),
-            c(172f, .55f, .15f),
-            c(12f, .7f, .045f),
-        )
-    }
+    /**
+     * 調色盤（照 Paper 預設的結構：淡、深、兩個飽和色）：主色、深色、鄰近色、淡色、深的互補色。
+     * 飽和度只部分跟著 App 主色（灰階的 App 也還有顏色，不會整片變灰）。
+     */
+    private fun colors(st: BgState): Array<Color> = arrayOf(
+        GlStyles.hsl(st, 0f, .85f, .52f + .06f * st.pulse),
+        GlStyles.hsl(st, 25f, .7f, .13f),
+        GlStyles.hsl(st, -45f, .8f, .46f),
+        GlStyles.hsl(st, 15f, .55f, .74f),
+        GlStyles.hsl(st, 200f, .45f, .16f),
+    )
 
     /** 著色器沒辦法用（GL 失敗）或第一張圖還沒好：CPU 用幾個柔邊的放射漸層近似。 */
     fun DrawScope.fallback(st: BgState, w: Float, h: Float) {
