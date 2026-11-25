@@ -15,6 +15,7 @@ import kotlin.math.sin
  * 改寫自 Paper Shaders 的 mesh-gradient（https://shaders.paper.design，Apache License 2.0，
  * 授權全文見 assets/licenses/paper-shaders-LICENSE.txt）。改動：
  * - 改成 GLSL ES 1.00（電視只有 OpenGL ES 2.0），迴圈手動展開、只用常數索引
+ * - 扭曲與漩渦搬到頂點著色器（網格上算再內插），色點權重的距離次方 3.5 改成 4
  * - 時間相位與色點軌跡改在 CPU 端以雙精度計算、取模後才傳進著色器（Mali-470 只有半精度）
  * - 拿掉顆粒（grain）選項，改用共用的雜訊貼圖做抖色
  * - 色點數固定 5 個、顏色由目前的主色推出；最亮的那團被焦點吸過去，焦點脈動時漩渦稍微加強
@@ -96,12 +97,14 @@ internal object MeshGradient {
         }
     }
 
-    // 色點權重＝1／(距離^3.5＋0.001)：距離用平方算（pow(d², 1.75)），加一點點避免 pow(0, y)（有些 GPU 會回傳 NaN）
-    const val SHADER = """
-precision mediump float;
-uniform vec2 u_res;
-uniform sampler2D u_noise;
-uniform vec4 u_p[10];
+    /**
+     * 頂點著色器（33×19 的網格、全精度）：Paper 的有機扭曲與漩渦都是低頻的，在頂點上算、內插給每個像素就夠了，
+     * 片段著色器因此一個三角函數都不用算。輸出 v_r＝扭曲、旋轉後的座標（0～1，y 往下）。
+     */
+    const val VERTEX = """
+attribute vec2 a_pos;
+uniform vec4 u_w;
+varying vec2 v_r;
 
 vec2 rot(vec2 v, float a) {
   float s = sin(a);
@@ -110,10 +113,10 @@ vec2 rot(vec2 v, float a) {
 }
 
 void main() {
-  vec2 uv = gl_FragCoord.xy / u_res;
-  float t = u_p[0].x;
-  float t5 = u_p[0].y;
-  float dist = u_p[0].w;
+  vec2 uv = a_pos * 0.5 + 0.5;
+  float t = u_w.x;
+  float t5 = u_w.y;
+  float dist = u_w.w;
   float radius = smoothstep(0.0, 1.0, length(uv - 0.5));
   float center = 1.0 - radius;
 
@@ -126,18 +129,31 @@ void main() {
   sx = smoothstep(0.0, 1.0, uv.x);
   uv.y += dist * center * 0.5 * cos(t + 4.0 * sx);
 
-  vec2 r = rot(uv - 0.5, -3.0 * u_p[0].z * radius) + 0.5;
+  v_r = rot(uv - 0.5, -3.0 * u_w.z * radius) + 0.5;
+  gl_Position = vec4(a_pos, 0.0, 1.0);
+}
+"""
 
+    // 色點權重：Paper 是 1／(距離^3.5＋0.001)；這裡用距離^4（＝距離平方的平方），省掉每個像素五次 pow（Mali-470 上很貴），
+    // 色團邊緣稍微收得緊一點點
+    const val SHADER = """
+precision mediump float;
+uniform sampler2D u_noise;
+uniform vec4 u_p[10];
+varying vec2 v_r;
+
+void main() {
   vec3 col = vec3(0.0);
   float tw = 0.0;
   vec2 d;
+  float q;
   float w;
-  d = r - u_p[1].xy; w = 1.0 / (pow(dot(d, d) + 0.0001, 1.75) + 0.001); col += u_p[4].rgb * w; tw += w;
-  d = r - u_p[1].zw; w = 1.0 / (pow(dot(d, d) + 0.0001, 1.75) + 0.001); col += u_p[5].rgb * w; tw += w;
-  d = r - u_p[2].xy; w = 1.0 / (pow(dot(d, d) + 0.0001, 1.75) + 0.001); col += u_p[6].rgb * w; tw += w;
-  d = r - u_p[2].zw; w = 1.0 / (pow(dot(d, d) + 0.0001, 1.75) + 0.001); col += u_p[7].rgb * w; tw += w;
-  d = r - u_p[3].xy; w = 1.0 / (pow(dot(d, d) + 0.0001, 1.75) + 0.001); col += u_p[8].rgb * w; tw += w;
-  col /= max(tw, 0.0001);
+  d = v_r - u_p[1].xy; q = dot(d, d); w = 1.0 / (q * q + 0.001); col += u_p[4].rgb * w; tw += w;
+  d = v_r - u_p[1].zw; q = dot(d, d); w = 1.0 / (q * q + 0.001); col += u_p[5].rgb * w; tw += w;
+  d = v_r - u_p[2].xy; q = dot(d, d); w = 1.0 / (q * q + 0.001); col += u_p[6].rgb * w; tw += w;
+  d = v_r - u_p[2].zw; q = dot(d, d); w = 1.0 / (q * q + 0.001); col += u_p[7].rgb * w; tw += w;
+  d = v_r - u_p[3].xy; q = dot(d, d); w = 1.0 / (q * q + 0.001); col += u_p[8].rgb * w; tw += w;
+  col /= tw;
 
   // 抖色：加上 ±½ 階的雜訊再寫入 8 bit，暗色的大面積漸層不會斷成一圈一圈
   col += (texture2D(u_noise, gl_FragCoord.xy / 64.0).rgb - 0.5) / 255.0;

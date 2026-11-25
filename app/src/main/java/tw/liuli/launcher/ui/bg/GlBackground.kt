@@ -79,7 +79,8 @@ object GlBackground {
     private var surfH = 0
     private val programs = HashMap<BgStyle, Program>()
     private var noiseTex = 0
-    private var quad: FloatBuffer? = null
+    private var grid: FloatBuffer? = null
+    private var gridIdx: java.nio.ShortBuffer? = null
     private var readBuf: ByteBuffer? = null
     private val ring = arrayOfNulls<Bitmap>(3)
     private var ringI = 0
@@ -165,14 +166,14 @@ object GlBackground {
         val w = SIZES[lv][0]
         val h = SIZES[lv][1]
         if (!ensureGl(w, h)) return null
-        val prog = programs.getOrPut(style) { Program(style.glShader()) }
+        val prog = programs.getOrPut(style) { Program(style.glVertex(), style.glShader()) }
         val t0 = SystemClock.elapsedRealtimeNanos()
         GLES20.glViewport(0, 0, w, h)
         GLES20.glUseProgram(prog.id)
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, noiseTex)
-        prog.bind(w, h, work, quad!!)
-        GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
+        prog.bind(w, h, work, grid!!)
+        GLES20.glDrawElements(GLES20.GL_TRIANGLES, GRID_X * GRID_Y * 6, GLES20.GL_UNSIGNED_SHORT, gridIdx!!)
         val buf = readBuf.let { if (it == null || it.capacity() < w * h * 4) ByteBuffer.allocateDirect(w * h * 4).order(ByteOrder.nativeOrder()).also { b -> readBuf = b } else it }
         buf.clear()
         // 讀回會等 GPU 畫完：這段時間＝GPU 成本＋讀回
@@ -246,9 +247,22 @@ object GlBackground {
     }
 
     private fun initResources() {
-        quad = ByteBuffer.allocateDirect(8 * 4).order(ByteOrder.nativeOrder()).asFloatBuffer().apply {
-            put(floatArrayOf(-1f, -1f, 1f, -1f, -1f, 1f, 1f, 1f)); position(0)
+        // 全螢幕網格（不是一個四邊形）：低頻的座標扭曲、漩渦放在頂點著色器算（Mali-470 的頂點處理器是全精度，
+        // 而且只有 33×19 個頂點），片段著色器拿內插好的座標，每個像素省下所有三角函數
+        val g = ByteBuffer.allocateDirect((GRID_X + 1) * (GRID_Y + 1) * 2 * 4).order(ByteOrder.nativeOrder()).asFloatBuffer()
+        for (j in 0..GRID_Y) for (i in 0..GRID_X) { g.put(i * 2f / GRID_X - 1f); g.put(j * 2f / GRID_Y - 1f) }
+        g.position(0)
+        grid = g
+        val ix = ByteBuffer.allocateDirect(GRID_X * GRID_Y * 6 * 2).order(ByteOrder.nativeOrder()).asShortBuffer()
+        for (j in 0 until GRID_Y) for (i in 0 until GRID_X) {
+            val a = (j * (GRID_X + 1) + i).toShort()
+            val b = (a + 1).toShort()
+            val c = (a + GRID_X + 1).toShort()
+            val d = (c + 1).toShort()
+            ix.put(a); ix.put(b); ix.put(c); ix.put(b); ix.put(d); ix.put(c)
         }
+        ix.position(0)
+        gridIdx = ix
         // 共用的雜訊貼圖：64×64、每個像素 RGBA 四個獨立的均勻亂數（xorshift32）。2 的次方尺寸，ES 2.0 才能 REPEAT
         val n = 64
         val px = ByteBuffer.allocateDirect(n * n * 4).order(ByteOrder.nativeOrder())
@@ -285,16 +299,23 @@ object GlBackground {
         surfW = 0; surfH = 0; warm = 0; nFrames = 0; sumGpu = 0; sumCopy = 0
     }
 
-    /** 一個著色器樣式：全螢幕四邊形＋片段著色器。uniform：u_res（像素）、u_noise（雜訊貼圖）、u_p[0..PARAMS)（樣式參數）。 */
-    private class Program(frag: String) {
+    private const val GRID_X = 32
+    private const val GRID_Y = 18
+
+    /**
+     * 一個著色器樣式：全螢幕網格＋頂點／片段著色器。uniform：u_res（像素）、u_noise（雜訊貼圖）、
+     * u_p[0..PARAMS／4)（片段著色器用的樣式參數，vec4 陣列）、u_w（頂點著色器用，＝u_p[0]；分開宣告，兩邊的精度才不會衝突）。
+     */
+    private class Program(vert: String, frag: String) {
         val id: Int
         private val aPos: Int
         private val uRes: Int
         private val uNoise: Int
         private val uP: Int
+        private val uW: Int
 
         init {
-            val vs = compile(GLES20.GL_VERTEX_SHADER, VERTEX)
+            val vs = compile(GLES20.GL_VERTEX_SHADER, vert)
             val fs = compile(GLES20.GL_FRAGMENT_SHADER, frag)
             id = GLES20.glCreateProgram()
             GLES20.glAttachShader(id, vs)
@@ -307,6 +328,7 @@ object GlBackground {
             uRes = GLES20.glGetUniformLocation(id, "u_res")
             uNoise = GLES20.glGetUniformLocation(id, "u_noise")
             uP = GLES20.glGetUniformLocation(id, "u_p")
+            uW = GLES20.glGetUniformLocation(id, "u_w")
         }
 
         fun bind(w: Int, h: Int, p: FloatArray, quad: FloatBuffer) {
@@ -314,6 +336,7 @@ object GlBackground {
             if (uNoise >= 0) GLES20.glUniform1i(uNoise, 0)
             // 參數以 vec4 陣列傳入（PARAMS／4 個），著色器裡用常數索引取用
             if (uP >= 0) GLES20.glUniform4fv(uP, PARAMS / 4, p, 0)
+            if (uW >= 0) GLES20.glUniform4fv(uW, 1, p, 0)
             GLES20.glEnableVertexAttribArray(aPos)
             GLES20.glVertexAttribPointer(aPos, 2, GLES20.GL_FLOAT, false, 0, quad)
         }
@@ -329,10 +352,18 @@ object GlBackground {
         }
     }
 
-    private const val VERTEX = """
+    /** 預設的頂點著色器：v_uv＝畫面座標 0～1（y 往下，和讀回的圖一致）。 */
+    const val VERTEX = """
 attribute vec2 a_pos;
-void main() { gl_Position = vec4(a_pos, 0.0, 1.0); }
+varying vec2 v_uv;
+void main() { v_uv = a_pos * 0.5 + 0.5; gl_Position = vec4(a_pos, 0.0, 1.0); }
 """
+}
+
+/** 著色器樣式的頂點著色器。 */
+internal fun BgStyle.glVertex(): String = when (this) {
+    BgStyle.MESH -> MeshGradient.VERTEX
+    else -> GlBackground.VERTEX
 }
 
 /** 著色器樣式的片段著色器原始碼。 */
