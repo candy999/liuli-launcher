@@ -126,7 +126,7 @@ void main() {
         fun params(st: BgState, out: FloatArray) {
             head(st, out)
             val t = .0625 * (st.at * .5 + 118.0)
-            GlBackground.putTimes(out, t); out[5] = wrap(t, TAU)
+            out[4] = wrap(t, 64.0); out[5] = wrap(t, TAU)
             out[6] = .25f + .15f * st.pulse; out[7] = .8f
             put(out, 8, c(st, 0f, .25f, .07f))
             put(out, 12, c(st, 0f, .95f, .70f))
@@ -134,21 +134,42 @@ void main() {
             put(out, 20, c(st, -10f, 1f, .58f))
         }
 
-        const val SHADER = HEAD + """
+        /**
+         * 扭曲的座標整個在頂點著色器算（全精度，網格 96×54），片段著色器只拿內插好的座標畫棋盤圖樣。
+         * 以前在片段著色器算：漩渦迭代裡 cos 的參數到 20～30，半精度只剩 1／64 弧度，七次迭代累積起來，色帶的邊緣一階一階的。
+         */
+        const val VERTEX = """
+attribute vec2 a_pos;
+uniform float u_fy;
+uniform vec4 u_w;
+uniform vec4 u_v1;
+varying vec2 v_uv;
+varying vec2 v_cs;
+""" + GlBackground.VNOISE + """
 void main() {
-  vec2 uv = (v_uv - 0.5) * vec2(u_p[0].x, 1.0) * 2.2;
-  float n1 = gt(uv + u_p[15].x, vec2(u_p[14].x));
-  float n2 = gt(uv * 2.0 - u_p[15].x, vec2(-u_p[14].x));
+  v_uv = a_pos * 0.5 + 0.5;
+  vec2 uv = (v_uv - 0.5) * vec2(u_w.x, 1.0) * 2.2;
+  float t = u_v1.x;
+  float n1 = gv(uv + t);
+  float n2 = gv(uv * 2.0 - t);
   float a = n1 * 6.2831853;
-  uv += 4.0 * u_p[1].z * n2 * vec2(cos(a), sin(a));
-  float tt = u_p[1].y;
-  float sw = u_p[1].w;
+  uv += 4.0 * u_v1.z * n2 * vec2(cos(a), sin(a));
+  float tt = u_v1.y;
+  float sw = u_v1.w;
   for (int i = 1; i < 8; i++) {
     float fi = float(i);
     uv.x += sw / fi * cos(tt + fi * 1.5 * uv.y);
     uv.y += sw / fi * cos(tt + fi * uv.x);
   }
-  vec2 cs = uv * 0.85;
+  v_cs = uv * 0.85;
+  gl_Position = vec4(a_pos.x, a_pos.y * u_fy, 0.0, 1.0);
+}
+"""
+
+        const val SHADER = HEAD + """
+varying vec2 v_cs;
+void main() {
+  vec2 cs = v_cs;
   float shape = 0.5 + 0.5 * sin(cs.x) * cos(cs.y) - 0.1073;
   float mixer = shape * 3.0;
   vec3 col = u_p[2].rgb;

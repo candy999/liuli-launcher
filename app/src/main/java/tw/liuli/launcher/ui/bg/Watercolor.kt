@@ -141,6 +141,25 @@ internal object Watercolor {
         return t * t * (3f - 2f * t)
     }
 
+    /** 水的擾動（緩慢流動的位移場）在頂點著色器算（全精度、低頻，內插誤差看不出來），片段著色器省兩次雜訊取樣。 */
+    const val VERTEX = """
+attribute vec2 a_pos;
+uniform float u_fy;
+uniform vec4 u_w;
+varying vec2 v_uv;
+varying vec2 v_wv;
+varying vec2 v_wv;
+""" + GlBackground.VNOISE + """
+void main() {
+  v_uv = a_pos * 0.5 + 0.5;
+  vec2 s = v_uv * vec2(u_w.w, 1.0) * 2.2;
+  float t1 = u_vt.x + u_vf.x;
+  float t2 = u_vt.y + u_vf.y;
+  v_wv = v_uv + (vec2(gv(s + vec2(t1, 3.0)), gv(s + vec2(11.0, t2))) - 0.5) * 0.045;
+  gl_Position = vec4(a_pos.x, a_pos.y * u_fy, 0.0, 1.0);
+}
+"""
+
     // 每一滴：d＝到中心的距離（寬高比校正）；邊界半徑被低頻雜訊推擠（花瓣形），內部濃淡不均，邊緣一圈寬柔的水痕。
     // 顏料以相乘疊上去：col *= mix(1, 透光色, 濃度)
     const val SHADER = """
@@ -181,8 +200,7 @@ void main() {
   vec2 uv0 = v_uv;
   vec3 col = u_p[0].rgb * (0.95 + 0.07 * g(uv0 * vec2(28.0, 16.0)));
   // 水的擾動：緩慢流動的位移場（兩層雜訊各自漂移），顏料跟著水輕輕漂移、變形；紙紋不動
-  vec2 s = uv0 * vec2(u_p[0].w, 1.0) * 2.2;
-  vec2 uv = uv0 + (vec2(gt(s + vec2(u_p[15].x, 0.0), vec2(u_p[14].x, 3.0)), gt(s + vec2(0.0, u_p[15].y), vec2(11.0, u_p[14].y))) - 0.5) * 0.045;
+  vec2 uv = v_wv;
   col = drop(col, uv, u_p[1], u_p[2]);
   col = drop(col, uv, u_p[3], u_p[4]);
   col = drop(col, uv, u_p[5], u_p[6]);

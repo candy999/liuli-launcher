@@ -466,7 +466,7 @@ object GlBackground {
 
     private fun initResources() {
         // 全螢幕網格（不是一個四邊形）：低頻的座標扭曲、漩渦放在頂點著色器算（Mali-470 的頂點處理器是全精度，
-        // 而且只有 65×37 個頂點），片段著色器拿內插好的座標，每個像素省下所有三角函數
+        // 而且只有 97×55 個頂點），片段著色器拿內插好的座標，每個像素省下所有三角函數
         val g = ByteBuffer.allocateDirect((GRID_X + 1) * (GRID_Y + 1) * 2 * 4).order(ByteOrder.nativeOrder()).asFloatBuffer()
         for (j in 0..GRID_Y) for (i in 0..GRID_X) { g.put(i * 2f / GRID_X - 1f); g.put(j * 2f / GRID_Y - 1f) }
         g.position(0)
@@ -542,9 +542,9 @@ object GlBackground {
         surfW = 0; surfH = 0; warm = 0; nFrames = 0; sumGpu = 0; sumCopy = 0
     }
 
-    // 64×36：頂點著色器裡算的低頻量（色塊雜訊）線性內插的誤差要小到看不出折角
-    private const val GRID_X = 64
-    private const val GRID_Y = 36
+    // 96×54（約 20 像素一格）：頂點著色器裡算的量（色塊雜訊、扭曲色帶的座標、水彩的水流）線性內插的誤差要小到看不出折角
+    private const val GRID_X = 96
+    private const val GRID_Y = 54
 
     /**
      * 一個著色器樣式：全螢幕網格＋頂點／片段著色器。uniform：u_res（像素）、u_noise（雜訊貼圖）、
@@ -563,6 +563,8 @@ object GlBackground {
         private val uNoiseL: Int
         private val uData: Int
         private val uNoiseQ: Int
+        private val uVt: Int
+        private val uVf: Int
 
         init {
             val vs = compile(GLES20.GL_VERTEX_SHADER, vert)
@@ -584,6 +586,8 @@ object GlBackground {
             uNoiseL = GLES20.glGetUniformLocation(id, "u_noiseL")
             uData = GLES20.glGetUniformLocation(id, "u_data")
             uNoiseQ = GLES20.glGetUniformLocation(id, "u_noiseQ")
+            uVt = GLES20.glGetUniformLocation(id, "u_vt")
+            uVf = GLES20.glGetUniformLocation(id, "u_vf")
         }
 
         fun bind(w: Int, h: Int, p: FloatArray, quad: FloatBuffer, flipY: Boolean) {
@@ -598,6 +602,8 @@ object GlBackground {
             if (uNoiseL >= 0) GLES20.glUniform1i(uNoiseL, 1)
             if (uData >= 0) GLES20.glUniform1i(uData, 2)
             if (uNoiseQ >= 0) GLES20.glUniform1i(uNoiseQ, 3)
+            if (uVt >= 0) GLES20.glUniform4fv(uVt, 1, p, 56)
+            if (uVf >= 0) GLES20.glUniform4fv(uVf, 1, p, 60)
             GLES20.glEnableVertexAttribArray(aPos)
             GLES20.glVertexAttribPointer(aPos, 2, GLES20.GL_FLOAT, false, 0, quad)
         }
@@ -645,6 +651,23 @@ float gnt(vec2 p, vec2 ti) {
 }
 """
 
+    /**
+     * 頂點著色器用的 value noise（全精度；Mali-400 系列的頂點著色器不能讀貼圖，用雜湊）。
+     * 低頻、平滑的量（位移場、扭曲座標）放在頂點算再內插：片段著色器是半精度，這些量算到後面誤差會被放大成鋸齒。
+     * u_vt／u_vf＝u_p[14]／u_p[15]（[putTimes] 的時間整數／小數，頂點這邊加起來就是全精度的時間）。
+     */
+    const val VNOISE = """
+uniform vec4 u_vt;
+uniform vec4 u_vf;
+float hv(vec2 i) { return fract(sin(dot(i, vec2(127.1, 311.7))) * 43758.5453); }
+float gv(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = p - i;
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(hv(i), hv(i + vec2(1.0, 0.0)), f.x), mix(hv(i + vec2(0.0, 1.0)), hv(i + vec2(1.0, 1.0)), f.x), f.y);
+}
+"""
+
     /** 最多四個時間相位（取模 64）拆成整數（u_p[14]）與小數（u_p[15]），給 gt／gnt 用。 */
     fun putTimes(out: FloatArray, t0: Double, t1: Double = 0.0, t2: Double = 0.0, t3: Double = 0.0) {
         for ((k, t) in doubleArrayOf(t0, t1, t2, t3).withIndex()) {
@@ -673,6 +696,8 @@ void main() { v_uv = a_pos * 0.5 + 0.5; gl_Position = vec4(a_pos.x, a_pos.y * u_
 internal fun BgStyle.glVertex(): String = when (this) {
     BgStyle.SWIRL -> GlStyles.Swirl.VERTEX
     BgStyle.SIMPLEX -> GlStyles2.Simplex.VERTEX
+    BgStyle.WARP -> GlStyles2.Warp.VERTEX
+    BgStyle.WATERCOLOR -> Watercolor.VERTEX
     else -> GlBackground.VERTEX
 }
 

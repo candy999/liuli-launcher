@@ -100,7 +100,7 @@ void main() {
   shape *= smoothstep(0.2, 0.2 + 0.8 * u_p[0].z, lt);
   float mixer = shape * 3.0;
   // 柔邊（代替 fwidth）：mixer 每個繪製像素大約變 4.8·(0.64＋扭轉)／(解析度·半徑)，柔邊取約 0.7 個像素——邊緣銳利但不鋸齒
-  float soft = clamp(3.4 * (0.64 + twist) / (u_res.y * l), u_p[0].w, 0.3);
+  float soft = clamp(3.4 * (0.64 + twist) / (u_res.y * l), 0.011, 0.3);
   float m1 = smoothstep(0.5 - soft, 0.5 + soft, clamp(mixer, 0.0, 1.0));
   float m2 = smoothstep(0.5 - soft, 0.5 + soft, clamp(mixer - 1.0, 0.0, 1.0));
   float m3 = smoothstep(0.5 - soft, 0.5 + soft, clamp(mixer - 2.0, 0.0, 1.0));
