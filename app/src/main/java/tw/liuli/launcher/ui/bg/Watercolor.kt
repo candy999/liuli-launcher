@@ -148,6 +148,7 @@ internal object Watercolor {
 precision mediump float;
 uniform sampler2D u_noise;
 uniform sampler2D u_noiseL;
+uniform vec2 u_res;
 uniform vec4 u_p[14];
 varying vec2 v_uv;
 
@@ -169,8 +170,13 @@ vec3 drop(vec3 col, vec2 uv, vec4 a, vec4 b) {
   float r = a.z * (0.8 + 0.38 * n);
   float e = (dist - r) / a.z;
   // 邊緣與水痕要比 320×180 的一格寬很多（放大六倍），不然會變成鋸齒：柔邊約 0.08 個半徑、水痕約 0.07 個半徑寬
-  float inside = 1.0 - smoothstep(-0.05, 0.04, e);
-  float rim = exp(-(e + 0.06) * (e + 0.06) * 110.0);
+  // 邊緣柔化的寬度至少 3 個繪製像素（換算成這一滴半徑的比例）：小的水滴、低解析度時邊緣不會只剩一兩個像素而出現鋸齒
+  float px = 1.0 / (u_res.y * a.z);
+  float soft = max(0.06, 3.0 * px);
+  float inside = 1.0 - smoothstep(-soft, soft * 0.8, e);
+  float rw = max(0.095, 3.0 * px);
+  float re = (e + rw * 0.65) / rw;
+  float rim = exp(-re * re);
   // 顏料在水裡不均勻，而且跟著水流慢慢漂
   float body = 0.34 + 0.26 * g(q * 1.9 + b.w + 31.0 + vec2(0.0, u_p[13].z));
   float k = a.w * inside * clamp(body + rim * 0.55, 0.0, 1.0);
