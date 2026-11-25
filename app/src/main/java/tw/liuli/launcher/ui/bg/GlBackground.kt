@@ -65,7 +65,7 @@ object GlBackground {
 
     /** 水彩暈染整片都是柔邊，320×180 放大看不出差別（海信 480×270 一格約 30ms）。 */
     private fun startLevel(style: BgStyle) = when (style) {
-        BgStyle.WATERCOLOR, BgStyle.CURTAIN -> 1   // 極光簾：三層、每層六次雜訊取樣
+        BgStyle.WATERCOLOR, BgStyle.CURTAIN, BgStyle.SOFTAURORA -> 1   // 極光簾：三層、每層六次雜訊取樣；柔極光：三條帶、海信 480×270 要 60ms
         else -> 0
     }
 

@@ -94,7 +94,7 @@ internal object LiquidEther {
         project()
         advect(d0, d, dt)
         t = d; d = d0; d0 = t
-        val kv = exp(-dt * .35f); val kd = exp(-dt * .28f)
+        val kv = exp(-dt * .3f); val kd = exp(-dt * .12f)
         for (i in 0 until N) { u[i] *= kv; v[i] *= kv; d[i] *= kd }
     }
 
@@ -117,13 +117,13 @@ internal object LiquidEther {
             val a = at * .45f
             val ax = (st.fx + .22f * sin(a)).coerceIn(.05f, .95f) * (W - 1)
             val ay = (st.fy + .16f * sin(a * 2f)).coerceIn(.05f, .95f) * (H - 1)
-            splat(ax, ay, cos(a) * 10f, cos(a * 2f) * 7f, dt * .35f, 2.6f, .15f)
+            splat(ax, ay, cos(a) * 12f, cos(a * 2f) * 8f, dt * 1.4f, 3.4f, .18f)
             step(dt)
         }
         // 寫出：R＝流速、G＝顏料濃度
         front.position(0)
         for (i in 0 until N) {
-            val sp = sqrt(u[i] * u[i] + v[i] * v[i]) * .09f
+            val sp = sqrt(u[i] * u[i] + v[i] * v[i]) * .12f
             front.put((min(1f, sp) * 255f).toInt().toByte())
             front.put((min(1f, abs(d[i])) * 255f).toInt().toByte())
             front.put(0); front.put(-1)

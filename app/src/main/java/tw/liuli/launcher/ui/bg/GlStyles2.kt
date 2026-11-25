@@ -190,28 +190,28 @@ void main() {
             out[4] = wrap(t * .21, TAU); out[5] = wrap(t * .13, TAU); out[6] = wrap(t * .05, 64.0); out[7] = wrap(t * .09, TAU)
             put(out, 8, c(st, 20f, .6f, .025f))
             put(out, 12, c(st, 30f, .5f, .09f))
-            put(out, 16, c(st, 0f, .95f, .55f))
-            put(out, 20, c(st, 55f, .9f, .55f))
+            put(out, 16, c(st, 0f, .95f, .42f))
+            put(out, 20, c(st, 55f, .9f, .42f))
         }
 
         const val SHADER = HEAD + """
 vec3 band(vec2 uv, float k, float y0, float amp) {
   float x = uv.x * u_p[0].x;
   float w = 0.06 * sin(x * 2.1 + u_p[1].x + k * 1.7) + 0.035 * sin(x * 4.3 - u_p[1].y * 1.3 + k * 2.9)
-          + 0.05 * gn(vec2(x * 1.1 + k * 7.0, u_p[1].z));
+          + 0.1 * (g(vec2(x * 1.1 + k * 7.0, u_p[1].z)) - 0.5);
   float d = uv.y - (y0 + w);
-  float th = 0.035 + 0.035 * g(vec2(x * 1.7 + k * 5.0, u_p[1].z * 0.7));
+  float th = 0.03 + 0.03 * g(vec2(x * 1.7 + k * 5.0, u_p[1].z * 0.7));
   float glow = exp(-d * d / (th * th));
-  float tail = exp(-max(-d, 0.0) * 5.0) * step(d, 0.0) * 0.45;
-  float rays = 0.75 + 0.25 * g(vec2(x * 22.0, k * 13.0));
+  float tail = exp(-max(-d, 0.0) * 5.0) * step(d, 0.0) * 0.35;
+  float rays = 0.8 + 0.2 * sin(x * 70.0 + k * 3.0);
   vec3 c = mix(u_p[4].rgb, u_p[5].rgb, 0.5 + 0.5 * sin(x * 1.3 + k * 2.0 + u_p[1].w));
-  return c * (glow * 0.9 + tail * rays) * amp;
+  return c * (glow * 0.6 + tail * rays) * amp;
 }
 void main() {
   vec2 uv = v_uv;
   vec3 light = band(uv, 0.0, 0.36, 1.0) + band(uv, 1.0, 0.50, 0.7) + band(uv, 2.0, 0.27, 0.45);
   vec3 sky = mix(u_p[3].rgb, u_p[2].rgb, uv.y);
-  vec3 col = sky + (1.0 - exp(-light * 1.5));
+  vec3 col = sky + (1.0 - exp(-light * 1.1));
   """ + DITHER + """
   gl_FragColor = vec4(col, 1.0);
 }
