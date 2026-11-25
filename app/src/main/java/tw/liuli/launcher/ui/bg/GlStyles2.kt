@@ -203,7 +203,8 @@ void main() {
   float l = max(length(uv), 0.001);
   float stripe = fract(l + atan(uv.y, uv.x) / 6.2831853 - u_p[1].x);
   float shape = 2.0 * abs(stripe - 0.5);
-  float px = 1.5 * (5.6 * u_p[0].x / u_res.x) * (1.0 + 0.16 / l);
+  // 柔邊約 2.2 個像素：半徑 ×5.6 之後在半精度下只準到約 0.004，柔邊太窄邊緣會起毛
+  float px = 2.2 * (5.6 * u_p[0].x / u_res.x) * (1.0 + 0.16 / l);
   float res = smoothstep(0.5 - px, 0.5 + px, shape);
   vec3 col = mix(u_p[2].rgb, u_p[3].rgb, res);
   """ + DITHER + """

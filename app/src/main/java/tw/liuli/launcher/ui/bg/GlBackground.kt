@@ -76,7 +76,7 @@ object GlBackground {
      * 起始檔位（[SIZES] 的索引；0＝1920×1080、2＝960×540、3＝800×450、4＝640×360、5＝480×270、6＝320×180）。
      * 全部每秒 30 格（以前有些樣式每秒 15 格換解析度，流動看得出卡），解析度照 30 格的 GPU 預算（一張 20ms 以內）挑。
      * 海信 Mali-470 實測（一張的 GPU 時間）：螺旋 960 約 9ms、特魯謝緞帶 14ms、液態以太 13ms、漩渦 960 要 21ms → 800；
-     * 色塊雜訊、扭曲色帶 640 約 12～14ms；水彩 640 要 33ms → 480；極光簾 320 約 18ms。
+     * 色塊雜訊、扭曲色帶、水彩（每滴只畫自己的範圍）、柔極光（帶子的形狀在頂點算）640 約 14～16ms；極光簾 320 約 18ms。
      */
     private fun startLevel(style: BgStyle) = when (style) {
         BgStyle.SPIRAL, BgStyle.TRUCHET, BgStyle.BLINDS, BgStyle.LIQUID -> 2
