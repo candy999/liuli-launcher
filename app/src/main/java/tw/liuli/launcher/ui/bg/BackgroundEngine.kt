@@ -897,8 +897,11 @@ class BackgroundEngine {
      * 電視 CPU 上這一套約 30～40ms，以前放在主執行緒會讓每次背景更新都卡一格；現在 UI 完全不等它。
      */
     suspend fun runGlass() {
+        var gN = 0; var gDraw = 0L; var gRest = 0L; var gSince = 0L
         while (true) {
             glassReq.receive()
+            val g0 = System.nanoTime()
+            var g1 = 0L
             workState.copyFrom(st)
             val s = style
             val revealed = started.isCompleted
@@ -913,12 +916,21 @@ class BackgroundEngine {
                         }
                     }
                     workBitmap.getPixels(px, 0, GLASS_W, 0, 0, GLASS_W, GLASS_H)
+                    g1 = System.nanoTime()
                     repeat(3) {
                         boxBlurH(px, tmp, GLASS_W, GLASS_H, BLUR_R)
                         boxBlurV(tmp, px, GLASS_W, GLASS_H, BLUR_R)
                     }
                 }
                 expose(px)
+            }
+            // 量測：玻璃小圖每張的 CPU 成本（畫樣式／模糊＋過曝）與每秒張數，每 60 張印一次
+            val g2 = System.nanoTime()
+            if (g1 != 0L) { gDraw += g1 - g0; gRest += g2 - g1 }
+            if (gN == 0) gSince = g0
+            if (++gN >= 60) {
+                Log.i(TAG, "glass ${s.id}: draw %.1fms + blur %.1fms, %.1f/s".format(gDraw / 60 / 1e6f, gRest / 60 / 1e6f, 60e9f / (g2 - gSince)))
+                gN = 0; gDraw = 0; gRest = 0
             }
             glassBitmap.setPixels(px, 0, GLASS_W, 0, 0, GLASS_W, GLASS_H)
             // 轉場中：等下一格背景一起重畫（省一次整個畫面的重繪）；靜止時立刻更新
