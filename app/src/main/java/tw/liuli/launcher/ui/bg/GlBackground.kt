@@ -114,8 +114,6 @@ object GlBackground {
     private var noiseTex = 0
     private var noiseTexL = 0
     private var noiseTexQ = 0
-    private var grid: FloatBuffer? = null
-    private var gridIdx: java.nio.ShortBuffer? = null
     private var readBuf: ByteBuffer? = null
     private val ring = arrayOfNulls<Bitmap>(3)
     private var ringI = 0
@@ -208,7 +206,7 @@ object GlBackground {
                 for (sz in arrayOf(intArrayOf(480, 270), intArrayOf(960, 540), intArrayOf(1920, 1080))) {
                     ensureGl(sz[0], sz[1])
                     if (!EGL14.eglMakeCurrent(dpy, surf, surf, ctx)) continue
-                    val prog = programs.getOrPut(style) { Program(style.glVertex(), style.glShader()) }
+                    val prog = programs.getOrPut(style) { Program(style) }
                     pass(prog, sz[0], sz[1], false); GLES20.glFinish()
                     val ts = LongArray(8)
                     for (i in ts.indices) {
@@ -284,8 +282,8 @@ object GlBackground {
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, noiseTexL)
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, noiseTex)
-        prog.bind(w, h, work, grid!!, flipY)
-        GLES20.glDrawElements(GLES20.GL_TRIANGLES, GRID_X * GRID_Y * 6, GLES20.GL_UNSIGNED_SHORT, gridIdx!!)
+        prog.bind(w, h, work, prog.grid, flipY)
+        GLES20.glDrawElements(GLES20.GL_TRIANGLES, prog.gridN, GLES20.GL_UNSIGNED_SHORT, prog.gridIdx)
     }
 
     private var dataTex = 0
@@ -339,7 +337,7 @@ object GlBackground {
             if (win != EGL14.EGL_NO_SURFACE) {
                 if (winLevel != lv) { t.setDefaultBufferSize(w, h); winLevel = lv }
                 if (!EGL14.eglMakeCurrent(dpy, win, win, ctx)) throw IllegalStateException("eglMakeCurrent(window)")
-                val prog = programs.getOrPut(style) { Program(style.glVertex(), style.glShader()) }
+                val prog = programs.getOrPut(style) { Program(style) }
                 // 每 4 格量一次 GPU 耗時（glFinish 會讓 CPU 等 GPU，平常不用）；玻璃小圖每 2 格更新一次（玻璃很模糊，看不出差別）
                 val n = frameNo++
                 val timed = n % 4 == 0L
@@ -367,7 +365,7 @@ object GlBackground {
         if (lv < 4) { w = SIZES[4][0]; h = SIZES[4][1] }
         if (!ensureGl(w, h)) return null
         if (!EGL14.eglMakeCurrent(dpy, surf, surf, ctx)) throw IllegalStateException("eglMakeCurrent")
-        val prog = programs.getOrPut(style) { Program(style.glVertex(), style.glShader()) }
+        val prog = programs.getOrPut(style) { Program(style) }
         val t0 = SystemClock.elapsedRealtimeNanos()
         pass(prog, w, h, flipY = false)
         GLES20.glFinish()
@@ -466,22 +464,6 @@ object GlBackground {
     }
 
     private fun initResources() {
-        // 全螢幕網格（不是一個四邊形）：低頻的座標扭曲、漩渦放在頂點著色器算（Mali-470 的頂點處理器是全精度，
-        // 而且只有 97×55 個頂點），片段著色器拿內插好的座標，每個像素省下所有三角函數
-        val g = ByteBuffer.allocateDirect((GRID_X + 1) * (GRID_Y + 1) * 2 * 4).order(ByteOrder.nativeOrder()).asFloatBuffer()
-        for (j in 0..GRID_Y) for (i in 0..GRID_X) { g.put(i * 2f / GRID_X - 1f); g.put(j * 2f / GRID_Y - 1f) }
-        g.position(0)
-        grid = g
-        val ix = ByteBuffer.allocateDirect(GRID_X * GRID_Y * 6 * 2).order(ByteOrder.nativeOrder()).asShortBuffer()
-        for (j in 0 until GRID_Y) for (i in 0 until GRID_X) {
-            val a = (j * (GRID_X + 1) + i).toShort()
-            val b = (a + 1).toShort()
-            val c = (a + GRID_X + 1).toShort()
-            val d = (c + 1).toShort()
-            ix.put(a); ix.put(b); ix.put(c); ix.put(b); ix.put(d); ix.put(c)
-        }
-        ix.position(0)
-        gridIdx = ix
         // 共用的雜訊貼圖：64×64、每個像素 RGBA 四個獨立的均勻亂數（xorshift32）。2 的次方尺寸，ES 2.0 才能 REPEAT
         val n = 64
         val px = ByteBuffer.allocateDirect(n * n * 4).order(ByteOrder.nativeOrder())
@@ -543,17 +525,40 @@ object GlBackground {
         surfW = 0; surfH = 0; warm = 0; nFrames = 0; sumGpu = 0; sumCopy = 0
     }
 
-    // 96×54（約 20 像素一格）：頂點著色器裡算的量（色塊雜訊、扭曲色帶的座標、水彩的水流）線性內插的誤差要小到看不出折角
-    private const val GRID_X = 96
-    private const val GRID_Y = 54
+    /**
+     * 全螢幕網格（不是一個四邊形）的格數：低頻的量放在頂點著色器算（全精度），片段著色器拿內插好的值。
+     * 在頂點算的量越細，網格要越密，內插的折角才看不出來（扭曲色帶 96×54、色塊雜訊 64×36）；
+     * 但網格太密，三角形只剩幾個像素，Mali-470 的片段處理效率會掉很多（極光簾 320×180 配 96×54 從 15ms 變 35ms），其他樣式用 32×18。
+     */
+    private fun gridSize(style: BgStyle) = when (style) {
+        BgStyle.WARP -> 96 to 54
+        BgStyle.SIMPLEX -> 64 to 36
+        else -> 32 to 18
+    }
 
     /**
      * 一個著色器樣式：全螢幕網格＋頂點／片段著色器。uniform：u_res（像素）、u_noise（雜訊貼圖）、
      * u_p[0..PARAMS／4)（片段著色器用的樣式參數，vec4 陣列）、u_w／u_v1（頂點著色器用，＝u_p[0]／u_p[1]；分開宣告，兩邊的精度才不會衝突）、
      * u_noiseL（線性內插的雜訊貼圖，第 1 個貼圖單元）。
      */
-    private class Program(vert: String, frag: String) {
+    private class Program(vert: String, frag: String, gx: Int, gy: Int) {
+        constructor(style: BgStyle) : this(style.glVertex(), style.glShader(), gridSize(style).first, gridSize(style).second)
         val id: Int
+        val grid: FloatBuffer = ByteBuffer.allocateDirect((gx + 1) * (gy + 1) * 2 * 4).order(ByteOrder.nativeOrder()).asFloatBuffer().also { g ->
+            for (j in 0..gy) for (i in 0..gx) { g.put(i * 2f / gx - 1f); g.put(j * 2f / gy - 1f) }
+            g.position(0)
+        }
+        val gridN = gx * gy * 6
+        val gridIdx: java.nio.ShortBuffer = ByteBuffer.allocateDirect(gridN * 2).order(ByteOrder.nativeOrder()).asShortBuffer().also { ix ->
+            for (j in 0 until gy) for (i in 0 until gx) {
+                val a = (j * (gx + 1) + i).toShort()
+                val b = (a + 1).toShort()
+                val c = (a + gx + 1).toShort()
+                val d = (c + 1).toShort()
+                ix.put(a); ix.put(b); ix.put(c); ix.put(b); ix.put(d); ix.put(c)
+            }
+            ix.position(0)
+        }
         private val aPos: Int
         private val uRes: Int
         private val uNoise: Int
