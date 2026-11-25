@@ -77,6 +77,7 @@ object GlBackground {
     }
     private var reqN = 0
     private var measuredStyle: BgStyle? = null
+    private var slowWins = 0
     private val SIZES = arrayOf(intArrayOf(480, 270), intArrayOf(320, 180))
     private const val SLOW_MS = 20f
 
@@ -360,15 +361,19 @@ object GlBackground {
 
     /** [read]：讀回（直接顯示時＝交換緩衝）；[copy]：直接顯示時＝玻璃小圖（畫＋讀回）。 */
     private fun measure(style: BgStyle, lv: Int, w: Int, h: Int, gpu: Long, read: Long, copy: Long, direct: Boolean) {
-        if (style != measuredStyle) { measuredStyle = style; warm = 10; nFrames = 0; sumGpu = 0; sumRead = 0; sumCopy = 0 }
+        if (style != measuredStyle) { measuredStyle = style; warm = 10; nFrames = 0; sumGpu = 0; sumRead = 0; sumCopy = 0; slowWins = 0 }
         if (warm < 20) { warm++; return } // 剛建好 context、編譯著色器、換樣式的前幾格特別慢
         sumGpu += gpu; sumRead += read; sumCopy += copy
         if (++nFrames < 30) return
         val g = (if (direct) sumGpu else sumGpu + sumRead) / nFrames / 1e6f
         if (verbose || reports++ < 3) Log.i(TAG, "${style.id} ${w}x$h ${if (direct) "direct: gpu %.1fms + swap %.1fms, glass %.1fms" else "readback: gpu %.1fms + read %.1fms, -%.0f"}".format(sumGpu / nFrames / 1e6f, sumRead / nFrames / 1e6f, sumCopy / nFrames / 1e6f))
         nFrames = 0; sumGpu = 0; sumRead = 0; sumCopy = 0
-        // 每兩格才畫一張的樣式（每秒 15 格），一張可以花比較久：門檻跟著放寬（GPU 佔用的比例一樣）
-        if (debugLevel < 0 && lv == 0 && g > SLOW_MS * kotlin.math.sqrt(every(style).toFloat())) {
+        // 每兩格才畫一張的樣式（每秒 15 格），一張可以花比較久：門檻跟著放寬（GPU 佔用的比例一樣）。
+        // 要連續三窗（約 12 秒）都慢才降：冷啟動、開抽屜那幾秒 GPU 被介面佔住，量到的會暫時偏高（海信上網格漸層曾因此被永久降成 320×180）
+        val slow = g > SLOW_MS * kotlin.math.sqrt(every(style).toFloat())
+        slowWins = if (slow) slowWins + 1 else 0
+        if (debugLevel < 0 && lv == 0 && slowWins >= 3) {
+            slowWins = 0
             levels[style.ordinal] = 1
             warm = 10
             Log.i(TAG, "太慢（%.1fms），改用 ${SIZES[1][0]}x${SIZES[1][1]}".format(g))
