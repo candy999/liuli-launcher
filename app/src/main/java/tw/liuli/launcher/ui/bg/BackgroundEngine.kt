@@ -47,6 +47,9 @@ enum class BgStyle(val id: String, val label: String, val note: String, val ambi
     DOTS("dots", "波點圓圈", "遠近兩層波點，焦點處聚光"),
     TRIANGLES("triangles", "幾何三角", "曲面隆起並跟著焦點移動，三角面拉伸變形"),
     MESH("mesh", "網格漸層", "幾團顏色沿著各自的軌跡緩緩流動、互相暈染，最亮的那團跟著焦點", ambient = true, gl = true),
+    INK("ink", "墨流", "墨色在水裡沿著流線擴散，焦點附近的水輕輕旋轉", ambient = true, gl = true),
+    SWIRL("swirl", "漩渦", "幾條色帶繞著焦點緩緩旋轉，越靠近中心扭得越緊", ambient = true, gl = true),
+    BLINDS("blinds", "漸層百葉", "一排直立的百葉片，朝向焦點的那一側亮起，焦點處聚光", gl = true),
     SOLID("solid", "純色", "雙色漸層純色"),
     BLACK("black", "純黑（OLED）", "幾乎全黑，焦點下方一抹主色");
 

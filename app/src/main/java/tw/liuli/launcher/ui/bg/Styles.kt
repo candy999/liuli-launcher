@@ -148,16 +148,20 @@ private fun DrawScope.drawStyleRaw(style: BgStyle, st: BgState, skipFront: Boole
         BgStyle.BEAMS -> beams(st)
         BgStyle.SOLID -> solid(st)
         BgStyle.BLACK -> black(st)
-        BgStyle.MESH -> glStyle(st)
+        BgStyle.MESH, BgStyle.INK, BgStyle.SWIRL, BgStyle.BLINDS -> glStyle(style, st)
     }
 }
 
 // ───────────── 著色器樣式（GlBackground 畫好的小圖拉伸到整個畫面） ─────────────
 
-private fun DrawScope.glStyle(st: BgState) {
-    val bmp = if (GlBackground.failed) null else GlBackground.current
-    if (bmp == null) with(MeshGradient) { fallback(st, W, H) }
-    else drawRect(MeshGradient.brush(bmp), size = FULL)
+private fun DrawScope.glStyle(style: BgStyle, st: BgState) {
+    // 小圖要是這個樣式畫的才用（剛切換樣式時 current 還是上一個樣式的）
+    val bmp = if (GlBackground.failed || GlBackground.currentStyle != style) null else GlBackground.current
+    when {
+        bmp != null -> drawRect(MeshGradient.brush(bmp), size = FULL)
+        style == BgStyle.MESH -> with(MeshGradient) { fallback(st, W, H) }
+        else -> { base(st); focusGlow(st, W * .45f, .55f); vignette(.5f) }
+    }
 }
 
 // ───────────── 共用 ─────────────

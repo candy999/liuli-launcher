@@ -46,6 +46,10 @@ object GlBackground {
     @Volatile var current: Bitmap? = null
         private set
 
+    /** [current] 是哪個樣式畫的（剛切換樣式時還是上一個的，玻璃先不要用）。 */
+    @Volatile var currentStyle: BgStyle? = null
+        private set
+
     /** [current] 每換一次加一；全螢幕背景在繪製階段讀它（著色器樣式不跟著引擎的 frame 重畫，等新圖來才畫）。 */
     var version by mutableLongStateOf(0L)
         private set
@@ -79,6 +83,7 @@ object GlBackground {
     private var surfH = 0
     private val programs = HashMap<BgStyle, Program>()
     private var noiseTex = 0
+    private var noiseTexL = 0
     private var grid: FloatBuffer? = null
     private var gridIdx: java.nio.ShortBuffer? = null
     private var readBuf: ByteBuffer? = null
@@ -122,6 +127,11 @@ object GlBackground {
     val textureListener = object : android.view.TextureView.SurfaceTextureListener {
         override fun onSurfaceTextureAvailable(st: android.graphics.SurfaceTexture, w: Int, h: Int) {
             ensureThread().post { destroyWindow(); tex = st; winLevel = -1 }
+            // 只在轉場時動的樣式（百葉）：背景停著就不會再來要求，新的 TextureView 要用最後一次的參數補畫一張
+            val go = synchronized(lock) {
+                if (pendStyle == null || inFlight) false else { hasPending = true; inFlight = true; true }
+            }
+            if (go) ensureThread().post(render)
         }
         override fun onSurfaceTextureDestroyed(st: android.graphics.SurfaceTexture): Boolean {
             directShown = false
@@ -196,7 +206,7 @@ object GlBackground {
             }
         }
         main.post {
-            if (out != null) { current = out; version++ }
+            if (out != null) { current = out; currentStyle = style; version++ }
             if (shown && !directShown) directShown = true
             if (failed) version++
             val again = synchronized(lock) { if (hasPending && !failed) true else { inFlight = false; false } }
@@ -207,6 +217,8 @@ object GlBackground {
     private fun pass(prog: Program, w: Int, h: Int, flipY: Boolean) {
         GLES20.glViewport(0, 0, w, h)
         GLES20.glUseProgram(prog.id)
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE1)
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, noiseTexL)
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, noiseTex)
         prog.bind(w, h, work, grid!!, flipY)
@@ -380,15 +392,20 @@ object GlBackground {
             px.putInt(z)
         }
         px.position(0)
-        val ids = IntArray(1)
-        GLES20.glGenTextures(1, ids, 0)
+        // 同一份資料兩個貼圖物件：最近鄰（抖色）與線性內插（當 value noise 用；ES 2.0 的取樣方式綁在貼圖上）
+        val ids = IntArray(2)
+        GLES20.glGenTextures(2, ids, 0)
         noiseTex = ids[0]
-        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, noiseTex)
-        GLES20.glTexImage2D(GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, n, n, 0, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, px)
-        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_NEAREST)
-        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_NEAREST)
-        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_REPEAT)
-        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_REPEAT)
+        noiseTexL = ids[1]
+        for ((id, filter) in listOf(noiseTex to GLES20.GL_NEAREST, noiseTexL to GLES20.GL_LINEAR)) {
+            px.position(0)
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, id)
+            GLES20.glTexImage2D(GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, n, n, 0, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, px)
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, filter)
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, filter)
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_REPEAT)
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_REPEAT)
+        }
         val ext = GLES20.glGetString(GLES20.GL_EXTENSIONS) ?: ""
         Log.i(TAG, "GL ${GLES20.glGetString(GLES20.GL_RENDERER)} / ${GLES20.glGetString(GLES20.GL_VERSION)}, derivatives=${ext.contains("GL_OES_standard_derivatives")}")
     }
@@ -397,6 +414,7 @@ object GlBackground {
         destroyWindow()
         programs.clear()
         noiseTex = 0
+        noiseTexL = 0
         readBuf = null
         if (dpy != EGL14.EGL_NO_DISPLAY) {
             EGL14.eglMakeCurrent(dpy, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_CONTEXT)
@@ -413,7 +431,8 @@ object GlBackground {
 
     /**
      * 一個著色器樣式：全螢幕網格＋頂點／片段著色器。uniform：u_res（像素）、u_noise（雜訊貼圖）、
-     * u_p[0..PARAMS／4)（片段著色器用的樣式參數，vec4 陣列）、u_w（頂點著色器用，＝u_p[0]；分開宣告，兩邊的精度才不會衝突）。
+     * u_p[0..PARAMS／4)（片段著色器用的樣式參數，vec4 陣列）、u_w／u_v1（頂點著色器用，＝u_p[0]／u_p[1]；分開宣告，兩邊的精度才不會衝突）、
+     * u_noiseL（線性內插的雜訊貼圖，第 1 個貼圖單元）。
      */
     private class Program(vert: String, frag: String) {
         val id: Int
@@ -423,6 +442,8 @@ object GlBackground {
         private val uP: Int
         private val uW: Int
         private val uFy: Int
+        private val uV1: Int
+        private val uNoiseL: Int
 
         init {
             val vs = compile(GLES20.GL_VERTEX_SHADER, vert)
@@ -440,6 +461,8 @@ object GlBackground {
             uP = GLES20.glGetUniformLocation(id, "u_p")
             uW = GLES20.glGetUniformLocation(id, "u_w")
             uFy = GLES20.glGetUniformLocation(id, "u_fy")
+            uV1 = GLES20.glGetUniformLocation(id, "u_v1")
+            uNoiseL = GLES20.glGetUniformLocation(id, "u_noiseL")
         }
 
         fun bind(w: Int, h: Int, p: FloatArray, quad: FloatBuffer, flipY: Boolean) {
@@ -450,6 +473,8 @@ object GlBackground {
             // 參數以 vec4 陣列傳入（PARAMS／4 個），著色器裡用常數索引取用
             if (uP >= 0) GLES20.glUniform4fv(uP, PARAMS / 4, p, 0)
             if (uW >= 0) GLES20.glUniform4fv(uW, 1, p, 0)
+            if (uV1 >= 0) GLES20.glUniform4fv(uV1, 1, p, 4)
+            if (uNoiseL >= 0) GLES20.glUniform1i(uNoiseL, 1)
             GLES20.glEnableVertexAttribArray(aPos)
             GLES20.glVertexAttribPointer(aPos, 2, GLES20.GL_FLOAT, false, 0, quad)
         }
@@ -477,17 +502,25 @@ void main() { v_uv = a_pos * 0.5 + 0.5; gl_Position = vec4(a_pos.x, a_pos.y * u_
 /** 著色器樣式的頂點著色器。 */
 internal fun BgStyle.glVertex(): String = when (this) {
     BgStyle.MESH -> MeshGradient.VERTEX
+    BgStyle.INK -> GlStyles.Ink.VERTEX
+    BgStyle.SWIRL -> GlStyles.Swirl.VERTEX
     else -> GlBackground.VERTEX
 }
 
 /** 著色器樣式的片段著色器原始碼。 */
 internal fun BgStyle.glShader(): String = when (this) {
     BgStyle.MESH -> MeshGradient.SHADER
+    BgStyle.INK -> GlStyles.Ink.SHADER
+    BgStyle.SWIRL -> GlStyles.Swirl.SHADER
+    BgStyle.BLINDS -> GlStyles.Blinds.SHADER
     else -> error("不是著色器樣式：$id")
 }
 
 /** 著色器樣式的參數（主執行緒每格算一次：時間相位取模、色點軌跡、調色盤）。 */
 internal fun BgStyle.glParams(st: BgState, out: FloatArray) = when (this) {
     BgStyle.MESH -> MeshGradient.params(st, out)
+    BgStyle.INK -> GlStyles.Ink.params(st, out)
+    BgStyle.SWIRL -> GlStyles.Swirl.params(st, out)
+    BgStyle.BLINDS -> GlStyles.Blinds.params(st, out)
     else -> Unit
 }
