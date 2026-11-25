@@ -7,10 +7,8 @@ import kotlin.math.sin
 /**
  * 第三批著色器樣式。共同規則同 [GlStyles]：時間在 CPU 端（雙精度）算好、取模後才傳進來；片段著色器只用 mediump；
  * 亂數一律查雜訊貼圖——
- * - g(p)：value noise（線性內插貼圖＋smoothstep 座標，一次取樣），週期 64
- * - gn(p)：梯度雜訊（Perlin 式；四個角的梯度查最近鄰貼圖），範圍約 −1～1，週期 64。用來代替 Paper 的 snoise
- *   （snoise 的 permute 是 mod(x·34, 289)，半精度下會溢位成條紋）
- * 雜訊的時間漂移取模 64 後接得起來（貼圖以 64 格為週期）。
+ * - g／gt：value noise；gn／gnt：梯度雜訊（Perlin 式，代替 Paper 的 snoise——它的 permute 在半精度下會溢位成條紋）。見 [GlBackground.NOISE]
+ * - 時間漂移拆成整數與小數（[GlBackground.putTimes]），座標才保持很小、半精度下不會一格一格
  *
  * 參數：u_p[0] 固定是 (畫面寬高比, 焦點 x, 焦點 y, 脈動)，其餘各樣式自己定義。
  */
@@ -34,26 +32,9 @@ precision mediump float;
 uniform sampler2D u_noise;
 uniform sampler2D u_noiseL;
 uniform vec2 u_res;
-uniform vec4 u_p[14];
+uniform vec4 u_p[16];
 varying vec2 v_uv;
-float g(vec2 p) {
-  vec2 i = floor(p);
-  vec2 f = fract(p);
-  f = f * f * (3.0 - 2.0 * f);
-  return texture2D(u_noiseL, (i + f + 0.5) / 64.0).r;
-}
-vec2 gr(vec2 i) { return texture2D(u_noise, (i + 0.5) / 64.0).rg * 2.0 - 1.0; }
-float gn(vec2 p) {
-  vec2 i = floor(p);
-  vec2 f = fract(p);
-  vec2 u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
-  float a = dot(gr(i), f);
-  float b = dot(gr(i + vec2(1.0, 0.0)), f - vec2(1.0, 0.0));
-  float c = dot(gr(i + vec2(0.0, 1.0)), f - vec2(0.0, 1.0));
-  float d = dot(gr(i + vec2(1.0, 1.0)), f - vec2(1.0, 1.0));
-  return 1.6 * mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
-}
-"""
+""" + GlBackground.NOISE
     private const val DITHER = GlBackground.TONE + "col += (texture2D(u_noise, gl_FragCoord.xy / 64.0).rgb - 0.5) / 255.0;"
 
     // ───────────── 色塊雜訊（Paper simplex-noise） ─────────────
@@ -67,7 +48,7 @@ float gn(vec2 p) {
         fun params(st: BgState, out: FloatArray) {
             head(st, out)
             val t = st.at * .1                          // Paper：0.2 × u_time × speed 0.5
-            out[4] = wrap(.3 * t, 64.0); out[5] = wrap(.32 * t, 64.0)
+            GlBackground.putTimes(out, .3 * t, .32 * t)
             put(out, 8, c(st, -150f, .6f, .45f))
             put(out, 12, c(st, 10f, .9f, .78f))
             put(out, 16, c(st, 0f, .95f, .58f))
@@ -85,7 +66,7 @@ float ss(float m) {
 }
 void main() {
   vec2 s = (v_uv - 0.5) * vec2(u_p[0].x, 1.0) * 0.75;
-  float n = 0.5 * gn(s - vec2(0.0, u_p[1].x)) + 0.5 * gn(2.0 * s + vec2(0.0, u_p[1].y));
+  float n = 0.5 * gnt(s - vec2(0.0, u_p[15].x), vec2(0.0, -u_p[14].x)) + 0.5 * gnt(2.0 * s + vec2(0.0, u_p[15].y), vec2(0.0, u_p[14].y));
   float shape = 0.5 + 0.5 * n;
   float mixer = (shape - 0.1) * 5.0;
   vec3 col = u_p[2].rgb;
@@ -112,7 +93,7 @@ void main() {
         fun params(st: BgState, out: FloatArray) {
             head(st, out)
             val t = .0625 * (st.at * .5 + 118.0)
-            out[4] = wrap(t, 64.0); out[5] = wrap(t, TAU)
+            GlBackground.putTimes(out, t); out[5] = wrap(t, TAU)
             out[6] = .25f + .15f * st.pulse; out[7] = .8f
             put(out, 8, c(st, 0f, .25f, .07f))
             put(out, 12, c(st, 0f, .95f, .70f))
@@ -123,9 +104,8 @@ void main() {
         const val SHADER = HEAD + """
 void main() {
   vec2 uv = (v_uv - 0.5) * vec2(u_p[0].x, 1.0) * 2.2;
-  float t = u_p[1].x;
-  float n1 = g(uv + t);
-  float n2 = g(uv * 2.0 - t);
+  float n1 = gt(uv + u_p[15].x, vec2(u_p[14].x));
+  float n2 = gt(uv * 2.0 - u_p[15].x, vec2(-u_p[14].x));
   float a = n1 * 6.2831853;
   uv += 4.0 * u_p[1].z * n2 * vec2(cos(a), sin(a));
   float tt = u_p[1].y;
@@ -158,7 +138,7 @@ void main() {
     object Spiral {
         fun params(st: BgState, out: FloatArray) {
             head(st, out)
-            out[4] = wrap(st.at * .35 + st.ripple * .8, TAU)
+            out[4] = wrap(st.at * .35 + st.ripple * .8, TAU) / TAU.toFloat()
             put(out, 8, c(st, 0f, .85f, .09f))
             put(out, 12, c(st, 15f, .75f, .50f))
         }
@@ -167,8 +147,7 @@ void main() {
 void main() {
   vec2 uv = (v_uv - u_p[0].yz) * vec2(u_p[0].x, 1.0) * 5.6;
   float l = max(length(uv), 0.001);
-  float ang = atan(uv.y, uv.x) - u_p[1].x;
-  float stripe = fract(l + ang / 6.2831853);
+  float stripe = fract(l + atan(uv.y, uv.x) / 6.2831853 - u_p[1].x);
   float shape = 2.0 * abs(stripe - 0.5);
   float px = 1.5 * (5.6 * u_p[0].x / u_res.x) * (1.0 + 0.16 / l);
   float res = smoothstep(0.5 - px, 0.5 + px, shape);
@@ -189,7 +168,7 @@ void main() {
         fun params(st: BgState, out: FloatArray) {
             head(st, out)
             val t = st.at.toDouble()
-            out[4] = wrap(t * .21, TAU); out[5] = wrap(t * .13, TAU); out[6] = wrap(t * .05, 64.0); out[7] = wrap(t * .09, TAU)
+            out[4] = wrap(t * .21, TAU); out[5] = wrap(t * .13, TAU); out[7] = wrap(t * .09, TAU); GlBackground.putTimes(out, t * .05)
             put(out, 8, c(st, 20f, .6f, .025f))
             put(out, 12, c(st, 30f, .5f, .09f))
             put(out, 16, c(st, 0f, .95f, .42f))
@@ -200,9 +179,9 @@ void main() {
 vec3 band(vec2 uv, float k, float y0, float amp) {
   float x = uv.x * u_p[0].x;
   float w = 0.06 * sin(x * 2.1 + u_p[1].x + k * 1.7) + 0.035 * sin(x * 4.3 - u_p[1].y * 1.3 + k * 2.9)
-          + 0.1 * (g(vec2(x * 1.1 + k * 7.0, u_p[1].z)) - 0.5);
+          + 0.1 * (gt(vec2(x * 1.1, u_p[15].x), vec2(k * 7.0, u_p[14].x)) - 0.5);
   float d = uv.y - (y0 + w);
-  float th = 0.03 + 0.03 * g(vec2(x * 1.7 + k * 5.0, u_p[1].z * 0.7));
+  float th = 0.03 + 0.03 * gt(vec2(x * 1.7, u_p[15].x), vec2(k * 5.0 + 20.0, u_p[14].x));
   float glow = exp(-d * d / (th * th));
   float tail = exp(-max(-d, 0.0) * 5.0) * step(d, 0.0) * 0.35;
   float rays = 0.8 + 0.2 * sin(x * 70.0 + k * 3.0);
@@ -242,8 +221,9 @@ void main() {
             lastAt = st.at
             phase += dt * (.09 + act * .07)   // 雙精度，不取模（各相位的週期沒有公倍數，取模會跳）
             val t = phase
-            out[4] = wrap(t * .25, TAU); out[5] = wrap(t * .6, TAU); out[6] = wrap(t * .35, 64.0); out[7] = wrap(t * .2, 64.0)
-            out[8] = wrap(t * .4, 64.0); out[9] = wrap(t * .13, 64.0); out[10] = act.toFloat(); out[11] = 0f
+            out[4] = wrap(t * .25, TAU); out[5] = wrap(t * .6, TAU)
+            GlBackground.putTimes(out, t * .35, t * .2, t * .4, t * .13)
+            out[10] = act.toFloat(); out[11] = 0f
             put(out, 12, c(st, 0f, .9f, .45f))    // 光幕亮色（原版 0.10,0.84,0.40）
             put(out, 16, c(st, 20f, .85f, .16f))  // 光幕高處（0.025,0.28,0.32）
             put(out, 20, c(st, -5f, .8f, .85f))   // 亮邊（0.46,1.0,0.70）
@@ -261,12 +241,12 @@ void main() {
     float layer = float(i);
     float x = p.x + layer * 0.42;
     float bend = 0.15 * sin(x * 2.2 + u_p[1].x) + (0.03 + act * 0.08) * sin(x * 4.8 - u_p[1].y + layer);
-    float hem = -0.10 - layer * 0.13 + bend + (0.012 + act * 0.028) * (g(vec2(x * 15.0, u_p[1].z + layer)) - 0.5);
+    float hem = -0.10 - layer * 0.13 + bend + (0.012 + act * 0.028) * (gt(vec2(x * 15.0, u_p[15].x), vec2(0.0, u_p[14].x + layer)) - 0.5);
     float rise = p.y - hem;
-    float drift = x + rise * 0.1 + (0.017 + act * 0.015) * g(vec2(x * 8.0, u_p[1].w + layer));
-    float grain = g(vec2(drift * 60.0, u_p[2].x + layer * 4.0));
+    float drift = x + rise * 0.1 + (0.017 + act * 0.015) * gt(vec2(x * 8.0, u_p[15].y), vec2(0.0, u_p[14].y + layer));
+    float grain = gt(vec2(drift * 60.0, u_p[15].z), vec2(0.0, u_p[14].z + layer * 4.0));
     float threads = 0.36 + 0.64 * sqrt(grain) + 0.085;
-    float patches = 0.48 + 0.8 * g(vec2(x * 8.0 + layer, u_p[2].y));
+    float patches = 0.48 + 0.8 * gt(vec2(x * 8.0, u_p[15].w), vec2(layer, u_p[14].w));
     float reach = 5.5 + g(vec2(x * 11.0, layer + 4.0)) * 5.0 - act * 1.5;
     float veil = smoothstep(-0.012, 0.022, rise) * exp(-max(rise, 0.0) * reach);
     float lip = exp(-abs(rise) / (0.012 + grain * 0.013));
@@ -297,7 +277,7 @@ void main() {
     object Truchet {
         fun params(st: BgState, out: FloatArray) {
             head(st, out)
-            out[4] = wrap(st.at * .055, 64.0)
+            GlBackground.putTimes(out, st.at * .055)
             out[5] = .085f + (.35f + .4f * st.pulse) * .19f
             put(out, 8, c(st, 0f, .75f, .13f))    // 底（原版 0.33,0.043,0.11）
             put(out, 12, c(st, 40f, .85f, .48f))  // 緞帶（0.99,0.82,0.37）；調暗，整片圖樣才不會搶過圖示
@@ -307,8 +287,8 @@ void main() {
 
         const val SHADER = HEAD + """
 void main() {
-  vec2 p = (v_uv - 0.5) * vec2(u_p[0].x, 1.0) * 7.0 + vec2(u_p[1].x, 0.0);
-  vec2 id = floor(p);
+  vec2 p = (v_uv - 0.5) * vec2(u_p[0].x, 1.0) * 7.0 + vec2(u_p[15].x, 0.0);
+  vec2 id = mod(floor(p) + vec2(u_p[14].x, 0.0), 64.0);
   vec2 q = fract(p);
   if (texture2D(u_noise, (id + 0.5) / 64.0).a > 0.5) q.x = 1.0 - q.x;
   float d = min(abs(length(q) - 0.5), abs(length(q - 1.0) - 0.5));

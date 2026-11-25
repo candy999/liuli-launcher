@@ -105,7 +105,7 @@ internal object MeshGradient {
     const val SHADER = """
 precision mediump float;
 uniform sampler2D u_noise;
-uniform vec4 u_p[14];
+uniform vec4 u_p[16];
 varying vec2 v_uv;
 
 vec2 rot(vec2 v, float a) {

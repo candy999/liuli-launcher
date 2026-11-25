@@ -19,7 +19,7 @@ import kotlin.math.roundToInt
  * - 同時最多 [ACTIVE] 滴「活躍」的顏料：再滴下一滴時，最老的那一滴在 [RETIRE] 秒內快速淡出（不會突然消失）
  *
  * 參數：u_p[0]＝(紙 rgb, 畫面寬高比)；第 i 滴：u_p[1+2i]＝(x, y, 半徑, 濃度)、u_p[2+2i]＝(顏料透光色 rgb, 雜訊種子)；
- * u_p[13]＝水流的四個時間相位（取模 64，雜訊以 64 格為週期，接得起來）。
+ * 水流的四個時間相位放在 u_p[14]／u_p[15]（整數／小數，[GlBackground.putTimes]）。
  */
 internal object Watercolor {
     /** 著色器裡的位置數（含正在退場的）。 */
@@ -81,7 +81,7 @@ internal object Watercolor {
         }
         x[k] = px; y[k] = py; hue[k] = h; sat[k] = s
         rmax[k] = (if (big) .26f else .16f) + rnd.nextFloat() * .1f
-        seed[k] = rnd.nextFloat() * 50f
+        seed[k] = rnd.nextInt(64).toFloat()   // 整數：當雜訊的格子位移（座標本身保持很小，半精度才不會一格一格）
         birth[k] = at
         retireAt[k] = 1e9f
         lastSpawnAt = at
@@ -130,8 +130,7 @@ internal object Watercolor {
         }
         // 水流的時間相位（雙精度算、取模 64）
         val t = at.toDouble()
-        out[52] = ((t * .05) % 64.0).toFloat(); out[53] = ((t * .043) % 64.0).toFloat()
-        out[54] = ((t * .03) % 64.0).toFloat(); out[55] = ((t * .02) % 64.0).toFloat()
+        GlBackground.putTimes(out, t * .05, t * .043, t * .03, t * .02)
     }
 
     /** 紙的亮度：水彩是畫在淺色的紙上，但主畫面上有白字，所以紙調暗到中間調。 */
@@ -149,15 +148,10 @@ precision mediump float;
 uniform sampler2D u_noise;
 uniform sampler2D u_noiseL;
 uniform vec2 u_res;
-uniform vec4 u_p[14];
+uniform vec4 u_p[16];
 varying vec2 v_uv;
 
-float g(vec2 p) {
-  vec2 i = floor(p);
-  vec2 f = fract(p);
-  f = f * f * (3.0 - 2.0 * f);
-  return texture2D(u_noiseL, (i + f + 0.5) / 64.0).r;
-}
+"""+ GlBackground.NOISE + """
 
 vec3 drop(vec3 col, vec2 uv, vec4 a, vec4 b) {
   vec2 d = (uv - a.xy) * vec2(u_p[0].w, 1.0);
@@ -166,7 +160,7 @@ vec3 drop(vec3 col, vec2 uv, vec4 a, vec4 b) {
   if (a.w < 0.004 || dist > a.z * 1.45) return col;
   vec2 q = d / a.z;
   // 邊界的花瓣形隨時間慢慢起伏（水還沒乾）
-  float n = g(q * 1.3 + b.w + vec2(u_p[13].w, 0.0));
+  float n = gt(q * 1.3 + vec2(u_p[15].w, 0.0), vec2(b.w + u_p[14].w, b.w));
   float r = a.z * (0.8 + 0.38 * n);
   float e = (dist - r) / a.z;
   // 邊緣：水彩的邊是乾掉時顏料聚在邊上形成的，本來就清楚——柔邊約 0.02 個半徑，但至少 1.5 個繪製像素（換算成這一滴半徑的比例）才不會鋸齒；
@@ -178,7 +172,7 @@ vec3 drop(vec3 col, vec2 uv, vec4 a, vec4 b) {
   float re = (e + rw * 0.65) / rw;
   float rim = exp(-re * re);
   // 顏料在水裡不均勻，而且跟著水流慢慢漂
-  float body = 0.34 + 0.26 * g(q * 1.9 + b.w + 31.0 + vec2(0.0, u_p[13].z));
+  float body = 0.34 + 0.26 * gt(q * 1.9 + vec2(0.0, u_p[15].z), vec2(b.w + 31.0, b.w + 31.0 + u_p[14].z));
   float k = a.w * inside * clamp(body + rim * 0.55, 0.0, 1.0);
   return col * mix(vec3(1.0), b.rgb, k);
 }
@@ -188,7 +182,7 @@ void main() {
   vec3 col = u_p[0].rgb * (0.95 + 0.07 * g(uv0 * vec2(28.0, 16.0)));
   // 水的擾動：緩慢流動的位移場（兩層雜訊各自漂移），顏料跟著水輕輕漂移、變形；紙紋不動
   vec2 s = uv0 * vec2(u_p[0].w, 1.0) * 2.2;
-  vec2 uv = uv0 + (vec2(g(s + vec2(u_p[13].x, 3.0)), g(s + vec2(11.0, u_p[13].y))) - 0.5) * 0.045;
+  vec2 uv = uv0 + (vec2(gt(s + vec2(u_p[15].x, 0.0), vec2(u_p[14].x, 3.0)), gt(s + vec2(0.0, u_p[15].y), vec2(11.0, u_p[14].y))) - 0.5) * 0.045;
   col = drop(col, uv, u_p[1], u_p[2]);
   col = drop(col, uv, u_p[3], u_p[4]);
   col = drop(col, uv, u_p[5], u_p[6]);

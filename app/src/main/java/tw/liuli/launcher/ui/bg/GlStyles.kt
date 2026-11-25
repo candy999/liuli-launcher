@@ -55,7 +55,7 @@ internal object GlStyles {
             val lag = kotlin.math.sqrt(((inX - outX) * 16f / 9f).let { it * it } + (inY - outY).let { it * it }).coerceAtMost(.6f)
             spin += dt * (.22 + 1.6 * lag)
             val t = spin + st.ripple * .6
-            out[0] = (t % TAU).toFloat()
+            out[0] = ((t / TAU) % 1.0).toFloat()          // 相位 0～1（著色器裡角度除以 2π 之後才加：數字小，半精度才不會讓色帶邊緣鋸齒）
             out[1] = .1f + .06f * st.pulse + .22f * lag   // 扭轉（Paper 預設 0.1）；被拖動時扭得更緊
             out[2] = .2f                                   // 中心大小（Paper 預設 0.2）
             out[3] = .008f                                 // 柔邊下限（Paper 預設 0，用 fwidth 反鋸齒；這裡在著色器裡依像素算）
@@ -84,22 +84,16 @@ precision mediump float;
 uniform sampler2D u_noise;
 uniform sampler2D u_noiseL;
 uniform vec2 u_res;
-uniform vec4 u_p[14];
+uniform vec4 u_p[16];
 varying vec2 v_q;
-float g(vec2 p) {
-  vec2 i = floor(p);
-  vec2 f = fract(p);
-  f = f * f * (3.0 - 2.0 * f);
-  return texture2D(u_noiseL, (i + f + 0.5) / 64.0).r;
-}
+"""+ GlBackground.NOISE + """
 void main() {
   vec2 ci = u_p[1].xy;
   float w = smoothstep(0.05, 0.75, length(v_q - ci));
   vec2 v_p = v_q - mix(ci, u_p[1].zw, w);
   float l = max(length(v_p), 0.002);
   float twist = 3.0 * u_p[0].y;
-  float angle = 4.0 * atan(v_p.y, v_p.x) + u_p[0].x;
-  float shape = fract(pow(l, -twist) + angle / 6.2831853);
+  float shape = fract(pow(l, -twist) + atan(v_p.y, v_p.x) * 0.63661977 + u_p[0].x);
   shape = 1.0 - abs(2.0 * shape - 1.0);
   shape += 0.2 * (2.0 * g(v_p * 2.4 + 7.0) - 1.0);
   float lt = pow(l, twist);
@@ -139,7 +133,7 @@ void main() {
         const val SHADER = """
 precision mediump float;
 uniform sampler2D u_noise;
-uniform vec4 u_p[14];
+uniform vec4 u_p[16];
 varying vec2 v_uv;
 void main() {
   vec2 p = (v_uv - u_p[0].xy) * vec2(u_p[0].z, 1.0);

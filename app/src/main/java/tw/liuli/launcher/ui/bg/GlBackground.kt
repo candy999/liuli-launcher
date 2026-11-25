@@ -36,8 +36,11 @@ import java.nio.FloatBuffer
  */
 object GlBackground {
     private const val TAG = "LiuliGl"
-    /** 樣式參數的數量（著色器裡是 vec4 u_p[PARAMS／4]；ES 2.0 片段著色器保證至少 16 個 vec4 uniform，這裡用 14 個）。 */
-    const val PARAMS = 56
+    /**
+     * 樣式參數的數量（著色器裡是 vec4 u_p[PARAMS／4]）。u_p[14]／u_p[15] 固定給時間相位的整數／小數部分（[putTimes]）。
+     * ES 2.0 只保證 16 個 vec4，實際上 Mali-400 系列有 256 個；不夠的機器連結失敗，自動改用 CPU 備援。
+     */
+    const val PARAMS = 64
 
     /** EGL 或著色器編譯失敗：改用 CPU 的備援畫法，不再嘗試。 */
     @Volatile var failed = false
@@ -110,6 +113,7 @@ object GlBackground {
     private val programs = HashMap<BgStyle, Program>()
     private var noiseTex = 0
     private var noiseTexL = 0
+    private var noiseTexQ = 0
     private var grid: FloatBuffer? = null
     private var gridIdx: java.nio.ShortBuffer? = null
     private var readBuf: ByteBuffer? = null
@@ -274,6 +278,8 @@ object GlBackground {
     private fun pass(prog: Program, w: Int, h: Int, flipY: Boolean) {
         GLES20.glViewport(0, 0, w, h)
         GLES20.glUseProgram(prog.id)
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE3)
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, noiseTexQ)
         GLES20.glActiveTexture(GLES20.GL_TEXTURE1)
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, noiseTexL)
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
@@ -498,6 +504,22 @@ object GlBackground {
             GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_REPEAT)
             GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_REPEAT)
         }
+        // 四角打包的 value noise 貼圖：像素 (i,j) 的 RGBA＝格點 (i,j)、(i+1,j)、(i,j+1)、(i+1,j+1) 的值（取 R 通道，週期 64）。見 [NOISE]
+        val q = ByteBuffer.allocateDirect(n * n * 4).order(ByteOrder.nativeOrder())
+        fun r(i: Int, j: Int) = px.get(((j and 63) * n + (i and 63)) * 4)
+        for (j in 0 until n) for (i in 0 until n) { q.put(r(i, j)); q.put(r(i + 1, j)); q.put(r(i, j + 1)); q.put(r(i + 1, j + 1)) }
+        q.position(0)
+        val qi = IntArray(1)
+        GLES20.glGenTextures(1, qi, 0)
+        noiseTexQ = qi[0]
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, noiseTexQ)
+        GLES20.glTexImage2D(GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, n, n, 0, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, q)
+        for (pn in intArrayOf(GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_TEXTURE_MAG_FILTER)) GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, pn, GLES20.GL_NEAREST)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_REPEAT)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_REPEAT)
+        val mv = IntArray(1)
+        GLES20.glGetIntegerv(GLES20.GL_MAX_FRAGMENT_UNIFORM_VECTORS, mv, 0)
+        Log.i(TAG, "max fragment uniform vectors ${mv[0]}")
         val ext = GLES20.glGetString(GLES20.GL_EXTENSIONS) ?: ""
         Log.i(TAG, "GL ${GLES20.glGetString(GLES20.GL_RENDERER)} / ${GLES20.glGetString(GLES20.GL_VERSION)}, derivatives=${ext.contains("GL_OES_standard_derivatives")}")
     }
@@ -507,6 +529,7 @@ object GlBackground {
         programs.clear()
         noiseTex = 0
         noiseTexL = 0
+        noiseTexQ = 0
         dataTex = 0
         readBuf = null
         if (dpy != EGL14.EGL_NO_DISPLAY) {
@@ -538,6 +561,7 @@ object GlBackground {
         private val uV1: Int
         private val uNoiseL: Int
         private val uData: Int
+        private val uNoiseQ: Int
 
         init {
             val vs = compile(GLES20.GL_VERTEX_SHADER, vert)
@@ -558,6 +582,7 @@ object GlBackground {
             uV1 = GLES20.glGetUniformLocation(id, "u_v1")
             uNoiseL = GLES20.glGetUniformLocation(id, "u_noiseL")
             uData = GLES20.glGetUniformLocation(id, "u_data")
+            uNoiseQ = GLES20.glGetUniformLocation(id, "u_noiseQ")
         }
 
         fun bind(w: Int, h: Int, p: FloatArray, quad: FloatBuffer, flipY: Boolean) {
@@ -571,6 +596,7 @@ object GlBackground {
             if (uV1 >= 0) GLES20.glUniform4fv(uV1, 1, p, 4)
             if (uNoiseL >= 0) GLES20.glUniform1i(uNoiseL, 1)
             if (uData >= 0) GLES20.glUniform1i(uData, 2)
+            if (uNoiseQ >= 0) GLES20.glUniform1i(uNoiseQ, 3)
             GLES20.glEnableVertexAttribArray(aPos)
             GLES20.glVertexAttribPointer(aPos, 2, GLES20.GL_FLOAT, false, 0, quad)
         }
@@ -583,6 +609,47 @@ object GlBackground {
             GLES20.glGetShaderiv(s, GLES20.GL_COMPILE_STATUS, ok, 0)
             if (ok[0] == 0) throw IllegalStateException("compile: " + GLES20.glGetShaderInfoLog(s))
             return s
+        }
+    }
+
+    /**
+     * 共用的雜訊函式（半精度安全）。Mali-470 的片段著色器只有半精度：座標一大（例如加上取模 64 的時間），小數就只剩 1／16～1／32，
+     * 線性內插貼圖的取樣位置也一樣粗——扭曲色帶因此一格一格、色塊雜訊與特魯謝緞帶的邊緣鋸齒。所以：
+     * - 座標保持很小：時間拆成整數（格子位移 ti，整數在半精度下是精確的）與小數（加在座標上）兩部分，由 [putTimes] 放在 u_p[14]／u_p[15]
+     * - value noise 不用線性內插的貼圖：一個像素存「自己和右、下、右下」四個格點的值（u_noiseQ，最近鄰），
+     *   取一次就拿到四個角，內插在著色器裡用半精度的小數做（和以前線性內插貼圖的結果是同一個函數）
+     * gt(p, ti)：value noise 0～1；gnt(p, ti)：梯度雜訊約 −1～1。ti 必須是整數。
+     */
+    const val NOISE = """
+uniform sampler2D u_noiseQ;
+float gt(vec2 p, vec2 ti) {
+  vec2 i = floor(p);
+  vec2 f = p - i;
+  f = f * f * (3.0 - 2.0 * f);
+  vec4 c = texture2D(u_noiseQ, (mod(i + ti, 64.0) + 0.5) / 64.0);
+  return mix(mix(c.r, c.g, f.x), mix(c.b, c.a, f.x), f.y);
+}
+float g(vec2 p) { return gt(p, vec2(0.0)); }
+vec2 gr(vec2 i) { return texture2D(u_noise, (mod(i, 64.0) + 0.5) / 64.0).rg * 2.0 - 1.0; }
+float gnt(vec2 p, vec2 ti) {
+  vec2 i0 = floor(p);
+  vec2 f = p - i0;
+  vec2 i = i0 + ti;
+  vec2 u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+  float a = dot(gr(i), f);
+  float b = dot(gr(i + vec2(1.0, 0.0)), f - vec2(1.0, 0.0));
+  float c = dot(gr(i + vec2(0.0, 1.0)), f - vec2(0.0, 1.0));
+  float d = dot(gr(i + vec2(1.0, 1.0)), f - vec2(1.0, 1.0));
+  return 1.6 * mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
+"""
+
+    /** 最多四個時間相位（取模 64）拆成整數（u_p[14]）與小數（u_p[15]），給 gt／gnt 用。 */
+    fun putTimes(out: FloatArray, t0: Double, t1: Double = 0.0, t2: Double = 0.0, t3: Double = 0.0) {
+        for ((k, t) in doubleArrayOf(t0, t1, t2, t3).withIndex()) {
+            val w = ((t % 64.0) + 64.0) % 64.0
+            val i = kotlin.math.floor(w)
+            out[56 + k] = i.toFloat(); out[60 + k] = (w - i).toFloat()
         }
     }
 
