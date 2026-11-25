@@ -148,7 +148,16 @@ private fun DrawScope.drawStyleRaw(style: BgStyle, st: BgState, skipFront: Boole
         BgStyle.BEAMS -> beams(st)
         BgStyle.SOLID -> solid(st)
         BgStyle.BLACK -> black(st)
+        BgStyle.MESH -> glStyle(st)
     }
+}
+
+// ───────────── 著色器樣式（GlBackground 畫好的小圖拉伸到整個畫面） ─────────────
+
+private fun DrawScope.glStyle(st: BgState) {
+    val bmp = if (GlBackground.failed) null else GlBackground.current
+    if (bmp == null) with(MeshGradient) { fallback(st, W, H) }
+    else drawRect(MeshGradient.brush(bmp), size = FULL)
 }
 
 // ───────────── 共用 ─────────────

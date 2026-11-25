@@ -1027,6 +1027,19 @@ fun HomeScreen(
         ), gearReq)
     }
 
+    // 第三方授權：改寫自其他開源專案的部分（Apache-2.0 要附上授權、NOTICE 與修改說明；授權全文在 assets/licenses）
+    fun licenseSheet() {
+        open(SheetSpec(
+            "第三方授權", "琉璃本身是 MIT 授權；以下部分改寫自其他開源專案。",
+            listOf(
+                SheetItem("Paper Shaders", subtitle = "Apache License 2.0・github.com/paper-design/shaders") { },
+                SheetItem("Powered by Paper Shaders", subtitle = "https://shaders.paper.design") { },
+                SheetItem("改寫的部分", subtitle = "「網格漸層」背景：改寫成 OpenGL ES 2.0、時間與軌跡改在 CPU 計算、顏色跟著主色。授權全文附在 App 裡（assets/licenses）") { },
+            ),
+            key = "licenses", reopen = { licenseSheet() },
+        ), gearReq)
+    }
+
     // 關於琉璃：版本、手動檢查更新（只看正式版、只在按下時才做）、專案網址 QR code
     fun aboutSheet() {
         val version = BuildConfigInfo.versionName(context)
@@ -1042,6 +1055,7 @@ fun HomeScreen(
                 ) { Updater.press(context) },
                 SheetItem("專案網址", subtitle = "github.com/candy999/liuli-launcher") { },
                 SheetItem("授權", "MIT・開源") { },
+                SheetItem("第三方授權", "網格漸層背景改寫自 Paper Shaders") { licenseSheet() },
             ),
             key = "about", reopen = { aboutSheet() },
             header = { AboutHeader(Updater.PROJECT_URL) },
@@ -1122,6 +1136,9 @@ fun HomeScreen(
                 // 量測用（adb）：bgpace＝記錄接下來 300 格背景的間隔、印到 logcat（LiuliBg pace）；bgcap:30＝背景不升到每秒 60 格（比較用），bgcap:0 恢復；
                 // keylat:1＝每次按鍵印出「按下 → 下一格畫面畫完」的延遲（LiuliBg keylat）
                 "bgpace" -> engine.startPaceLog()
+                // 量測用（adb）：bgstyle:mesh＝這次執行先換成某個背景樣式（不存設定）；glres:0／1＝著色器背景強制 480×270／320×180，glres:-1 自動
+                "bgstyle" -> engine.applyStyle(BgStyle.byId(arg))
+                "glres" -> tw.liuli.launcher.ui.bg.GlBackground.debugLevel = arg.toIntOrNull() ?: -1
                 "bgcap" -> tw.liuli.launcher.ui.bg.BackgroundEngine.debugNoFast = arg == "30"
                 "keylat" -> tw.liuli.launcher.ui.bg.KeyLat.enabled = arg == "1"
                 "uitrace" -> tw.liuli.launcher.ui.bg.UiTrace.set(arg == "1", traceView)

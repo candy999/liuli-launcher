@@ -35,7 +35,7 @@ import kotlin.math.min
  * 背景樣式（順序依意象相近排列）。[ambient]＝一直在動（水下光影、山嵐流動、星星閃爍與星座網、光束流動）：轉場結束也不停，
  * 用 [BgState.at] 這個「只在背景真的有畫的時候才前進」的時鐘，暫停（面板滑動、離開琉璃）後接著動、不會跳。
  */
-enum class BgStyle(val id: String, val label: String, val note: String, val ambient: Boolean = false) {
+enum class BgStyle(val id: String, val label: String, val note: String, val ambient: Boolean = false, val gl: Boolean = false) {
     CONTOUR("contour", "等高線", "焦點是山峰，等高線跟著流動"),
     WAVES("waves", "流線浪潮", "波峰朝焦點聚集"),
     DEEPSEA("deepsea", "深海", "寬而模糊、錯落重疊的耶穌光灑進深海，光影晃動、微粒緩緩飄落", ambient = true),
@@ -46,6 +46,7 @@ enum class BgStyle(val id: String, val label: String, val note: String, val ambi
     BOKEH("bokeh", "光斑", "前後景深視差，焦點時光斑脈動"),
     DOTS("dots", "波點圓圈", "遠近兩層波點，焦點處聚光"),
     TRIANGLES("triangles", "幾何三角", "曲面隆起並跟著焦點移動，三角面拉伸變形"),
+    MESH("mesh", "網格漸層", "幾團顏色沿著各自的軌跡緩緩流動、互相暈染，最亮的那團跟著焦點", ambient = true, gl = true),
     SOLID("solid", "純色", "雙色漸層純色"),
     BLACK("black", "純黑（OLED）", "幾乎全黑，焦點下方一抹主色");
 
@@ -660,6 +661,8 @@ class BackgroundEngine {
                     }
 
                     // 玻璃（畫小張背景＋高斯模糊）在背景執行緒做，主執行緒只送出要求；忙的話自動合併成一次
+                    // 著色器樣式：用這一格的狀態排一張 GL 小圖（畫好才重畫全螢幕背景）
+                    if (style.gl) GlBackground.request(style, st)
                     if (done || bgTicks++ % (if (fast) 4 else 2) == 0) requestGlass()
                     if (blur) blurReq.trySend(Unit)
                     if (glassDirty) { glassDirty = false; glassVersion++ }
@@ -1028,6 +1031,7 @@ class BackgroundEngine {
     fun trimMemory() {
         trimPending = true
         YushanRidge.release()
+        GlBackground.release()
         blurImage = null
         blurPrev = null
         blurReq.trySend(Unit)

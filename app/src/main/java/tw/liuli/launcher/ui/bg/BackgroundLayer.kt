@@ -146,7 +146,8 @@ fun BackgroundLayer(engine: BackgroundEngine, blurred: () -> Float, modifier: Mo
                 },
         ) {
             Canvas(Modifier.fillMaxSize()) {
-                @Suppress("UNUSED_VARIABLE") val f = engine.frame // 訂閱：引擎每推進一幀就重畫
+                // 訂閱：引擎每推進一幀就重畫；著色器樣式改成 GL 小圖每來一張才重畫（引擎推進的那一格圖還沒好，重畫也是舊圖）
+                @Suppress("UNUSED_VARIABLE") val f = if (engine.style.gl && !GlBackground.failed) GlBackground.version else engine.frame
                 // 以「原生 ÷ d」的精確比例縮放（不是進位後的 w×h），進位多出的一點點只是延伸畫面、會被裁掉
                 val sx = fullW / d.toFloat() / BackgroundEngine.LOGICAL_W
                 val sy = fullH / d.toFloat() / BackgroundEngine.LOGICAL_H
@@ -244,6 +245,7 @@ internal fun BgStyle.prepareAssets(): Boolean = when (this) {
         YushanRidge.nativeReady && YushanRidge.trails != null && YushanRidge.trailsHi != null
     }
     BgStyle.GALAXY -> { MilkyWay.request(); MilkyWay.image != null }
+    BgStyle.MESH -> BackgroundEngine.active?.let { GlBackground.ready(this, it.st) } ?: true
     else -> true
 }
 
