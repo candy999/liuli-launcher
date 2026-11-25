@@ -188,6 +188,25 @@ private object BackdropPixels {
     }
 }
 
+/** 量測用（ACTION=gllog:1）：每 200 次烘焙要求印一次「跳過／只取色／整個重算」各幾次、重算的原因。 */
+private object BakeStats {
+    private val n = IntArray(3)
+    private var px = 0L
+    private val why = HashMap<String, Int>()
+    private var since = 0L
+    fun note(kind: Int, pixels: Int, reason: String? = null) {
+        if (!tw.liuli.launcher.ui.bg.GlBackground.verbose) return
+        if (since == 0L) since = android.os.SystemClock.uptimeMillis()
+        n[kind]++; px += pixels
+        if (reason != null) why[reason] = (why[reason] ?: 0) + 1
+        if (n.sum() >= 200) {
+            val s = (android.os.SystemClock.uptimeMillis() - since) / 1000f
+            android.util.Log.i("LiuliGlass", "%.1fs: skip ${n[0]} color ${n[1]} full ${n[2]}, %.0fk px/s, why $why".format(s, px / s / 1000f))
+            n.fill(0); px = 0; why.clear(); since = 0L
+        }
+    }
+}
+
 /** 一片玻璃的幾何快取（每個像素七個數）。 */
 private class Geo(val n: Int) {
     val su = FloatArray(n); val sv = FloatArray(n)
@@ -222,6 +241,19 @@ private class GlassBake(private val backdrop: GlassBackdrop, private val edge: B
     private var geo: Geo? = null
     /** 上一次烘的時候，背景小圖的像素（用來判斷這片玻璃後面的顏色變了多少）。 */
     private var lastSrc = IntArray(0)
+
+    /** 量測用：幾何為什麼要重算。 */
+    private fun whyNew(r: Req): String {
+        val o = geoFor ?: return "first"
+        return when {
+            o.ox != r.ox || o.oy != r.oy -> "pos"
+            o.w != r.w || o.h != r.h -> "size"
+            o.hl != r.hl -> "hl"
+            o.lx != r.lx || o.ly != r.ly -> "light"
+            o.tint != r.tint -> "tint"
+            else -> "other"
+        }
+    }
 
     private fun rememberBackdrop() {
         val src = BackdropPixels.px
@@ -299,8 +331,10 @@ private class GlassBake(private val backdrop: GlassBackdrop, private val edge: B
             if (reuse && !backdropChanged(r, sx, sy, sw, sh)) {
                 bakedFor = r
                 gate?.baked = true
+                BakeStats.note(0, 0)
                 continue
             }
+            BakeStats.note(if (reuse) 1 else 2, bw * bh, if (reuse) null else whyNew(r))
             withContext(Dispatchers.Default) {
                 val g = if (reuse) g0!! else Geo(bw * bh).also { buildGeo(it, bw, bh, nq, r, sx, sy, sw, sh, edge) }
                 shade(out, g, bw, bh)
