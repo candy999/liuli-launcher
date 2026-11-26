@@ -50,6 +50,9 @@ internal object GlStyles {
         private const val TURNS = .45                          // 完全捲緊時中心轉幾圈
         private const val SIGMA2 = .09f                        // 影響範圍 σ²（σ＝0.30，畫面高度 0.8 的單位）
         private const val PULL = 1.6f                          // 往中心吸：中心取樣放大 2.6 倍
+        /** 一圈幾瓣（三色各三瓣）與瓣寬變化：著色器裡寫死的 9.0、1.5 要跟這裡一致（CPU 版 [CpuLines.swirl] 用這兩個值）。 */
+        const val WEDGES = 9
+        const val WAVE = 1.5f
 
         fun params(st: BgState, out: FloatArray) {
             // 時鐘只往前走：玻璃小圖用的是稍早的狀態快照，拿它來算不能把時鐘往回撥
