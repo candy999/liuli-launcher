@@ -48,7 +48,7 @@ enum class BgStyle(val id: String, val label: String, val note: String, val ambi
     TRIANGLES("triangles", "幾何三角", "曲面隆起並跟著焦點移動，三角面拉伸變形"),
     MESH("mesh", "網格漸層", "幾團顏色沿著各自的軌跡緩緩流動、互相暈染，最亮的那團跟著焦點", ambient = true, gl = true),
     WATERCOLOR("watercolor", "水彩暈染", "焦點換到哪，就在那裡滴下一滴顏料慢慢暈開；邊緣柔，乾掉的水痕顏色較深", ambient = true, gl = true),
-    SWIRL("swirl", "漩渦", "攪拌濃稠的巧克力與奶油：焦點是攪拌的中心，附近的流體被捲進去，移過去時舊的捲紋慢慢鬆開", ambient = true, gl = true),
+    SWIRL("swirl", "漩渦", "五瓣巧克力、五瓣奶油交錯，焦點是攪拌的中心，越靠中心捲得越多；移過去時舊的捲紋慢慢鬆開", ambient = true, gl = true),
     SIMPLEX("simplex", "色塊雜訊", "幾種顏色像地圖色塊一樣分層，慢慢流動", ambient = true, gl = true),
     WARP("warp", "扭曲色帶", "棋盤圖樣被一層層漩渦扭成流動的絲狀色帶", ambient = true, gl = true),
     SOFTAURORA("softaurora", "柔極光", "暗色天空上三條柔和的極光帶起伏飄動", ambient = true, gl = true),
