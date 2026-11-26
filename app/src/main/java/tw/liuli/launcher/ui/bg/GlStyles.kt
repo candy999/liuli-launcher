@@ -46,8 +46,9 @@ internal object GlStyles {
         private var lastAt = Float.NaN
 
         fun params(st: BgState, out: FloatArray) {
+            // 時鐘只往前走：玻璃小圖用的是稍早的狀態快照，拿它來算不能把時鐘往回撥（CPU 版也共用這份狀態）
             val dt = if (lastAt.isNaN()) 0f else (st.at - lastAt).coerceIn(0f, .25f)
-            lastAt = st.at
+            if (lastAt.isNaN() || st.at > lastAt) lastAt = st.at
             if (inX.isNaN()) { inX = st.fx; inY = st.fy; outX = st.fx; outY = st.fy }
             val kIn = 1f - kotlin.math.exp(-dt / .35f)
             val kOut = 1f - kotlin.math.exp(-dt / 1.6f)

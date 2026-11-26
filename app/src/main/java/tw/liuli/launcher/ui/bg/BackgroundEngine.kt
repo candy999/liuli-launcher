@@ -49,14 +49,18 @@ enum class BgStyle(val id: String, val label: String, val note: String, val ambi
     MESH("mesh", "網格漸層", "幾團顏色沿著各自的軌跡緩緩流動、互相暈染，最亮的那團跟著焦點", ambient = true, gl = true),
     WATERCOLOR("watercolor", "水彩暈染", "焦點換到哪，就在那裡滴下一滴顏料慢慢暈開；邊緣柔，乾掉的水痕顏色較深", ambient = true, gl = true),
     SWIRL("swirl", "漩渦", "像颱風一樣把色帶一圈圈捲進中心，焦點移動時颱風跟著移過去", ambient = true, gl = true),
+    SWIRL_CPU("swirl_cpu", "漩渦", "像颱風一樣把色帶一圈圈捲進中心（CPU 畫的對照版：向量色帶，任何解析度邊緣都銳利）", ambient = true),
     SIMPLEX("simplex", "色塊雜訊", "幾種顏色像地圖色塊一樣分層，慢慢流動", ambient = true, gl = true),
     WARP("warp", "扭曲色帶", "棋盤圖樣被一層層漩渦扭成流動的絲狀色帶", ambient = true, gl = true),
     SOFTAURORA("softaurora", "柔極光", "暗色天空上三條柔和的極光帶起伏飄動", ambient = true, gl = true),
     CURTAIN("curtain", "極光簾", "極光的簾腳彎曲起伏，往上透出帶細絲的光幕", ambient = true, gl = true),
     LIQUID("liquid", "液態以太", "流體模擬：焦點移動時把彩色的流體推開，閒置時輕輕攪動", ambient = true, gl = true),
     SPIRAL("spiral", "螺旋", "一條螺旋線繞著焦點慢慢轉", ambient = true, gl = true),
+    SPIRAL_CPU("spiral_cpu", "螺旋", "一條螺旋線繞著焦點慢慢轉（CPU 畫的對照版：向量線條）", ambient = true),
     TRUCHET("truchet", "特魯謝緞帶", "隨機拼接的圓弧連成蜿蜒的緞帶，整片慢慢捲動", ambient = true, gl = true),
+    TRUCHET_CPU("truchet_cpu", "特魯謝緞帶", "隨機拼接的圓弧連成蜿蜒的緞帶，整片慢慢捲動（CPU 畫的對照版：向量線條）", ambient = true),
     BLINDS("blinds", "漸層百葉", "一排直立的百葉片，朝向焦點的那一側亮起，焦點處聚光", gl = true),
+    BLINDS_CPU("blinds_cpu", "漸層百葉", "一排直立的百葉片，朝向焦點的那一側亮起，焦點處聚光（CPU 畫的對照版）"),
     SOLID("solid", "純色", "雙色漸層純色"),
     BLACK("black", "純黑（OLED）", "幾乎全黑，焦點下方一抹主色");
 
@@ -65,7 +69,8 @@ enum class BgStyle(val id: String, val label: String, val note: String, val ambi
         const val RANDOM_ID = "random"
 
         /** 隨機的預設範圍：純色、純黑以外全部。 */
-        val DEFAULT_POOL: Set<String> get() = entries.filter { it != SOLID && it != BLACK }.map { it.id }.toSet()
+        // CPU 對照版（_cpu）不預設加入隨機：和 GPU 版是同一個樣式
+        val DEFAULT_POOL: Set<String> get() = entries.filter { it != SOLID && it != BLACK && !it.id.endsWith("_cpu") }.map { it.id }.toSet()
 
         /** 從 [pool]（使用者勾選的樣式 id）隨機抽一個，不和 [except]（上一次抽到的）重複；只勾一個就是那一個。 */
         fun random(except: BgStyle? = null, pool: Set<String> = DEFAULT_POOL): BgStyle {
