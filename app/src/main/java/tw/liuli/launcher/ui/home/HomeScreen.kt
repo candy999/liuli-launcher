@@ -547,6 +547,9 @@ fun HomeScreen(
 
     // ───────────── 設定 ─────────────
     // 隨機的範圍：第一列套用隨機，下面每個樣式按確定勾選／取消（至少留一個）
+    // 背景由誰繪製：著色器樣式＝GPU（這台電視編譯失敗、改用備援畫法的話＝CPU）
+    fun drawnBy(st: BgStyle) = if (st.gl && !tw.liuli.launcher.ui.bg.GlBackground.failedFor(st)) "GPU" else "CPU"
+
     fun randomSheet(focusIndex: Int) {
         val pool = settings.randomPool
         open(SheetSpec(
@@ -566,9 +569,6 @@ fun HomeScreen(
             key = "random", reopen = { randomSheet(0) },
         ), gearReq)
     }
-
-    // 背景由誰繪製：著色器樣式＝GPU（這台電視編譯失敗、改用備援畫法的話＝CPU）
-    fun drawnBy(st: BgStyle) = if (st.gl && !tw.liuli.launcher.ui.bg.GlBackground.failedFor(st)) "GPU" else "CPU"
 
     fun styleSheet() {
         val before = engine.style
