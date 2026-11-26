@@ -24,6 +24,9 @@ object GlassRate {
         private set
     val intervalMs: Float get() = 1000f / perSec
 
+    /** 交叉淡化（adb ACTION=glassfade:0 關掉做對照，不存）。 */
+    @Volatile var fade = true
+
     /** 操作中（按鍵後一小段時間、面板開著）：不升。主執行緒寫入。 */
     @Volatile var busy = false
 

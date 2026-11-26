@@ -1147,6 +1147,8 @@ fun HomeScreen(
                 "glbench" -> tw.liuli.launcher.ui.bg.GlBackground.bench()
                 // gllog:1＝一直印著色器背景的 GPU 耗時（LiuliGl）與玻璃小圖的 CPU 成本（LiuliBg glass）
                 "gllog" -> tw.liuli.launcher.ui.bg.GlBackground.verbose = arg == "1"
+                // glassfade:0＝毛玻璃不交叉淡化（量測對照用，不存）
+                "glassfade" -> tw.liuli.launcher.ui.glass.GlassRate.fade = arg != "0"
                 // glassdump＝把玻璃取樣的小圖（模糊前的 GL 小圖與模糊後的玻璃圖）存成 PNG（files/shots/），檢查玻璃顏色對不對
                 "glassdump" -> Thread {
                     runCatching {
