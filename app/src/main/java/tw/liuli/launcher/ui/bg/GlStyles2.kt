@@ -409,20 +409,24 @@ void main() {
 varying vec3 v_wv;
 varying vec3 v_th;
 varying vec3 v_m;
-vec3 band(float y, float x, float k, float y0, float w, float th, float m, float amp) {
+vec3 band(float y, float rays, float y0, float w, float th, float m, float amp) {
   float d = y - (y0 + w);
   float glow = exp(-d * d / (th * th));
   // 光幕的下緣：柔化約 1.5 個像素（以前是 step 硬邊，解析度提高後看得到一階一階）
   float tail = exp(-max(-d, 0.0) * 5.0) * (1.0 - smoothstep(-1.5 / u_res.y, 1.5 / u_res.y, d)) * 0.35;
-  float rays = 0.8 + 0.2 * sin(x * 70.0 + k * 3.0);
   vec3 c = mix(u_p[4].rgb, u_p[5].rgb, m);
   return c * (glow * 0.6 + tail * rays) * amp;
 }
 void main() {
   vec2 uv = v_uv;
   float x = uv.x * u_p[0].x;
-  vec3 light = band(uv.y, x, 0.0, 0.36, v_wv.x, v_th.x, v_m.x, 1.0) + band(uv.y, x, 1.0, 0.50, v_wv.y, v_th.y, v_m.y, 0.7)
-             + band(uv.y, x, 2.0, 0.27, v_wv.z, v_th.z, v_m.z, 0.45);
+  // 三條光帶的光芒 sin(70x＋3k)：只算一次 sin、cos，另外兩條用角度和公式（以前每條各算一次 sin）
+  float rs = sin(x * 70.0);
+  float rc = cos(x * 70.0);
+  float r1 = rs * -0.9899925 + rc * 0.14112;
+  float r2 = rs * 0.96017029 + rc * -0.2794155;
+  vec3 light = band(uv.y, 0.8 + 0.2 * rs, 0.36, v_wv.x, v_th.x, v_m.x, 1.0) + band(uv.y, 0.8 + 0.2 * r1, 0.50, v_wv.y, v_th.y, v_m.y, 0.7)
+             + band(uv.y, 0.8 + 0.2 * r2, 0.27, v_wv.z, v_th.z, v_m.z, 0.45);
   vec3 sky = mix(u_p[3].rgb, u_p[2].rgb, uv.y);
   vec3 col = sky + (1.0 - exp(-light * 1.1));
   """ + DITHER + """
@@ -522,10 +526,8 @@ void main() {
 
         const val SHADER = HEAD + """
 uniform sampler2D u_data;
-vec3 layerCol(float py, float hem, float dr, float pa, float re, float layer, float amt, float act) {
+vec3 layerCol(float py, float hem, float grain, float pa, float re, float amt, float act) {
   float rise = py - hem;
-  float drift = dr + rise * 0.1;
-  float grain = gt(vec2(drift * 60.0, u_p[15].z), vec2(0.0, u_p[14].z + layer * 4.0));
   float threads = 0.36 + 0.64 * sqrt(grain) + 0.085;
   float veil = smoothstep(-0.012, 0.022, rise) * exp(-max(rise, 0.0) * re);
   float lip = exp(-abs(rise) / (0.012 + grain * 0.013));
@@ -538,14 +540,15 @@ void main() {
   vec2 p = vec2((uv.x - 0.5) * u_p[0].x, 0.5 - uv.y);
   float act = u_p[2].z;
   vec3 color = mix(u_p[6].rgb, u_p[7].rgb, 1.0 - uv.y);
-  for (int i = 0; i < 3; i++) {
-    float layer = float(i);
-    vec4 a = texture2D(u_data, vec2(v_uv.x, (layer * 2.0 + 0.5) / 6.0));
-    vec4 b = texture2D(u_data, vec2(v_uv.x, (layer * 2.0 + 1.5) / 6.0));
-    float hem = a.r + a.g / 255.0 - 0.7;
-    float dr = p.x + layer * 0.42 + a.b * 0.04;
-    color += layerCol(p.y, hem, dr, 0.48 + a.a * 0.8, 4.0 + b.r * 6.5, layer, layer < 0.5 ? 1.0 : (layer < 1.5 ? 0.32 : 0.1024), act);
-  }
+  // 細絲（光幕裡一根根的紋路）只在最亮的第一層查雜訊，後兩層（亮度 32%、10%）共用——每個像素少查兩次雜訊
+  vec4 a0 = texture2D(u_data, vec2(v_uv.x, 0.5 / 6.0));
+  float hem0 = a0.r + a0.g / 255.0 - 0.7;
+  float grain = gt(vec2((p.x + a0.b * 0.04 + (p.y - hem0) * 0.1) * 60.0, u_p[15].z), vec2(0.0, u_p[14].z));
+  color += layerCol(p.y, hem0, grain, 0.48 + a0.a * 0.8, 4.0 + texture2D(u_data, vec2(v_uv.x, 1.5 / 6.0)).r * 6.5, 1.0, act);
+  vec4 a1 = texture2D(u_data, vec2(v_uv.x, 2.5 / 6.0));
+  color += layerCol(p.y, a1.r + a1.g / 255.0 - 0.7, grain, 0.48 + a1.a * 0.8, 4.0 + texture2D(u_data, vec2(v_uv.x, 3.5 / 6.0)).r * 6.5, 0.32, act);
+  vec4 a2 = texture2D(u_data, vec2(v_uv.x, 4.5 / 6.0));
+  color += layerCol(p.y, a2.r + a2.g / 255.0 - 0.7, grain, 0.48 + a2.a * 0.8, 4.0 + texture2D(u_data, vec2(v_uv.x, 5.5 / 6.0)).r * 6.5, 0.1024, act);
   color *= 0.88 + 0.12 * pow(max(0.0, 1.0 - length(p) * 0.6), 0.6);
   vec3 col = 1.0 - exp(-color * 1.4);
   """ + DITHER + """

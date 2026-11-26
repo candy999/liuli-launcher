@@ -116,8 +116,9 @@ internal object CpuLines {
                 val r = (u * (-a / (2 * PI))).toFloat()
                 val x = (r * cos(a)).toFloat(); val y = (r * sin(a)).toFloat()
                 if (first) { p.moveTo(x, y); first = false } else p.lineTo(x, y)
-                // 每段約 3 個邏輯單位（放大到 1080p 約 12 像素，曲線看不出折角）
-                a -= min(.2, 3.0 / max(r.toDouble(), 1.0))
+                // 每段約 6 個邏輯單位：弦的誤差＝段長²／(8·半徑)，半徑 20 以上就不到 0.2 個邏輯單位（÷2 時 0.4 像素），
+                // 點數比每段 3 少一半，畫布每格切三角形的工作也少一半
+                a -= min(.3, 6.0 / max(r.toDouble(), 1.0))
             }
             sc.toFill(p, u * .5f).also { sc.spiralPath = it; sc.spiralUnit = u }
         }
@@ -179,7 +180,10 @@ internal object CpuLines {
             sc.tFineAFill = sc.toFill(tFineA, fineW)
             sc.tFineBFill = sc.toFill(tFineB, fineW)
         }
-        withTransform({ translate(w / 2 - ((t - i0) * cell).toFloat(), h / 2) }) {
+        // 捲動的位移對齊到整數個繪製像素（捲得很慢，約每 7 格才跨一個像素）：位移沒變的格子，畫布可以沿用上一格切好的三角形
+        val pxScale = size.width / w
+        val sx = kotlin.math.round((w / 2 - ((t - i0) * cell).toFloat()) * pxScale) / pxScale
+        withTransform({ translate(sx, h / 2) }) {
             // 玻璃小圖：只畫緞帶本體（亮面與細線在 120×68 上看不到，模糊後更看不出來）
             if (forGlass()) { drawPath(sc.tRibbonFill!!, lerp(rib, edge, .2f)); return@withTransform }
             // 緞帶：外緣帶一點外緣色（GPU 版的 ridge 以外 ×0.38），中間是緞帶色
