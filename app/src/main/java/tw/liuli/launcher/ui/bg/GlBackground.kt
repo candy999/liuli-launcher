@@ -190,6 +190,8 @@ object GlBackground {
     private var texSurface: android.view.Surface? = null
     private var win: EGLSurface = EGL14.EGL_NO_SURFACE
     private var winLevel = -1
+    private val qs = IntArray(2)
+    private var sizedAt = 0L
     private var windowOk = true
     private var workStyle: BgStyle? = null
     private var pendLevel = 4
@@ -244,7 +246,12 @@ object GlBackground {
             latch.await(500, java.util.concurrent.TimeUnit.MILLISECONDS)
             return true
         }
-        override fun onSurfaceTextureSizeChanged(st: android.graphics.SurfaceTexture, w: Int, h: Int) { setNative(w, h) }
+        // TextureView 換大小時會自己把緩衝改回畫面大小（setDefaultBufferSize(view 寬, 高)），我們設的檔位大小就沒了：
+        // 不重設的話照舊只畫左下角 w×h，其他地方是黑的（電視關機再開機、畫面模式重設時發生過）
+        override fun onSurfaceTextureSizeChanged(st: android.graphics.SurfaceTexture, w: Int, h: Int) {
+            setNative(w, h)
+            handler?.post { if (tex === st) winLevel = -1 }
+        }
         override fun onSurfaceTextureUpdated(st: android.graphics.SurfaceTexture) {}
     }
 
@@ -593,8 +600,14 @@ void main() {
                 }
             }
             if (win != EGL14.EGL_NO_SURFACE) {
-                if (winLevel != w * 10000 + h) { t.setDefaultBufferSize(w, h); winLevel = w * 10000 + h }
+                if (winLevel != w * 10000 + h) { t.setDefaultBufferSize(w, h); winLevel = w * 10000 + h; sizedAt = frameNo }
                 if (!EGL14.eglMakeCurrent(dpy, win, win, ctx)) throw IllegalStateException("eglMakeCurrent(window)")
+                // 保險：實際的緩衝大小和這張要畫的不同（被別人改掉了）就再設一次。剛設過的幾張還是舊大小（緩衝早一張就拿好了），不算
+                if (frameNo - sizedAt > 3 && EGL14.eglQuerySurface(dpy, win, EGL14.EGL_WIDTH, qs, 0) &&
+                    EGL14.eglQuerySurface(dpy, win, EGL14.EGL_HEIGHT, qs, 1) && (qs[0] != w || qs[1] != h)) {
+                    Log.i(TAG, "畫面緩衝被改成 ${qs[0]}x${qs[1]}，改回 ${w}x$h")
+                    t.setDefaultBufferSize(w, h); sizedAt = frameNo
+                }
                 val prog = programs.getOrPut(style) { Program(style) }
                 // 每 3 張量一次 GPU 耗時（glFinish 會讓這條執行緒等 GPU，平常不用）；只量「穩定在學到的檔位」的張
                 val n = frameNo++
