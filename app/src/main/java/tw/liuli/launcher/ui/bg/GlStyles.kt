@@ -185,15 +185,25 @@ void main() {
   vec4 q = texture2D(u_field, v_uv);
   float c = (q.r + q.g / 255.0) * 2.0 - 1.0;
   float sn = (q.b + q.a / 255.0) * 2.0 - 1.0;
-  // ψ／2π×3 ＝ t 除以 3 的餘數。反向量再取 atan（＋1.5 補回來）：atan 在 ±π 那條接縫（Mali 半精度在那裡偶爾算錯，
-  // 會冒出一串虛線點）就落在 ψ＝0，也就是瓣與瓣的交界上，被柔邊蓋掉；直接取的話接縫在焦糖色那瓣正中間
-  float t = atan(-sn, -c) * 0.47746483 + 4.5;
-  float w = min(fwidth(t), fwidth(fract(t + 0.5))) * 1.2 + 0.03;
-  float fr = fract(t);
-  float k = mod(floor(t), 3.0);
-  vec3 ca = k < 0.5 ? u_p[3].rgb : (k < 1.5 ? u_p[5].rgb : u_p[4].rgb);
-  vec3 cb = k < 0.5 ? u_p[5].rgb : (k < 1.5 ? u_p[4].rgb : u_p[3].rgb);
-  vec3 col = mix(ca, cb, smoothstep(1.0 - w, 1.0, fr));
+  // 不用 atan 判斷是哪一瓣（Mali 半精度在 atan 的 ±π 接縫偶爾算錯：接縫在瓣中間會冒虛線點、在交界上會變成階梯）：
+  // 三色各佔 120°，扇區中心在 60°、180°、300°。相位向量最接近哪個中心就是哪一瓣；再轉到那個中心算角度（一定在 ±60° 以內，
+  // 離接縫很遠），兩側交界各用柔邊和前、後一色混合——交界上剛好各半，兩邊算出來一樣
+  vec2 v = vec2(c, sn);
+  vec2 u0 = vec2(0.5, 0.8660254);
+  vec2 u1 = vec2(-1.0, 0.0);
+  vec2 u2 = vec2(0.5, -0.8660254);
+  float d0 = dot(v, u0);
+  float d1 = dot(v, u1);
+  float d2 = dot(v, u2);
+  vec2 u = u2;
+  vec3 cp = u_p[5].rgb; vec3 ca = u_p[4].rgb; vec3 cn = u_p[3].rgb;           // 淺（前：中、後：深）
+  if (d0 >= d1 && d0 >= d2) { u = u0; cp = u_p[4].rgb; ca = u_p[3].rgb; cn = u_p[5].rgb; }   // 深
+  else if (d1 >= d2) { u = u1; cp = u_p[3].rgb; ca = u_p[5].rgb; cn = u_p[4].rgb; }          // 中
+  float phi = atan(u.x * v.y - u.y * v.x, dot(u, v));
+  // 柔邊（弧度）：cos、sin 本身處處連續，用它們的變化量算每個像素轉了多少角度，再加一點點固定的柔和
+  float w = 0.85 * (fwidth(c) + fwidth(sn)) / max(length(v), 0.2) + 0.063;
+  vec3 col = mix(ca, cn, smoothstep(-w, w, phi - 1.0471976));
+  col = mix(cp, col, smoothstep(-w, w, phi + 1.0471976));
   """ + DITHER + """
   gl_FragColor = vec4(col, 1.0);
 }
