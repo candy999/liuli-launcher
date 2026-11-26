@@ -46,6 +46,13 @@ internal object GlStyles {
         private var breath = 0.0                               // 呼吸的相位
         private var lastAt = Float.NaN
 
+        /**
+         * 還在動（攪拌中心還沒停穩，或還沒捲緊／鬆完）：CPU 版（不是持續動畫的樣式）靠這個決定引擎要不要繼續畫；
+         * 停穩之後引擎停下來、補一張原生解析度，之後不再重畫。
+         */
+        @Volatile var settling = true
+            private set
+
         // 以下四個值是使用者在試調台（網頁預覽）上調好的
         private const val TURNS = .45                          // 完全捲緊時中心轉幾圈
         private const val SIGMA2 = .09f                        // 影響範圍 σ²（σ＝0.30，畫面高度 0.8 的單位）
@@ -87,6 +94,7 @@ internal object GlStyles {
             val sp = kotlin.math.hypot(vx, vy)
             val s = if (sp > 1e-4f) kotlin.math.min(.2f, sp * .15f) / sp else 0f
             out[28] = vx * s; out[29] = vy * s; out[30] = 0f; out[31] = 0f
+            settling = kotlin.math.abs(wT - wind) > .01f || sp > .002f || kotlin.math.hypot(tx - cx, ty - cy) > .002f || lag > .02f
         }
 
         // v_q：畫面座標（寬高比校正、×0.8：畫面高度＝0.8 單位）
@@ -125,6 +133,60 @@ void main() {
   // t：一圈 9 瓣的座標（整數＝瓣的交界）。atan 在 ±π 跳一圈時 t 跳 9（3 的倍數），顏色順序接得起來
   float t = (9.0 * th + 1.5 * sin(2.0 * th + 0.7)) * 0.15915494;
   // 交界的寬度：t 本身在 ±π 那條線上會跳、fract 在半格的地方會跳，兩個取小的就不會誤判
+  float w = min(fwidth(t), fwidth(fract(t + 0.5))) * 1.2 + 0.03;
+  float fr = fract(t);
+  float k = mod(floor(t), 3.0);
+  vec3 ca = k < 0.5 ? u_p[3].rgb : (k < 1.5 ? u_p[5].rgb : u_p[4].rgb);
+  vec3 cb = k < 0.5 ? u_p[5].rgb : (k < 1.5 ? u_p[4].rgb : u_p[3].rgb);
+  vec3 col = mix(ca, cb, smoothstep(1.0 - w, 1.0, fr));
+  """ + DITHER + """
+  gl_FragColor = vec4(col, 1.0);
+}
+"""
+
+        /**
+         * B 方案第一段（分兩段，見 GlBackground.SPLIT）：瓣的相位 ψ＝2π·t／3（三色一循環）存成 cos、sin 各 16 位元
+         * （R、G＝cos 的高低位，B、A＝sin 的高低位）——cos、sin 在任何地方都平滑，雙線性放大不會在交界或 atan 的接縫處出錯。
+         */
+        const val FIELD = """precision mediump float;
+uniform vec4 u_p[16];
+varying vec2 v_q;
+vec2 enc(float v) { v = clamp(v * 0.5 + 0.5, 0.0, 0.999); return vec2(floor(v * 255.0) / 255.0, fract(v * 255.0)); }
+void main() {
+  vec2 ci = u_p[1].xy;
+  // 中心依距離在攪拌中心（快）與外圈的中心（慢）之間內插：移動時外圈落後，中間被拉長
+  float wg = smoothstep(0.05, 0.9, length(v_q - ci));
+  vec2 c = mix(ci, u_p[1].zw, wg);
+  vec2 d = v_q - c;
+  float f = exp(-dot(d, d) / u_p[6].y);
+  // 回推這裡的流體原本在哪：倒轉 a(r)、往外放大（往中心吸），再加上移動時的尾巴；離中心遠的地方 f≈0，原樣不動
+  float a = u_p[6].x * f;
+  float cs = cos(a);
+  float sn = sin(a);
+  vec2 s = c + vec2(cs * d.x - sn * d.y, sn * d.x + cs * d.y) * (1.0 + u_p[6].z * f) + u_p[7].xy * f;
+  // 以攪拌中心的角度分成九瓣：深、中、淺三色依序交錯，每色三瓣（外緣是直的扇形，往中心被捲進去）；瓣寬帶一點變化
+  vec2 e = s - c;
+  float th = atan(e.y, e.x);
+  // t：一圈 9 瓣的座標（整數＝瓣的交界）。atan 在 ±π 跳一圈時 t 跳 9（3 的倍數），顏色順序接得起來
+  float t = (9.0 * th + 1.5 * sin(2.0 * th + 0.7)) * 0.15915494;
+  float ps = t * 2.0943951;
+  gl_FragColor = vec4(enc(cos(ps)), enc(sin(ps)));
+}
+"""
+
+        /** B 方案第二段：讀回相位、換回三色裡的哪一瓣，在這個解析度的像素上切交界（寬度用 fwidth）。 */
+        const val EDGE = """#extension GL_OES_standard_derivatives : enable
+precision mediump float;
+uniform sampler2D u_noise;
+uniform sampler2D u_field;
+uniform vec4 u_p[16];
+varying vec2 v_uv;
+void main() {
+  vec4 q = texture2D(u_field, v_uv);
+  float c = (q.r + q.g / 255.0) * 2.0 - 1.0;
+  float sn = (q.b + q.a / 255.0) * 2.0 - 1.0;
+  // ψ／2π×3 ＝ t 除以 3 的餘數（−1.5～1.5，加 3 變正的）
+  float t = atan(sn, c) * 0.47746483 + 3.0;
   float w = min(fwidth(t), fwidth(fract(t + 0.5))) * 1.2 + 0.03;
   float fr = fract(t);
   float k = mod(floor(t), 3.0);

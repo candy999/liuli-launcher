@@ -49,7 +49,7 @@ enum class BgStyle(val id: String, val label: String, val note: String, val ambi
     MESH("mesh", "網格漸層", "幾團顏色沿著各自的軌跡緩緩流動、互相暈染，最亮的那團跟著焦點", ambient = true, gl = true),
     WATERCOLOR("watercolor", "水彩暈染", "焦點換到哪，就在那裡滴下一滴顏料慢慢暈開；邊緣柔，乾掉的水痕顏色較深", ambient = true, gl = true),
     SAUCE("sauce", "三色濃醬", "巧克力、焦糖、奶油三色交錯，焦點是攪拌的中心，越靠中心捲得越多；移過去時舊的捲紋慢慢鬆開", ambient = true, gl = true),
-    SAUCE_CPU("sauce_cpu", "三色濃醬", "巧克力、焦糖、奶油三色交錯被攪拌捲進中心（CPU 畫的對照版：向量曲面，任何解析度邊緣都銳利）", ambient = true),
+    SAUCE_CPU("sauce_cpu", "三色濃醬", "巧克力、焦糖、奶油三色交錯被攪拌捲進中心（CPU 畫的對照版：向量曲面，任何解析度邊緣都銳利；停穩後不再重畫）"),
     SIMPLEX("simplex", "色塊雜訊", "幾種顏色像地圖色塊一樣分層，慢慢流動", ambient = true, gl = true),
     WARP("warp", "扭曲色帶", "棋盤圖樣被一層層漩渦扭成流動的絲狀色帶", ambient = true, gl = true),
     SOFTAURORA("softaurora", "柔極光", "暗色天空上三條柔和的極光帶起伏飄動", ambient = true, gl = true),
@@ -654,7 +654,9 @@ class BackgroundEngine {
                     stepBounce(t)
                     // 持續動畫的樣式（星空、深海、光束）與簡潔模式的彈跳點：追上目標也不停
                     val settled = step(t)
-                    done = settled && t > holdUntil && !style.ambient && !bounce
+                    // 三色濃醬的 CPU 版：攪拌中心還在動、還沒捲緊或鬆完就繼續畫（彈簧與捲緊要 3 秒左右，比轉場長）；
+                    // 停穩後才停，之後補一張原生解析度、不再重畫（向量路徑每格重填很吃畫面執行緒）
+                    done = settled && t > holdUntil && !style.ambient && !bounce && !(style == BgStyle.SAUCE_CPU && GlStyles.Sauce.settling)
                     if (done) snapToTarget()
                     // 累加用雙精度（單精度一路加上去，幾個小時後每一格加的量會被捨入吃掉一部分，流動就不均勻）
                     // 持續流動也跟著播放速度（跟不上每秒 30 格時放慢，每格的變化量不變大）

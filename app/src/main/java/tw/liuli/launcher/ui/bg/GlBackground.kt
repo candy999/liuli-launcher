@@ -461,8 +461,8 @@ object GlBackground {
     // 再用較高的解析度（[edgeLevel]，最高原生）讀這張場、在那個解析度的像素上判斷邊緣與反鋸齒（fwidth）。
     // 場是平滑的（相位的 cos、到圓弧的距離、雜訊值），雙線性放大不會有鋸齒；最貴的計算還是在低解析度做，
     // 第二段每個像素只讀一次貼圖、做幾次比較。海信（Mali-470）原生走一遍要 10ms 以上付不起，所以邊緣是形狀的兩倍解析度
-    /** 分兩段畫的樣式（有明確邊緣的；漩渦要重做，之後再加）。 */
-    private val SPLIT = setOf(BgStyle.SPIRAL, BgStyle.TRUCHET, BgStyle.SIMPLEX)
+    /** 分兩段畫的樣式（有明確邊緣的）。 */
+    private val SPLIT = setOf(BgStyle.SPIRAL, BgStyle.TRUCHET, BgStyle.SIMPLEX, BgStyle.SAUCE)
     private var splitFailed = false
     private val fieldProgs = HashMap<BgStyle, Program>()
     private val edgeProgs = HashMap<BgStyle, Program>()
@@ -1032,6 +1032,7 @@ internal fun BgStyle.splitField(): String = when (this) {
     BgStyle.SPIRAL -> GlStyles2.Spiral.FIELD
     BgStyle.TRUCHET -> GlStyles2.Truchet.FIELD
     BgStyle.SIMPLEX -> GlStyles2.Simplex.FIELD
+    BgStyle.SAUCE -> GlStyles.Sauce.FIELD
     else -> throw IllegalArgumentException("$id 不分兩段")
 }
 
@@ -1040,6 +1041,7 @@ internal fun BgStyle.splitEdge(): String = when (this) {
     BgStyle.SPIRAL -> GlStyles2.Spiral.EDGE
     BgStyle.TRUCHET -> GlStyles2.Truchet.EDGE
     BgStyle.SIMPLEX -> GlStyles2.Simplex.EDGE
+    BgStyle.SAUCE -> GlStyles.Sauce.EDGE
     else -> throw IllegalArgumentException("$id 不分兩段")
 }
 
