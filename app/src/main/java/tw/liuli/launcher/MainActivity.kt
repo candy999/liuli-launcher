@@ -173,6 +173,12 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    // 開了別的 App、螢幕關掉：背景的動畫時鐘歸零（看不到的時候重整，回來從頭開始）
+    override fun onStop() {
+        BackgroundEngine.active?.restartClock()
+        super.onStop()
+    }
+
     override fun onStart() {
         super.onStart()
         if (MemoryTrim.hidden) {

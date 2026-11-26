@@ -297,8 +297,14 @@ class BackgroundEngine {
     private var paceN = 0
     private var paceLastNs = 0L
     private var atD = 0.0
-    /** 量測用（adb ACTION=bgat:秒）：把動畫時鐘撥到某一秒（例如 3590，十秒後跨過循環的接縫），不存。 */
+    /** 下一格把動畫時鐘撥到這一秒（-1＝不撥）：離開主畫面時歸零（[restartClock]）；量測用 adb ACTION=bgat:秒（例如 3593，七秒後跨過循環的接縫）。 */
     @Volatile var debugAtJump = -1.0
+
+    /**
+     * 開了別的 App（主畫面看不到）：動畫時鐘歸零，回來時從頭開始。看不到的時候撥，不會看到跳；
+     * 主畫面一直開著（好幾天）也沒關係，時鐘本來就每 [Loop.P] 秒無縫循環。
+     */
+    fun restartClock() { debugAtJump = 0.0 }
     private var coldStart = true
     fun startPaceLog() { paceN = 0; paceLastNs = 0L; paceLeft = paceBuf.size }
     private fun pace(ns: Long) {
@@ -668,7 +674,7 @@ class BackgroundEngine {
                     if (done) snapToTarget()
                     // 累加用雙精度（單精度一路加上去，幾個小時後每一格加的量會被捨入吃掉一部分，流動就不均勻）
                     // 持續流動也跟著播放速度（跟不上每秒 30 格時放慢，每格的變化量不變大）
-                    if (debugAtJump >= 0.0) { atD = debugAtJump % Loop.P; debugAtJump = -1.0 }
+                    if (debugAtJump >= 0.0) { atD = debugAtJump % Loop.P; debugAtJump = -1.0; Log.i(TAG, "動畫時鐘撥到 ${atD.toInt()} 秒") }
                     if (lastAmbT != 0L) { atD = (atD + min(t - lastAmbT, 100L) / 1000.0 * speed) % Loop.P; st.at = atD.toFloat() }
                     lastAmbT = t
                     st.nowMs = t
