@@ -52,7 +52,9 @@ internal object GlStyles {
         private const val RC2 = .0225                          // 中心 rc＝0.15
         private const val R2 = 3.61                            // 外緣 R＝1.9（整個畫面都在裡面）
         private const val K_MAX = 3.0                          // 完全捲緊時，從外緣到中心大約繞 2.5 圈
-        private val A = doubleArrayOf(.7, .4, .5, 1.1)         // 外緣顏料的四個波隨時間變化的速度
+        // 外緣顏料的四個波隨時間變化的速度：慢（半徑方向只有兩三圈），主要的形狀是被捲起來的螺旋臂。
+        // 以前 0.7～1.1：半徑方向十幾圈，像一圈圈的標靶，半精度的誤差也被放大成毛邊
+        private val A = doubleArrayOf(.25, .15, .2, .3)
 
         fun params(st: BgState, out: FloatArray) {
             // 時鐘只往前走：玻璃小圖用的是稍早的狀態快照，拿它來算不能把時鐘往回撥
@@ -88,7 +90,7 @@ internal object GlStyles {
             put(out, 12, st.col(-25f, .8f, .30f))   // 顏料：深
             put(out, 16, st.col(0f, .9f, .52f))     // 顏料：主色
             put(out, 20, st.col(30f, .85f, .66f))   // 顏料：偏暖
-            put(out, 32, st.col(-8f, .55f, .82f))   // 顏料：淡
+            put(out, 32, st.col(-8f, .55f, .72f))   // 顏料：淡
             out[24] = (K_MAX * wind).toFloat()       // k：從外緣流到這裡轉了幾弧度 ÷ ln(...)
             out[25] = RC2.toFloat()
             out[26] = (1.0 / (2 * Q)).toFloat()
@@ -126,10 +128,11 @@ void main() {
   // 這團顏料流進來時的角度（回推轉過的角度）與流進來的時間（r²／2Q，乘上各波的速度）
   float ph = atan(d.y, d.x) - u_p[6].x * (u_p[6].w - log(r2 + u_p[6].y));
   float rr = r2 * u_p[6].z;
+  // 角度的整數倍（1、2、3、5：繞一圈接得起來）；1 倍角讓旋臂一邊粗一邊細
   float v = 0.5
-    + 0.22 * sin(2.0 * ph + u_p[0].x + 0.7 * rr + 1.3 * sin(3.0 * ph - u_p[0].y - 0.4 * rr))
-    + 0.18 * sin(5.0 * ph + u_p[0].z + 0.5 * rr)
-    + 0.10 * sin(9.0 * ph + u_p[0].w + 1.1 * rr);
+    + 0.25 * sin(2.0 * ph + u_p[0].x + 0.25 * rr + 1.0 * sin(3.0 * ph - u_p[0].y - 0.15 * rr))
+    + 0.17 * sin(ph + u_p[0].z + 0.2 * rr)
+    + 0.10 * sin(5.0 * ph + u_p[0].w + 0.3 * rr);
   // 四種顏料（交界約 1.5 個像素的柔邊）
   float fw = 0.75 * fwidth(v) + 0.002;
   vec3 col = u_p[3].rgb;
