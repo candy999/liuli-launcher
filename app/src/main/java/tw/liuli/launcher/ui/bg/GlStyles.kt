@@ -123,11 +123,11 @@ void main() {
   float t = (15.0 * th + 1.5 * sin(2.0 * th + 0.7)) * 0.15915494;
   // 交界的寬度：t 本身在 ±π 那條線上會跳、fract 在半格的地方會跳，兩個取小的就不會誤判
   float w = min(fwidth(t), fwidth(fract(t + 0.5))) * 1.2 + 0.03;
-  float f = fract(t);
+  float fr = fract(t);
   float k = mod(floor(t), 3.0);
   vec3 ca = k < 0.5 ? u_p[3].rgb : (k < 1.5 ? u_p[5].rgb : u_p[4].rgb);
   vec3 cb = k < 0.5 ? u_p[5].rgb : (k < 1.5 ? u_p[4].rgb : u_p[3].rgb);
-  vec3 col = mix(ca, cb, smoothstep(1.0 - w, 1.0, f));
+  vec3 col = mix(ca, cb, smoothstep(1.0 - w, 1.0, fr));
   """ + DITHER + """
   gl_FragColor = vec4(col, 1.0);
 }
