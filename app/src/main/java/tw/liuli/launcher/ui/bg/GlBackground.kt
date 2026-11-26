@@ -129,7 +129,7 @@ object GlBackground {
      */
     private fun startLevel(style: BgStyle) = when (style) {
         BgStyle.SPIRAL, BgStyle.TRUCHET, BgStyle.BLINDS, BgStyle.LIQUID -> 2
-        BgStyle.SWIRL, BgStyle.SIMPLEX, BgStyle.WARP, BgStyle.SOFTAURORA, BgStyle.WATERCOLOR -> 3
+        BgStyle.SAUCE, BgStyle.SIMPLEX, BgStyle.WARP, BgStyle.SOFTAURORA, BgStyle.WATERCOLOR -> 3
         BgStyle.CURTAIN -> 5
         else -> 4
     } - 1
@@ -1020,7 +1020,7 @@ void main() { v_uv = a_pos * 0.5 + 0.5; gl_Position = vec4(a_pos.x, a_pos.y * u_
 
 /** 著色器樣式的頂點著色器。 */
 internal fun BgStyle.glVertex(): String = when (this) {
-    BgStyle.SWIRL -> GlStyles.Swirl.VERTEX
+    BgStyle.SAUCE -> GlStyles.Sauce.VERTEX
     BgStyle.SIMPLEX -> GlStyles2.Simplex.VERTEX
     BgStyle.WARP -> if (GlBackground.fragHighp) GlBackground.VERTEX else GlStyles2.Warp.VERTEX
     BgStyle.SOFTAURORA -> GlStyles2.SoftAurora.VERTEX
@@ -1046,7 +1046,7 @@ internal fun BgStyle.splitEdge(): String = when (this) {
 /** 著色器樣式的片段著色器原始碼。 */
 internal fun BgStyle.glShader(): String = when (this) {
     BgStyle.MESH -> MeshGradient.SHADER
-    BgStyle.SWIRL -> GlStyles.Swirl.SHADER
+    BgStyle.SAUCE -> GlStyles.Sauce.SHADER
     BgStyle.WATERCOLOR -> Watercolor.SHADER
     BgStyle.SIMPLEX -> GlStyles2.Simplex.SHADER
     BgStyle.WARP -> if (GlBackground.fragHighp) GlStyles2.Warp.SHADER_HP else GlStyles2.Warp.SHADER
@@ -1062,7 +1062,7 @@ internal fun BgStyle.glShader(): String = when (this) {
 /** 著色器樣式的參數（主執行緒每格算一次：時間相位取模、色點軌跡、調色盤）。 */
 internal fun BgStyle.glParams(st: BgState, out: FloatArray) = when (this) {
     BgStyle.MESH -> MeshGradient.params(st, out)
-    BgStyle.SWIRL -> GlStyles.Swirl.params(st, out)
+    BgStyle.SAUCE -> GlStyles.Sauce.params(st, out)
     BgStyle.WATERCOLOR -> Watercolor.params(st, out)
     BgStyle.SIMPLEX -> GlStyles2.Simplex.params(st, out)
     BgStyle.WARP -> GlStyles2.Warp.params(st, out)

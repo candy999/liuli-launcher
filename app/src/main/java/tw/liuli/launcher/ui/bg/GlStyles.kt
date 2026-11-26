@@ -38,7 +38,7 @@ internal object GlStyles {
      * 移動中捲紋鬆開（舊位置慢慢回到原狀），後方拖出一點尾巴；停下來後新位置再慢慢捲緊。停著時捲紋輕輕呼吸。
      * 琉璃自己寫的（以前改寫自 Paper Shaders 的 swirl，太規則、整片在轉，已經整個換掉）。
      */
-    object Swirl {
+    object Sauce {
         private var cx = Float.NaN; private var cy = 0f        // 攪拌中心（彈簧）
         private var vx = 0f; private var vy = 0f               // 攪拌中心的速度
         private var ox = 0f; private var oy = 0f               // 外圈的中心（慢慢跟上）

@@ -41,7 +41,7 @@ internal object CpuLines {
         var tKey = Long.MIN_VALUE
         val tmp = FloatArray(64)
         val swirlPaths = arrayOf(Path(), Path(), Path())
-        val curve = FloatArray(GlStyles.Swirl.WEDGES * SW_PTS * 2)
+        val curve = FloatArray(GlStyles.Sauce.WEDGES * SW_PTS * 2)
     }
     private val scratch: ThreadLocal<Scratch> = ThreadLocal.withInitial { Scratch() }
 
@@ -152,15 +152,15 @@ internal object CpuLines {
      * GPU 版的瓣座標 t＝(9θ＋1.5·sin(2θ＋0.7))／2π，交界在 t 為整數的地方；t 對 θ 單調遞增，用牛頓法各解一次。
      * [boundM] 是那條交界線的 t（決定兩側的顏色）。
      */
-    private val boundTheta = DoubleArray(GlStyles.Swirl.WEDGES)
-    private val boundM = IntArray(GlStyles.Swirl.WEDGES)
+    private val boundTheta = DoubleArray(GlStyles.Sauce.WEDGES)
+    private val boundM = IntArray(GlStyles.Sauce.WEDGES)
 
     init {
-        val n = GlStyles.Swirl.WEDGES.toDouble(); val wv = GlStyles.Swirl.WAVE.toDouble()
+        val n = GlStyles.Sauce.WEDGES.toDouble(); val wv = GlStyles.Sauce.WAVE.toDouble()
         fun t(th: Double) = (n * th + wv * sin(2 * th + .7)) / (2 * PI)
         fun dt(th: Double) = (n + 2 * wv * cos(2 * th + .7)) / (2 * PI)
         val m0 = kotlin.math.ceil(t(-PI)).toInt()
-        for (i in 0 until GlStyles.Swirl.WEDGES) {
+        for (i in 0 until GlStyles.Sauce.WEDGES) {
             val m = m0 + i
             var th = 2 * PI * m / n
             repeat(30) { th -= (t(th) - m) / dt(th) }
@@ -169,7 +169,7 @@ internal object CpuLines {
     }
 
     /**
-     * 漩渦的 CPU 版：和 GPU 版同一份狀態（[GlStyles.Swirl.params]：攪拌中心的彈簧、外圈落後、捲緊程度），
+     * 漩渦的 CPU 版：和 GPU 版同一份狀態（[GlStyles.Sauce.params]：攪拌中心的彈簧、外圈落後、捲緊程度），
      * 每條交界線在畫面上是「角度＝原始角度 − a(r)」的曲線（a(r)＝A·exp(−r²／σ²)，往中心吸只改變距離、不改變角度），
      * 中心依半徑在攪拌中心與外圈中心之間內插（同 GPU 版）。相鄰兩條圍成一瓣，同色的三瓣合成一個路徑填色——
      * 邊緣由路徑反鋸齒，任何解析度都銳利。移動時的尾巴（GPU 版取樣時的小偏移）這裡不畫。
@@ -177,7 +177,7 @@ internal object CpuLines {
     fun DrawScope.swirl(st: BgState, w: Float, h: Float) {
         val sc = scratch.get()!!
         val tmp = sc.tmp; val cv = sc.curve
-        GlStyles.Swirl.params(st, tmp)
+        GlStyles.Sauce.params(st, tmp)
         val unit = h / .8f                                   // GPU 版 v_q 的 1 單位＝畫面高度 ÷ 0.8
         val cix = tmp[4]; val ciy = tmp[5]; val cox = tmp[6]; val coy = tmp[7]
         val amp = tmp[24].toDouble(); val s2 = tmp[25].toDouble()
@@ -185,7 +185,7 @@ internal object CpuLines {
         val rMax = 3.0                                       // 畫面對角線約 1.63，取 3 確保瓣的外緣在畫面外
         // 每條交界線的點：r 從 0 到 3σ 密（a(r) 在這裡變化），3σ 到 rMax 疏
         val nIn = SW_PTS - 8
-        for (b in 0 until GlStyles.Swirl.WEDGES) {
+        for (b in 0 until GlStyles.Sauce.WEDGES) {
             val base = boundTheta[b]
             for (k in 0 until SW_PTS) {
                 val r = if (k < nIn) 3 * sig * k / (nIn - 1) else 3 * sig + (rMax - 3 * sig) * (k - nIn + 1) / 8.0
@@ -199,8 +199,8 @@ internal object CpuLines {
         }
         for (p in sc.swirlPaths) p.reset()
         // 瓣 i：交界 i（t＝m）到交界 i＋1（t＝m＋1）之間，顏色＝m 除以 3 的餘數（0 深、1 中、2 淺，同 GPU 版）
-        for (i in 0 until GlStyles.Swirl.WEDGES) {
-            val j = (i + 1) % GlStyles.Swirl.WEDGES
+        for (i in 0 until GlStyles.Sauce.WEDGES) {
+            val j = (i + 1) % GlStyles.Sauce.WEDGES
             val p = sc.swirlPaths[Math.floorMod(boundM[i], 3)]
             var o = i * SW_PTS * 2
             p.moveTo(cv[o], cv[o + 1])
