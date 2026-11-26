@@ -29,7 +29,7 @@ internal object GlStyles {
     // ───────────── 漩渦（攪拌濃稠的雙色流體） ─────────────
 
     /**
-     * 漩渦：一層濃稠的雙色流體，以攪拌中心為圓心分成十瓣（五瓣巧克力、五瓣奶油交錯，瓣寬帶一點變化），本身不動；
+     * 漩渦：一層濃稠的三色流體，以攪拌中心為圓心分成十五瓣（巧克力、焦糖、奶油依序交錯，每色五瓣，瓣寬帶一點變化），本身不動；
      * 只有攪拌的中心（焦點）會動——中心附近的流體被捲進去（越靠中心轉得越多，最多約半圈）、也稍微被往中心吸，
      * 離中心遠的地方完全不受影響，外緣永遠是原本的樣子。
      * 每個像素回推「這裡的流體原本在哪」：以中心為圓心，倒轉 a(r)＝A·exp(−r²／σ²) 的角度、往外放大 1＋P·exp(−r²／σ²) 倍，
@@ -78,6 +78,7 @@ internal object GlStyles {
             out[4] = cx; out[5] = cy; out[6] = ox; out[7] = oy
             put(out, 12, st.col(-10f, .75f, .16f))  // 深（巧克力）
             put(out, 16, st.col(8f, .7f, .66f))     // 淺（奶油）
+            put(out, 20, st.col(30f, .8f, .40f))    // 中（焦糖：色相往暖偏一點）
             out[24] = a; out[25] = SIGMA2; out[26] = PULL * wind; out[27] = 0f
             // 尾巴：攪拌中心附近沿移動方向往回取樣（後方的流體被拖長），最多 0.2
             val sp = kotlin.math.hypot(vx, vy)
@@ -115,14 +116,18 @@ void main() {
   float cs = cos(a);
   float sn = sin(a);
   vec2 s = c + vec2(cs * d.x - sn * d.y, sn * d.x + cs * d.y) * (1.0 + u_p[6].z * f) + u_p[7].xy * f;
-  // 以攪拌中心的角度分成十瓣：五瓣深、五瓣淺交錯（外緣是直的扇形，往中心被捲進去）；瓣寬帶一點變化，不會太整齊
+  // 以攪拌中心的角度分成十五瓣：深、中、淺三色依序交錯，每色五瓣（外緣是直的扇形，往中心被捲進去）；瓣寬帶一點變化
   vec2 e = s - c;
   float th = atan(e.y, e.x);
-  float v = sin(5.0 * th + 1.5 * sin(2.0 * th + 0.7));
-  float fw = 0.75 * fwidth(v) + 0.03;
-  float m = smoothstep(-fw, fw, v);
-  vec3 col = mix(u_p[3].rgb, u_p[4].rgb, m);
-  col += u_p[4].rgb * 0.08 * m * (1.0 - smoothstep(0.0, 0.5, v));
+  // t：一圈 15 瓣的座標（整數＝瓣的交界）。atan 在 ±π 跳一圈時 t 跳 15（3 的倍數），顏色順序接得起來
+  float t = (15.0 * th + 1.5 * sin(2.0 * th + 0.7)) * 0.15915494;
+  // 交界的寬度：t 本身在 ±π 那條線上會跳、fract 在半格的地方會跳，兩個取小的就不會誤判
+  float w = min(fwidth(t), fwidth(fract(t + 0.5))) * 1.2 + 0.03;
+  float f = fract(t);
+  float k = mod(floor(t), 3.0);
+  vec3 ca = k < 0.5 ? u_p[3].rgb : (k < 1.5 ? u_p[5].rgb : u_p[4].rgb);
+  vec3 cb = k < 0.5 ? u_p[5].rgb : (k < 1.5 ? u_p[4].rgb : u_p[3].rgb);
+  vec3 col = mix(ca, cb, smoothstep(1.0 - w, 1.0, f));
   """ + DITHER + """
   gl_FragColor = vec4(col, 1.0);
 }
