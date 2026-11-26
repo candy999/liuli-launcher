@@ -473,9 +473,11 @@ void main() {
          * 只跟橫向位置 x 有關的量（每層簾腳的高度、飄移、亮斑、往上延伸多高：四次雜訊＋兩次 sin）每格在 CPU 上算好
          * （128 欄 × 3 層），存成一張 128×6 的小貼圖（u_data，第 2 個貼圖單元），片段每層只讀兩個像素——
          * 以前每個像素三層各算一遍，海信上 384×216 就要 30ms。（試過搬到頂點著色器：超過 Mali-400 頂點單元 512 條指令的上限，編譯失敗。）
-         * 每層兩列：(簾腳高度高位, 低位, 飄移, 亮斑)、(往上延伸, -, -, -)；簾腳要精確（下緣那道亮邊），用 16 位元。
+         * 每層兩列：(簾腳高度高位, 低位, 飄移, 亮斑)、(往上延伸, 細絲, -, -)；簾腳要精確（下緣那道亮邊），用 16 位元。
+         * 細絲也只跟 x 有關（原本帶一點隨簾腳的斜度，拿掉後細絲筆直往上），在這裡算好，片段就不用每層每個像素查雜訊——
+         * 那次查詢的座標要等讀完貼圖才算得出來，Mali-400 上特別慢。
          */
-        const val DATA_W = 128
+        const val DATA_W = 384   // 細絲很密（橫向約 107 格雜訊），每格雜訊至少 3 欄
         const val DATA_H = 6
         val data: java.nio.ByteBuffer = java.nio.ByteBuffer.allocateDirect(DATA_W * DATA_H * 4)
 
@@ -500,7 +502,7 @@ void main() {
         /** 照這一格的參數（[params] 寫的 work）算出 [data]（GL 執行緒呼叫）。 */
         fun fillData(p: FloatArray) {
             val asp = p[0]; val ph1 = p[4]; val ph2 = p[5]; val act = p[6]
-            val tx = (p[56] + p[60]).toDouble(); val ty = (p[57] + p[61]).toDouble(); val tw = (p[59] + p[63]).toDouble()
+            val tx = (p[56] + p[60]).toDouble(); val ty = (p[57] + p[61]).toDouble(); val tz = (p[58] + p[62]).toDouble(); val tw = (p[59] + p[63]).toDouble()
             data.position(0)
             for (row in 0 until DATA_H) {
                 val i = row / 2
@@ -517,7 +519,9 @@ void main() {
                         data.put((hi + .5f).toInt().toByte()); data.put(b(hv - hi)); data.put(b(dr / .04f)); data.put(b((pa - .48f) / .8f))
                     } else {
                         val re = 5.5f + vn(x * 11.0, i + 4.0) * 5f - act * 1.5f
-                        data.put(b((re - 4f) / 6.5f)); data.put(0); data.put(0); data.put(0)
+                        val drift = x + (.017f + act * .015f) * vn(x * 8.0, ty + i)
+                        val grain = vn(drift * 60.0, tz + i * 4)
+                        data.put(b((re - 4f) / 6.5f)); data.put(b(grain)); data.put(0); data.put(0)
                     }
                 }
             }
@@ -526,10 +530,8 @@ void main() {
 
         const val SHADER = HEAD + """
 uniform sampler2D u_data;
-vec3 layerCol(float py, float hem, float dr, float pa, float re, float layer, float amt, float act) {
+vec3 layerCol(float py, float hem, float grain, float pa, float re, float amt, float act) {
   float rise = py - hem;
-  float drift = dr + rise * 0.1;
-  float grain = gt(vec2(drift * 60.0, u_p[15].z), vec2(0.0, u_p[14].z + layer * 4.0));
   float threads = 0.36 + 0.64 * sqrt(grain) + 0.085;
   float veil = smoothstep(-0.012, 0.022, rise) * exp(-max(rise, 0.0) * re);
   float lip = exp(-abs(rise) / (0.012 + grain * 0.013));
@@ -542,15 +544,12 @@ void main() {
   vec2 p = vec2((uv.x - 0.5) * u_p[0].x, 0.5 - uv.y);
   float act = u_p[2].z;
   vec3 color = mix(u_p[6].rgb, u_p[7].rgb, 1.0 - uv.y);
-  // 三層各讀兩個像素、各查一次細絲雜訊（試過後兩層共用第一層的細絲：讀取攤平後變成「等前一次讀貼圖才算得出座標」，
-  // Mali-400 反而慢五成）
+  // 三層各讀兩個像素（簾腳、亮斑、延伸、細絲都在 CPU 算好了），不再查雜訊
   for (int i = 0; i < 3; i++) {
     float layer = float(i);
     vec4 a = texture2D(u_data, vec2(v_uv.x, (layer * 2.0 + 0.5) / 6.0));
     vec4 b = texture2D(u_data, vec2(v_uv.x, (layer * 2.0 + 1.5) / 6.0));
-    float hem = a.r + a.g / 255.0 - 0.7;
-    float dr = p.x + layer * 0.42 + a.b * 0.04;
-    color += layerCol(p.y, hem, dr, 0.48 + a.a * 0.8, 4.0 + b.r * 6.5, layer, layer < 0.5 ? 1.0 : (layer < 1.5 ? 0.32 : 0.1024), act);
+    color += layerCol(p.y, a.r + a.g / 255.0 - 0.7, b.g, 0.48 + a.a * 0.8, 4.0 + b.r * 6.5, layer < 0.5 ? 1.0 : (layer < 1.5 ? 0.32 : 0.1024), act);
   }
   color *= 0.88 + 0.12 * pow(max(0.0, 1.0 - length(p) * 0.6), 0.6);
   vec3 col = 1.0 - exp(-color * 1.4);
