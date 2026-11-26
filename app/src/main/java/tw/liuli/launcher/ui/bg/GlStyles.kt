@@ -30,7 +30,7 @@ internal object GlStyles {
 
     /**
      * 漩渦：一層濃稠的雙色流體，以攪拌中心為圓心分成十瓣（五瓣巧克力、五瓣奶油交錯，瓣寬帶一點變化），本身不動；
-     * 只有攪拌的中心（焦點）會動——中心附近的流體被捲進去（越靠中心轉得越多，最多約一圈）、也稍微被往中心吸，
+     * 只有攪拌的中心（焦點）會動——中心附近的流體被捲進去（越靠中心轉得越多，最多約半圈）、也稍微被往中心吸，
      * 離中心遠的地方完全不受影響，外緣永遠是原本的樣子。
      * 每個像素回推「這裡的流體原本在哪」：以中心為圓心，倒轉 a(r)＝A·exp(−r²／σ²) 的角度、往外放大 1＋P·exp(−r²／σ²) 倍，
      * 再看那一點在十瓣裡的哪一瓣（外緣是直的扇形，往中心被捲成螺旋）。
@@ -46,9 +46,10 @@ internal object GlStyles {
         private var breath = 0.0                               // 呼吸的相位
         private var lastAt = Float.NaN
 
-        private const val TURNS = 1.0                          // 完全捲緊時中心轉幾圈
-        private const val SIGMA2 = .12f                        // 影響範圍 σ²（σ≈0.35，畫面高度 0.8 的單位）
-        private const val PULL = .6f                           // 往中心吸：中心取樣放大 1.6 倍
+        // 以下四個值是使用者在試調台（網頁預覽）上調好的
+        private const val TURNS = .45                          // 完全捲緊時中心轉幾圈
+        private const val SIGMA2 = .09f                        // 影響範圍 σ²（σ＝0.30，畫面高度 0.8 的單位）
+        private const val PULL = 1.6f                          // 往中心吸：中心取樣放大 2.6 倍
 
         fun params(st: BgState, out: FloatArray) {
             // 時鐘只往前走：玻璃小圖用的是稍早的狀態快照，拿它來算不能把時鐘往回撥
@@ -117,7 +118,7 @@ void main() {
   // 以攪拌中心的角度分成十瓣：五瓣深、五瓣淺交錯（外緣是直的扇形，往中心被捲進去）；瓣寬帶一點變化，不會太整齊
   vec2 e = s - c;
   float th = atan(e.y, e.x);
-  float v = sin(5.0 * th + 0.6 * sin(2.0 * th + 0.7));
+  float v = sin(5.0 * th + 1.5 * sin(2.0 * th + 0.7));
   float fw = 0.75 * fwidth(v) + 0.03;
   float m = smoothstep(-fw, fw, v);
   vec3 col = mix(u_p[3].rgb, u_p[4].rgb, m);
