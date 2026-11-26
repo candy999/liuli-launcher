@@ -354,12 +354,13 @@ void main() {
     // ───────────── 極光簾（Subframe aurora-curtain） ─────────────
 
     /**
-     * 極光簾：三層極光的下緣（簾腳）彎曲起伏，往上透出帶細絲的光幕，最下緣一道亮邊；背景有零星的星星。
+     * 極光簾：三層極光的下緣（簾腳）彎曲起伏，往上透出帶細絲的光幕，最下緣一道亮邊。
      * 改寫自 Subframe 的 aurora-curtain（Copyright (c) 2026 Subframe，MIT License，全文見 assets/licenses/subframe-LICENSE.txt）。改動：
      * - fract(sin·43719) 雜湊改成查雜訊貼圖；時間相位在 CPU 取模
      * - 細絲的頻率 145／310 → 60（480×270 畫不出那麼細，放大後會閃）；最細的一層拿掉
      * - 「活躍度」滑桿改成焦點脈動；顏色改成主色系（原版固定綠色）
      * - 座標 y 往下（畫面座標），簾腳在畫面下方、光往上
+     * - 拿掉背景的星星：這個樣式只畫得起低解析度（海信 320×180），星星放大六倍變成糊糊的方塊
      */
     object Curtain {
         // 流動的相位逐格累加：以前是「累計時間 × 速度」，焦點一動速度變了，相位一口氣跳好幾十圈（換格子時整片暴衝）
@@ -407,10 +408,6 @@ void main() {
     vec3 tint = mix(u_p[3].rgb, u_p[4].rgb, smoothstep(0.02, 0.38, max(0.0, rise)));
     color += amount * (tint * (veil * threads * (0.5 + act * 0.52) + halo) + u_p[5].rgb * lip * threads * (0.55 + act * 0.4));
   }
-  vec2 star = vec2(p.x, p.y) * 90.0;
-  vec2 cell = floor(star);
-  float pts = step(0.996, texture2D(u_noise, (cell + 0.5) / 64.0).b) * (1.0 - smoothstep(0.05, 0.3, length(fract(star) - 0.5)));
-  color += pts * 0.42 * (1.0 - smoothstep(0.1, 0.8, max(color.r, max(color.g, color.b))));
   color *= 0.88 + 0.12 * pow(max(0.0, 1.0 - length(p) * 0.6), 0.6);
   vec3 col = 1.0 - exp(-color * 1.4);
   """ + DITHER + """

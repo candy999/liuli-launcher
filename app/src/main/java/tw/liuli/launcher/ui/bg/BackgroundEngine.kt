@@ -52,7 +52,7 @@ enum class BgStyle(val id: String, val label: String, val note: String, val ambi
     SIMPLEX("simplex", "色塊雜訊", "幾種顏色像地圖色塊一樣分層，慢慢流動", ambient = true, gl = true),
     WARP("warp", "扭曲色帶", "棋盤圖樣被一層層漩渦扭成流動的絲狀色帶", ambient = true, gl = true),
     SOFTAURORA("softaurora", "柔極光", "暗色天空上三條柔和的極光帶起伏飄動", ambient = true, gl = true),
-    CURTAIN("curtain", "極光簾", "極光的簾腳彎曲起伏，往上透出帶細絲的光幕，夜空有零星星星", ambient = true, gl = true),
+    CURTAIN("curtain", "極光簾", "極光的簾腳彎曲起伏，往上透出帶細絲的光幕", ambient = true, gl = true),
     LIQUID("liquid", "液態以太", "流體模擬：焦點移動時把彩色的流體推開，閒置時輕輕攪動", ambient = true, gl = true),
     SPIRAL("spiral", "螺旋", "一條螺旋線繞著焦點慢慢轉", ambient = true, gl = true),
     TRUCHET("truchet", "特魯謝緞帶", "隨機拼接的圓弧連成蜿蜒的緞帶，整片慢慢捲動", ambient = true, gl = true),
