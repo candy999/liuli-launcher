@@ -603,6 +603,8 @@ class BackgroundEngine {
             var skipMeasure = 2
             var winSum = 0f
             var winN = 0
+            // 這一窗裡「晚了一格以上」的間隔有幾個：平均看不出來的頓（33、50ms 交錯，平均 40ms 剛好在門檻下）
+            var winLong = 0
             latN = 0
             var fastWins = 0
             var slowWins = 0
@@ -646,7 +648,11 @@ class BackgroundEngine {
                         nextRestoreT = t + RAMP_STEP_MS
                     } else if (lastBgT != 0L) {
                         // 量測：兩格背景之間實際隔多久（備援指標；主要看 FrameMetrics 的總耗時）
-                        if (skipMeasure > 0) skipMeasure-- else { winSum += (t - lastBgT).toFloat(); winN++; measure = true }
+                        if (skipMeasure > 0) skipMeasure-- else {
+                            val gap = (t - lastBgT).toFloat()
+                            winSum += gap; winN++; measure = true
+                            if (gap > interval * LONG_GAP) winLong++
+                        }
                     }
                     lastBgT = t
                     pace(ns)
@@ -728,21 +734,25 @@ class BackgroundEngine {
                     frame++
                 }
                 drainLatency()
-                if (android.os.SystemClock.uptimeMillis() < evalFrom) { winSum = 0f; winN = 0; latN = 0 }
-                else if (glOwned) { winSum = 0f; winN = 0; latN = 0 }
+                if (android.os.SystemClock.uptimeMillis() < evalFrom) { winSum = 0f; winN = 0; winLong = 0; latN = 0 }
+                else if (glOwned) { winSum = 0f; winN = 0; winLong = 0; latN = 0 }
                 else if (!forced && !blurOn && !ramping && renderDiv == div && (latN >= LAT_WINDOW || winN >= ADAPT_WINDOW * 2)) {
                     // 總耗時（中位數）：沒有排隊時就是這一幀真正的成本；超過更新間隔＝開始排隊
                     val lat = if (latN > 0) median(latBuf, latN) else -1f
                     val avg = if (winN > 0) winSum / winN else interval
-                    winSum = 0f; winN = 0; latN = 0
+                    // 頓的比例：Android 9 的 FrameMetrics 總耗時不含等 GPU 畫完，顯示晶片跟不上時「總耗時」看起來很好，
+                    // 只有畫面的間隔會一格 33、一格 50ms 地頓（海信 Mali-470 上星空銀河四成的間隔是 50ms，平均 40ms 剛好在門檻下）
+                    val longFrac = if (winN > 0) winLong.toFloat() / winN else 0f
+                    winSum = 0f; winN = 0; winLong = 0; latN = 0
                     if (lat >= 0f) { costLat[si] = lat; costDiv[si] = div }
-                    val cost = if (lat >= 0f) lat else avg
-                    val slow = avg > interval * SLOW_RATIO || lat > interval * LAT_SLOW
+                    // 成本取總耗時與實際間隔較大的那個：顯示晶片跟不上時總耗時偏低，間隔才是真的
+                    val cost = if (lat >= 0f) max(lat, avg) else avg
+                    val slow = avg > interval * SLOW_RATIO || lat > interval * LAT_SLOW || longFrac > LONG_SLOW
                     val verySlow = avg > interval * VERY_SLOW_RATIO || lat > interval * LAT_VERY_SLOW
                     // 背景優先於毛玻璃：跟不上時先降毛玻璃的更新次數，到最低了才降背景（剛升完檔就跟不上是試探失敗，照常退回）
                     if (slow && android.os.SystemClock.uptimeMillis() - lastUpgradeAt > 4000 && tw.liuli.launcher.ui.glass.GlassRate.yieldToBackground()) { slowWins = 0; skipMeasure = 2; continue }
                     // 升檔要「推估」付得起：先加回更新率，再加解析度
-                    val canUp = avg < interval * FAST_RATIO && when {
+                    val canUp = avg < interval * FAST_RATIO && longFrac <= LONG_OK && when {
                         iv > 0 -> lat < 0f || lat <= INTERVALS[iv - 1] * LAT_UP
                         div > 1 -> lat < 0f || lat * scaleCost(div, div - 1) <= interval * LAT_UP
                         else -> false
@@ -786,8 +796,8 @@ class BackgroundEngine {
                     val oldDiv = div
                     val oldIv = iv
                     if (checkDivFrom > 0f) {
-                        // 降解析度後幾乎沒變快：這個樣式卡在 CPU，解析度還原、改降更新率
-                        if (cost > checkDivFrom * 0.85f && cost > interval * LAT_UP) {
+                        // 降解析度後幾乎沒變快、而且還是跟不上：這個樣式卡在 CPU，解析度還原、改降更新率
+                        if (slow && cost > checkDivFrom * 0.85f && cost > interval * LAT_UP) {
                             cpuBound[si] = true
                             div = max(1, div - 1)
                             if (slow && iv < INTERVALS.lastIndex) iv++
@@ -1254,6 +1264,11 @@ class BackgroundEngine {
         private const val ADAPT_WINDOW = 8
         /** 背景格間隔超過排定的 1.25 倍＝跟不上（連續兩窗才降）；超過 1.8 倍直接降；在 1.1 倍內＝準時，可以試著升。 */
         private const val SLOW_RATIO = 1.25f
+        /** 間隔超過更新間隔的這個倍數＝晚了一格（30 格時 46.7ms）。 */
+        private const val LONG_GAP = 1.4f
+        /** 一窗裡晚一格的間隔超過這個比例就算跟不上；不超過 [LONG_OK] 才可以升檔。 */
+        private const val LONG_SLOW = .2f
+        private const val LONG_OK = .06f
         private const val VERY_SLOW_RATIO = 1.8f
         private const val FAST_RATIO = 1.1f
 
