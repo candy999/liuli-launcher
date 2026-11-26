@@ -35,6 +35,13 @@ object LIcons {
     private const val CLOUD_LOW = "M7 19h10a4 4 0 0 0 .6-7.96A6 6 0 0 0 6.2 12 3.5 3.5 0 0 0 7 19z"
     private const val CLOUD_HIGH = "M7 15h10a4 4 0 0 0 .6-7.96A6 6 0 0 0 6.2 8 3.5 3.5 0 0 0 7 15z"
 
+    /** 晶片：選單裡標示「由顯示晶片繪製」的背景樣式。 */
+    val Chip = line(
+        "M8 7h8a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1z",
+        "M10.5 10.5h3v3h-3z",
+        "M10 4v3", "M14 4v3", "M10 17v3", "M14 17v3",
+        "M4 10h3", "M4 14h3", "M17 10h3", "M17 14h3",
+    )
     val Input = line("M5 4.5h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2z", "M8.5 20.5h7", "M12 16.5v4")
     val Settings = line(
         "M15 12a3 3 0 1 1-6 0a3 3 0 1 1 6 0z",

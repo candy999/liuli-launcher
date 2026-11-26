@@ -36,27 +36,32 @@ import kotlin.math.min
  * 用 [BgState.at] 這個「只在背景真的有畫的時候才前進」的時鐘，暫停（面板滑動、離開琉璃）後接著動、不會跳。
  */
 enum class BgStyle(val id: String, val label: String, val note: String, val ambient: Boolean = false, val gl: Boolean = false) {
-    CONTOUR("contour", "等高線", "焦點是山峰，等高線跟著流動"),
-    WAVES("waves", "流線浪潮", "波峰朝焦點聚集"),
-    DEEPSEA("deepsea", "深海", "寬而模糊、錯落重疊的耶穌光灑進深海，光影晃動、微粒緩緩飄落", ambient = true),
+    // 夜空與光
     RIDGE("ridge", "玉山星軌", "向量平塗的玉山，顏色跟著一天的時間走；山嵐在山谷間隨風流動，星軌整天慢慢轉", ambient = true),
     GALAXY("galaxy", "星空銀河", "斜跨的銀河與三層星星，漂移的星點時連時斷地織成星座網", ambient = true),
+    SOFTAURORA("softaurora", "柔極光", "暗色天空上三條柔和的極光帶起伏飄動", ambient = true, gl = true),
+    CURTAIN("curtain", "極光簾", "極光的簾腳彎曲起伏，往上透出帶細絲的光幕", ambient = true, gl = true),
     BEAMS("beams", "光束", "粗細不一的垂直光束呼吸、流動，往焦點聚攏", ambient = true),
+    DEEPSEA("deepsea", "深海", "寬而模糊、錯落重疊的耶穌光灑進深海，光影晃動、微粒緩緩飄落", ambient = true),
+    // 光點與光軌
     TRAILS("trails", "光軌", "長曝光光軌，兩端交錯開合"),
     BOKEH("bokeh", "光斑", "前後景深視差，焦點時光斑脈動"),
     DOTS("dots", "波點圓圈", "遠近兩層波點，焦點處聚光"),
-    TRIANGLES("triangles", "幾何三角", "曲面隆起並跟著焦點移動，三角面拉伸變形"),
-    MESH("mesh", "網格漸層", "幾團顏色沿著各自的軌跡緩緩流動、互相暈染，最亮的那團跟著焦點", ambient = true, gl = true),
-    WATERCOLOR("watercolor", "水彩暈染", "焦點換到哪，就在那裡滴下一滴顏料慢慢暈開；邊緣柔，乾掉的水痕顏色較深", ambient = true, gl = true),
-    SAUCE("sauce", "三色濃醬", "巧克力、焦糖、奶油三色交錯，焦點是攪拌的中心，越靠中心捲得越多；移過去時舊的捲紋慢慢鬆開"),
-    SIMPLEX("simplex", "色塊雜訊", "幾種顏色像地圖色塊一樣分層，慢慢流動", ambient = true, gl = true),
-    WARP("warp", "扭曲色帶", "棋盤圖樣被一層層漩渦扭成流動的絲狀色帶", ambient = true, gl = true),
-    SOFTAURORA("softaurora", "柔極光", "暗色天空上三條柔和的極光帶起伏飄動", ambient = true, gl = true),
-    CURTAIN("curtain", "極光簾", "極光的簾腳彎曲起伏，往上透出帶細絲的光幕", ambient = true, gl = true),
-    LIQUID("liquid", "液態以太", "流體模擬：焦點移動時把彩色的流體推開，閒置時輕輕攪動", ambient = true, gl = true),
+    // 線條與幾何
+    CONTOUR("contour", "等高線", "焦點是山峰，等高線跟著流動"),
+    WAVES("waves", "流線浪潮", "波峰朝焦點聚集"),
     SPIRAL("spiral", "螺旋", "一條螺旋線繞著焦點慢慢轉", ambient = true),
     TRUCHET("truchet", "特魯謝緞帶", "隨機拼接的圓弧連成蜿蜒的緞帶，整片慢慢捲動", ambient = true),
     BLINDS("blinds", "漸層百葉", "一排直立的百葉片，朝向焦點的那一側亮起，焦點處聚光", gl = true),
+    TRIANGLES("triangles", "幾何三角", "曲面隆起並跟著焦點移動，三角面拉伸變形"),
+    // 色彩與流體
+    MESH("mesh", "網格漸層", "幾團顏色沿著各自的軌跡緩緩流動、互相暈染，最亮的那團跟著焦點", ambient = true, gl = true),
+    SIMPLEX("simplex", "色塊雜訊", "幾種顏色像地圖色塊一樣分層，慢慢流動", ambient = true, gl = true),
+    WARP("warp", "扭曲色帶", "棋盤圖樣被一層層漩渦扭成流動的絲狀色帶", ambient = true, gl = true),
+    WATERCOLOR("watercolor", "水彩暈染", "焦點換到哪，就在那裡滴下一滴顏料慢慢暈開；邊緣柔，乾掉的水痕顏色較深", ambient = true, gl = true),
+    LIQUID("liquid", "液態以太", "流體模擬：焦點移動時把彩色的流體推開，閒置時輕輕攪動", ambient = true, gl = true),
+    SAUCE("sauce", "三色濃醬", "巧克力、焦糖、奶油三色交錯，焦點是攪拌的中心，越靠中心捲得越多；移過去時舊的捲紋慢慢鬆開"),
+    // 單色
     SOLID("solid", "純色", "雙色漸層純色"),
     BLACK("black", "純黑（OLED）", "幾乎全黑，焦點下方一抹主色");
 

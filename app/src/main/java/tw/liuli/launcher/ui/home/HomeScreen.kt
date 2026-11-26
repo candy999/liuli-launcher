@@ -547,8 +547,8 @@ fun HomeScreen(
 
     // ───────────── 設定 ─────────────
     // 隨機的範圍：第一列套用隨機，下面每個樣式按確定勾選／取消（至少留一個）
-    // 背景由誰繪製：著色器樣式＝GPU（這台電視編譯失敗、改用備援畫法的話＝CPU）
-    fun drawnBy(st: BgStyle) = if (st.gl && !tw.liuli.launcher.ui.bg.GlBackground.failedFor(st)) "GPU" else "CPU"
+    // 由顯示晶片繪製的背景樣式在選單右邊標晶片圖示（這台電視編譯失敗、改用備援畫法的就不標）
+    fun gpuIcon(st: BgStyle) = if (st.gl && !tw.liuli.launcher.ui.bg.GlBackground.failedFor(st)) tw.liuli.launcher.ui.theme.LIcons.Chip else null
 
     fun randomSheet(focusIndex: Int) {
         val pool = settings.randomPool
@@ -560,7 +560,7 @@ fun HomeScreen(
                     settings.updateBgStyle(BgStyle.RANDOM_ID); engine.applyStyle(settings.resolveBgStyle()); closeAll()
                 },
             ) + BgStyle.entries.mapIndexed { i, st ->
-                SheetItem(st.label, if (st.id in pool) "加入隨機" else "", subtitle = "${drawnBy(st)} 繪製", selected = st.id in pool) {
+                SheetItem(st.label, if (st.id in pool) "加入隨機" else "", selected = st.id in pool, trailingIcon = gpuIcon(st)) {
                     if (!settings.toggleRandom(st.id)) toast("至少要留一個樣式")
                     randomSheet(i + 1)
                 }
@@ -574,13 +574,13 @@ fun HomeScreen(
         val before = engine.style
         val random = settings.bgStyle == BgStyle.RANDOM_ID
         open(SheetSpec(
-            "背景樣式", "上下移動即時預覽；確定套用，返回取消。右邊標「GPU」的由顯示晶片繪製，標「CPU」的由處理器繪製。",
+            "背景樣式", "上下移動即時預覽；確定套用，返回取消。有晶片圖示的樣式由顯示晶片繪製。",
             listOf(
                 // 隨機：每次冷啟動（背景從黑畫面載入）從勾選的樣式裡換一個；進去可以勾選範圍
                 SheetItem("隨機", subtitle = "每次重新啟動時，從勾選的 ${settings.randomPool.size} 個樣式裡換一個", selected = random,
                     onFocus = { engine.applyStyle(before) }) { randomSheet(0) },
             ) + BgStyle.entries.map { st ->
-                SheetItem(st.label, detail = drawnBy(st), subtitle = st.note, selected = !random && st == before, onFocus = { engine.applyStyle(st) }) {
+                SheetItem(st.label, subtitle = st.note, selected = !random && st == before, onFocus = { engine.applyStyle(st) }, trailingIcon = gpuIcon(st)) {
                     settings.updateBgStyle(st.id); engine.applyStyle(st); close()
                 }
             },

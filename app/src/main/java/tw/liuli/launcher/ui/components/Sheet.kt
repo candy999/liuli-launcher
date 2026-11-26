@@ -76,6 +76,8 @@ data class SheetItem(
     val liveSubtitle: (() -> String)? = null,
     /** 可左右調整的數值列：左鍵 -1、右鍵 +1（按住會連續調整）。 */
     val onAdjust: ((Int) -> Unit)? = null,
+    /** 右側的小圖示（例如背景樣式由顯示晶片繪製的晶片標記）。 */
+    val trailingIcon: androidx.compose.ui.graphics.vector.ImageVector? = null,
     val action: () -> Unit,
 )
 
@@ -342,6 +344,10 @@ private fun SheetRow(item: SheetItem, requester: FocusRequester?, onFocused: () 
                     color = if (onLight) Ink.OnLight.copy(alpha = 0.6f) else Ink.Tertiary,
                 )
             }
+        }
+        item.trailingIcon?.let {
+            Spacer(Modifier.width(10.dp))
+            tw.liuli.launcher.ui.theme.LIcon(it, size = 18.dp, tint = if (onLight) Ink.OnLight.copy(alpha = 0.6f) else Ink.Tertiary)
         }
         val detail = (item.liveDetail?.invoke() ?: item.detail)?.takeIf { it.isNotEmpty() }
         if (detail != null) {
