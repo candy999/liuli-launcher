@@ -692,10 +692,11 @@ class BackgroundEngine {
                     // 操作中（按鍵後一小段時間、面板開著）讓路：每兩格才畫一張，GPU 留給焦點動畫與捲動
                     // 讓路的方式和 CPU 樣式一樣：重的樣式降一檔解析度，每秒 30 格不變（以前是每兩格才畫一張，抽屜打開時背景只剩每秒 15 格）
                     if (style.gl) GlBackground.request(style, st, busy)
-                    // 玻璃每秒更新 15 次（每秒 60 格的樣式每 4 格、其他每 2 格）。每更新一次，畫面上每一片液態玻璃都要重新取色。
-                    // 著色器樣式：GL 那邊每畫好一張玻璃小圖（每秒 15 張）就更新一次——以前照引擎的格數另外抽，
+                    // 玻璃每秒更新 10 次（每秒 60 格的樣式每 6 格、其他每 3 格）。每更新一次，畫面上每一片液態玻璃都要重新取色，
+                    // 玻璃在兩次之間交叉淡化（見 LiquidGlass 的 GlassBake），看起來是連續的（以前每秒 15 次、直接換，主畫面烘玻璃要 0.6 個核心）。
+                    // 著色器樣式：GL 那邊每畫好一張玻璃小圖（每秒 10 張）就更新一次——以前照引擎的格數另外抽，
                     // 和 GL 的節奏對不上，有時拿到同一張、有時跳過，實際只剩每秒 3～5 次
-                    val glassEvery = if (fast) 4 else 2
+                    val glassEvery = if (fast) 6 else 3
                     if (style.gl) {
                         val gv = GlBackground.version
                         if (done || gv != lastGlassGl) { lastGlassGl = gv; requestGlass() }

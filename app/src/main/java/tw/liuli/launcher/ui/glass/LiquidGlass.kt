@@ -6,6 +6,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
@@ -94,6 +95,7 @@ fun Modifier.liquidGlass(
     val bake = remember(backdrop.image) { GlassBake(backdrop, edge) }
     bake.gate = gate
     LaunchedEffect(bake) { bake.run() }
+    LaunchedEffect(bake) { bake.animateFades() }
     val matrix = remember { android.graphics.Matrix() }
     val rough = remember(backdrop.image) {
         backdrop.image?.let { img ->
@@ -138,23 +140,19 @@ fun Modifier.liquidGlass(
                 // 面板滑動中（整塊是一張離屏圖在移動）：已經有烘好的就不再重烘——一重烘，整張離屏圖就得重畫一次
                 if (!(frozen() && bake.baked && gate?.baked != false)) bake.request(origin, size, radii, tint, hl, v, dens, lp?.x ?: -1f, lp?.y ?: 0f)
                 val paint = bake.paint(matrix)
+                // 交叉淡化：新的一張從上一張淡進來（玻璃每秒只換 10 次，中間靠淡化補，看起來是連續流動的）。
+                // 兩張都是不透明的圖：先畫上一張、再用透明度 a 蓋上新的一張＝兩張照比例混合
+                @Suppress("UNUSED_VARIABLE") val f = bake.frame   // 淡化中每格重畫
+                val a = bake.fadeAlpha()
+                val prev = if (paint != null && a < 1f) bake.prevPaint(matrix) else null
                 if (paint != null) drawIntoCanvas {
                     val c = it.nativeCanvas
-                    if (size.width * size.height > 500_000f) {   // 只有側邊欄、抽屜這種大面板；時鐘、天氣的玻璃會整片淡入淡出（逐筆乘透明度），重疊的地方會多疊一層
-                        // 大片面板（側邊欄、抽屜）：中間絕大部分是一個不透明、不用反鋸齒的矩形（GPU 不必混合、不必算邊緣覆蓋率），
-                        // 只有上下兩條含圓角的窄帶才用反鋸齒的路徑。海信上抽屜的玻璃是整個畫面最貴的一筆填色
-                        val top = kotlin.math.ceil(max(radii[0], radii[1]))
-                        val bot = kotlin.math.ceil(max(radii[2], radii[3]))
-                        // 兩條窄帶各往中間多畫 3 像素、先畫；中間的矩形最後蓋上去。
-                        // 這一片玻璃在布丁變形的圖層裡會被非整數地縮放、位移：不重疊的話，矩形的邊（不反鋸齒、貼齊像素）和窄帶的裁切邊
-                        // 可能落在不同的像素列，中間露出一條一個像素的縫（閃一格的橫線）
-                        val lap = 3f
-                        if (top > 0f) { c.save(); c.clipRect(0f, 0f, size.width, top + lap); c.drawPath(androidPath, paint); c.restore() }
-                        if (bot > 0f) { c.save(); c.clipRect(0f, size.height - bot - lap, size.width, size.height); c.drawPath(androidPath, paint); c.restore() }
-                        paint.isAntiAlias = false
-                        c.drawRect(0f, top, size.width, size.height - bot, paint)
-                        paint.isAntiAlias = true
-                    } else c.drawPath(androidPath, paint)
+                    if (prev != null) {
+                        fillGlass(c, prev, size, radii, androidPath)
+                        paint.alpha = (a * 255f + .5f).toInt()
+                    }
+                    fillGlass(c, paint, size, radii, androidPath)
+                    paint.alpha = 255
                 }
                 // 第一張還沒烘好（剛出現的那一兩格）：直接貼霧化的背景小圖＋同樣的白霧——和烘好的中間幾乎一樣，只差邊緣那一圈，
                 // 不會先看到一塊深色的板子再跳成玻璃
@@ -169,6 +167,25 @@ fun Modifier.liquidGlass(
                 tw.liuli.launcher.ui.bg.UiTrace.time("glass", System.nanoTime() - tq)
             }
         }
+}
+
+/** 把烘好的圖填進玻璃的圓角形狀。 */
+private fun fillGlass(c: android.graphics.Canvas, paint: android.graphics.Paint, size: Size, radii: FloatArray, androidPath: android.graphics.Path) {
+    if (size.width * size.height > 500_000f) {   // 只有側邊欄、抽屜這種大面板；時鐘、天氣的玻璃會整片淡入淡出（逐筆乘透明度），重疊的地方會多疊一層
+        // 大片面板（側邊欄、抽屜）：中間絕大部分是一個不透明、不用反鋸齒的矩形（GPU 不必混合、不必算邊緣覆蓋率），
+        // 只有上下兩條含圓角的窄帶才用反鋸齒的路徑。海信上抽屜的玻璃是整個畫面最貴的一筆填色
+        val top = kotlin.math.ceil(max(radii[0], radii[1]))
+        val bot = kotlin.math.ceil(max(radii[2], radii[3]))
+        // 兩條窄帶各往中間多畫 3 像素、先畫；中間的矩形最後蓋上去。
+        // 這一片玻璃在布丁變形的圖層裡會被非整數地縮放、位移：不重疊的話，矩形的邊（不反鋸齒、貼齊像素）和窄帶的裁切邊
+        // 可能落在不同的像素列，中間露出一條一個像素的縫（閃一格的橫線）
+        val lap = 3f
+        if (top > 0f) { c.save(); c.clipRect(0f, 0f, size.width, top + lap); c.drawPath(androidPath, paint); c.restore() }
+        if (bot > 0f) { c.save(); c.clipRect(0f, size.height - bot - lap, size.width, size.height); c.drawPath(androidPath, paint); c.restore() }
+        paint.isAntiAlias = false
+        c.drawRect(0f, top, size.width, size.height - bot, paint)
+        paint.isAntiAlias = true
+    } else c.drawPath(androidPath, paint)
 }
 
 /** 一片玻璃「第一張烘好了沒」（可觀察）。面板滑入之前先等它。 */
@@ -305,6 +322,44 @@ private class GlassBake(private val backdrop: GlassBackdrop, private val edge: B
         wake.trySend(Unit)
     }
 
+    // ── 交叉淡化（只有「形狀沒變、背景換色」的那種更新才淡化；位置、大小、光改變時直接換，框才不會拖影） ──
+    /** 上一張（淡化的起點）：和目前那張輪流寫入。 */
+    private var prevBitmap: android.graphics.Bitmap? = null
+    private var prevPaintObj: android.graphics.Paint? = null
+    private var fadeStartNs = 0L
+    private var fadeNs = 0L
+    private var lastBakeMs = 0L
+    private val fadeWake = Channel<Unit>(Channel.CONFLATED)
+    /** 淡化中每格加一（繪製階段讀它，淡化時才會每格重畫）。 */
+    var frame by mutableIntStateOf(0)
+        private set
+
+    /** 新的一張目前的比例（1＝完全換成新的，不用畫上一張）。 */
+    fun fadeAlpha(): Float {
+        if (fadeNs <= 0L) return 1f
+        val a = (System.nanoTime() - fadeStartNs).toFloat() / fadeNs
+        return if (a >= 1f) { fadeNs = 0L; 1f } else max(0f, a)
+    }
+
+    /** 淡化的起點那張（大小、粗細跟目前這張一樣才會用到）。 */
+    fun prevPaint(m: android.graphics.Matrix): android.graphics.Paint? {
+        val p = prevPaintObj ?: return null
+        val b = prevBitmap ?: return null
+        val cur = bitmap ?: return null
+        if (b.width != cur.width || b.height != cur.height) return null
+        p.shader.setLocalMatrix(m)   // [paint] 已經把 m 設成這片玻璃的縮放
+        return p
+    }
+
+    /** 淡化進行中每格叫醒繪製。 */
+    suspend fun animateFades() {
+        while (true) {
+            fadeWake.receive()
+            // 照時間結束（玻璃被蓋住時繪製不會跑、不會把 fadeNs 歸零，不能靠它，不然會一直要求下一格）
+            while (fadeNs > 0L && System.nanoTime() - fadeStartNs < fadeNs) withFrameNanos { frame++ }
+        }
+    }
+
     /** 目前烘好的圖（給圓角矩形填色用）；大小對不上（剛改過大小）就先不用。 */
     fun paint(m: android.graphics.Matrix): android.graphics.Paint? {
         val b = bakedFor ?: return null
@@ -350,16 +405,43 @@ private class GlassBake(private val backdrop: GlassBackdrop, private val edge: B
                 if (!reuse) { geo = g; geoFor = r; geoQ = nq; geoSw = sw; geoSh = sh }
             }
             rememberBackdrop()
-            var b = bitmap
-            if (b == null || b.width != bw || b.height != bh) {
-                b = android.graphics.Bitmap.createBitmap(bw, bh, android.graphics.Bitmap.Config.ARGB_8888)
-                b.setHasAlpha(false)   // 不透明：GPU 填色時不用混合
-                bitmap = b
-                paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG or android.graphics.Paint.FILTER_BITMAP_FLAG).apply {
-                    shader = android.graphics.BitmapShader(b, android.graphics.Shader.TileMode.CLAMP, android.graphics.Shader.TileMode.CLAMP)
+            val nowMs = android.os.SystemClock.uptimeMillis()
+            val gap = nowMs - lastBakeMs
+            lastBakeMs = nowMs
+            val cur0 = bitmap
+            // 只換色（形狀沒變）而且已經有一張同樣大小的：新的寫進另一張，從目前這張淡化過去。
+            // 淡化時間＝這次和上次的間隔（每秒 10 次≈0.1 秒；背景變得慢、隔比較久才烘一張，就淡得慢一點，最多 0.3 秒）
+            val fade = reuse && cur0 != null && cur0.width == bw && cur0.height == bh && gap in 1..2000
+            if (fade) {
+                var pb = prevBitmap
+                if (pb == null || pb.width != bw || pb.height != bh) {
+                    pb = android.graphics.Bitmap.createBitmap(bw, bh, android.graphics.Bitmap.Config.ARGB_8888)
+                    pb.setHasAlpha(false)
+                    prevPaintObj = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG or android.graphics.Paint.FILTER_BITMAP_FLAG).apply {
+                        shader = android.graphics.BitmapShader(pb, android.graphics.Shader.TileMode.CLAMP, android.graphics.Shader.TileMode.CLAMP)
+                    }
                 }
+                // 輪替：目前這張變成起點，新的寫進原本的起點那張
+                val pp = prevPaintObj
+                prevBitmap = cur0; prevPaintObj = paint
+                bitmap = pb; paint = pp
+                pb!!.setPixels(out, 0, bw, 0, 0, bw, bh)
+                fadeNs = min(gap, 300L).coerceAtLeast(40L) * 1_000_000L
+                fadeStartNs = System.nanoTime()
+                fadeWake.trySend(Unit)
+            } else {
+                fadeNs = 0L
+                var b = bitmap
+                if (b == null || b.width != bw || b.height != bh) {
+                    b = android.graphics.Bitmap.createBitmap(bw, bh, android.graphics.Bitmap.Config.ARGB_8888)
+                    b.setHasAlpha(false)   // 不透明：GPU 填色時不用混合
+                    bitmap = b
+                    paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG or android.graphics.Paint.FILTER_BITMAP_FLAG).apply {
+                        shader = android.graphics.BitmapShader(b, android.graphics.Shader.TileMode.CLAMP, android.graphics.Shader.TileMode.CLAMP)
+                    }
+                }
+                b!!.setPixels(out, 0, bw, 0, 0, bw, bh)
             }
-            b!!.setPixels(out, 0, bw, 0, 0, bw, bh)
             q = nq
             bakedFor = r
             tick++
@@ -368,8 +450,8 @@ private class GlassBake(private val backdrop: GlassBackdrop, private val edge: B
             // 背景在動時每秒最多烘十幾次：玻璃後面是模糊的背景，慢一兩格看不出來
             // 面板上的光正在移動：馬上接著烘下一張（不然光是一段一段跳過去的）
             val lightMoving = wanted?.let { it.lx != r.lx } == true
-            // 下一張只是背景換了顏色（形狀沒變）：跟著背景小圖每秒 15 張（取色是整數運算、幾何有快取，抽屜一張約幾毫秒）。
-            // （以前限制每秒 5 張、大片 3 張，抽屜的玻璃看起來一頓一頓）
+            // 下一張只是背景換了顏色（形狀沒變）：跟著背景小圖每秒 10 張（取色是整數運算、幾何有快取，抽屜一張約幾毫秒），中間交叉淡化。
+            // （以前限制每秒 5 張、大片 3 張、直接換，抽屜的玻璃看起來一頓一頓）
             // 海信實測：主畫面十幾片玻璃，每秒各取色 10 次要 0.4 個 CPU 核心
             val onlyColor = wanted?.sameGeo(r) == true
             delay(if (lightMoving) 1 else if (nq >= 3 && !onlyColor) 120 else 60)

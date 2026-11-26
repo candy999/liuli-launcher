@@ -477,9 +477,9 @@ object GlBackground {
                 }
                 val t1 = SystemClock.elapsedRealtimeNanos()
                 var bmp: Bitmap? = null
-                // 玻璃小圖每秒 15 張（照時間，不照張數：操作中、每秒畫幾張都一樣），引擎每收到一張就更新玻璃
+                // 玻璃小圖每秒 10 張（照時間，不照張數：操作中、每秒畫幾張都一樣），引擎每收到一張就更新玻璃（玻璃在兩張之間交叉淡化）
                 val now = SystemClock.elapsedRealtimeNanos()
-                if (now - lastGlassNs >= 60_000_000L || current == null) {
+                if (now - lastGlassNs >= 96_000_000L || current == null) {
                     lastGlassNs = now
                     if (!EGL14.eglMakeCurrent(dpy, surf, surf, ctx)) throw IllegalStateException("eglMakeCurrent(pbuffer)")
                     pass(prog, BackgroundEngine.GLASS_W, BackgroundEngine.GLASS_H, flipY = false)
