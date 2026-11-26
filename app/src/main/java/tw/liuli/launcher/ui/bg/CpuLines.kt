@@ -6,6 +6,8 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.asAndroidPath
+import androidx.compose.ui.graphics.asComposePath
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -28,8 +30,8 @@ import kotlin.math.sqrt
  * 座標是邏輯畫布 [w]×[h]（480×270，見 [BackgroundEngine.LOGICAL_W]），畫布會再縮放到實際解析度。
  *
  * 成本的做法：
- * - 螺旋：整條螺旋是一個固定的路徑，只有平移（中心）與旋轉（相位），路徑本身不重建。
- * - 特魯謝緞帶：所有圓弧合成四個路徑（底、亮面、兩條細線），只有捲過一整格才重建，其餘只平移。
+ * - 螺旋：整條螺旋是一個固定的填色外框（描邊只做一次），只有平移（中心）與旋轉（相位），路徑本身不重建。
+ * - 特魯謝緞帶：所有圓弧合成四個填色外框（底、亮面、兩條細線），只有捲過一整格或寬度換檔才重建，其餘只平移。
  * - 漸層百葉：每片一個帶漸層的矩形，約三十片。
  */
 internal object CpuLines {
@@ -37,8 +39,11 @@ internal object CpuLines {
     private class Scratch {
         var spiralPath: Path? = null
         var spiralUnit = 0f
-        val tRibbon = Path(); val tInner = Path(); val tFineA = Path(); val tFineB = Path()
+        val tRibbon = Path(); val tFineA = Path(); val tFineB = Path()
         var tKey = Long.MIN_VALUE
+        // 特魯謝緞帶描邊後的填色外框（捲過一格或寬度換檔才重建）
+        var tRibbonFill: Path? = null; var tInnerFill: Path? = null; var tFineAFill: Path? = null; var tFineBFill: Path? = null
+        val strokePaint = android.graphics.Paint().apply { style = android.graphics.Paint.Style.STROKE; strokeCap = android.graphics.Paint.Cap.BUTT }
         val tmp = FloatArray(64)
         val swirlPaths = arrayOf(Path(), Path(), Path())
         val curve = FloatArray(GlStyles.Sauce.WEDGES * SW_PTS * 2)
@@ -56,6 +61,18 @@ internal object CpuLines {
     private fun col(st: BgState, dh: Float, sat: Float, l: Float) = GlStyles.hsl(st, dh, sat, l).toned()
     private fun col(a: FloatArray, i: Int) = Color(a[i], a[i + 1], a[i + 2]).toned()
 
+    /**
+     * 把線描邊後的形狀轉成「填色的外框」（只在建路徑時做一次）。
+     * 描邊每一格都要重新算外框（線越長越貴：螺旋八千個點、緞帶兩百段圓弧，海信上畫面執行緒每秒忙 0.8 秒）；
+     * 轉成填色外框後，路徑本身不變、每格只平移旋轉，畫布可以沿用快取。
+     */
+    private fun Scratch.toFill(path: Path, width: Float): Path {
+        strokePaint.strokeWidth = width
+        val out = android.graphics.Path()
+        strokePaint.getFillPath(path.asAndroidPath(), out)
+        return out.asComposePath()
+    }
+
     // ───────────── 螺旋 ─────────────
 
     fun DrawScope.spiral(st: BgState, w: Float, h: Float) {
@@ -63,8 +80,8 @@ internal object CpuLines {
         val u = h / 5.6f   // 一圈的間距＝畫面高度 ÷ 5.6，和 GPU 版一樣
         drawRect(col(st, 0f, .85f, .09f), size = Size(w, h))
         // 阿基米德螺旋 r＝u·(−α／2π)：每轉一圈往外一個 u，線寬半個 u（GPU 版 stripe 的一半）。
-        // 固定的路徑：相位＝整條旋轉、焦點＝平移，所以只在第一次（或畫布比例變了）建一次
-        val path = sc.spiralPath.takeIf { sc.spiralUnit == u } ?: Path().also { p ->
+        // 固定的路徑：相位＝整條旋轉、焦點＝平移，所以只在第一次（或畫布比例變了）建一次——而且直接存成描邊後的填色外框
+        val path = sc.spiralPath.takeIf { sc.spiralUnit == u } ?: Path().let { p ->
             val turns = 14
             var first = true
             var a = 0.0
@@ -76,14 +93,14 @@ internal object CpuLines {
                 // 每段約 3 個邏輯單位（放大到 1080p 約 12 像素，曲線看不出折角）
                 a -= min(.2, 3.0 / max(r.toDouble(), 1.0))
             }
-            sc.spiralPath = p; sc.spiralUnit = u
+            sc.toFill(p, u * .5f).also { sc.spiralPath = it; sc.spiralUnit = u }
         }
         val phase = ((st.at * .2 + st.ripple * .8) % (2 * PI)) / (2 * PI)
         withTransform({
             translate(st.fx * w, st.fy * h)
             rotate((phase * 360.0).toFloat(), Offset.Zero)
         }) {
-            drawPath(path, col(st, 15f, .75f, .50f), style = Stroke(width = u * .5f, cap = StrokeCap.Butt))
+            drawPath(path, col(st, 15f, .75f, .50f))
         }
     }
 
@@ -99,20 +116,23 @@ internal object CpuLines {
 
     fun DrawScope.truchet(st: BgState, w: Float, h: Float) {
         val sc = scratch.get()!!
-        val tRibbon = sc.tRibbon; val tInner = sc.tInner; val tFineA = sc.tFineA; val tFineB = sc.tFineB
+        val tRibbon = sc.tRibbon; val tFineA = sc.tFineA; val tFineB = sc.tFineB
         val cell = h / 7f
         val t = (st.at * .055).toDouble()
-        val width = .085f + (.35f + .4f * st.pulse) * .19f          // 緞帶半寬（格子單位）
+        // 緞帶半寬（格子單位）：分成 0.005 一檔（1080p 約 0.8 像素，看不出跳），焦點脈動時才不用每格重建外框
+        val width = kotlin.math.round((.085f + (.35f + .4f * st.pulse) * .19f) * 200f) / 200f
         val bg = col(st, 0f, .75f, .13f); val rib = col(st, 40f, .85f, .48f)
         val edge = col(st, 20f, .8f, .38f); val fine = col(st, 0f, .8f, .24f)
         drawRect(bg, size = Size(w, h))
         val i0 = floor(t - w / 2 / cell).toInt() - 1
         val half = (h / 2 / cell).toInt() + 1
-        // 路徑以「格子單位 × cell」畫，捲到下一格（i0 變）或緞帶寬度變了才重建；細線的半徑跟著寬度
+        // 路徑以「格子單位 × cell」畫，捲到下一格（i0 變）或緞帶寬度換檔才重建；細線的半徑跟著寬度。
+        // 建好就轉成填色外框，之後每格只平移
+        val fineW = max(.012f, 1.5f * 7f / 1080f) * cell * 2f
         val key = i0.toLong() * 4096 + (width * 4000).toInt()
-        if (key != sc.tKey) {
+        if (key != sc.tKey || sc.tRibbonFill == null) {
             sc.tKey = key
-            tRibbon.reset(); tInner.reset(); tFineA.reset(); tFineB.reset()
+            tRibbon.reset(); tFineA.reset(); tFineB.reset()
             val cols = (w / cell).toInt() + 4
             for (i in i0 until i0 + cols) for (j in -half - 1..half) {
                 val fl = flip(i, j)
@@ -128,24 +148,26 @@ internal object CpuLines {
                     arc(tRibbon, .5f); arc(tFineA, .5f - .68f * width); arc(tFineB, .5f + .68f * width)
                 }
             }
-            tInner.addPath(tRibbon)
+            sc.tRibbonFill = sc.toFill(tRibbon, 2f * width * cell)
+            sc.tInnerFill = sc.toFill(tRibbon, 2f * .655f * width * cell)
+            sc.tFineAFill = sc.toFill(tFineA, fineW)
+            sc.tFineBFill = sc.toFill(tFineB, fineW)
         }
-        val fineW = max(.012f, 1.5f * 7f / 1080f) * cell * 2f
         withTransform({ translate(w / 2 - ((t - i0) * cell).toFloat(), h / 2) }) {
             // 緞帶：外緣帶一點外緣色（GPU 版的 ridge 以外 ×0.38），中間是緞帶色
-            drawPath(tRibbon, lerp(rib, edge, .38f), style = Stroke(width = 2f * width * cell, cap = StrokeCap.Butt))
-            drawPath(tInner, rib, style = Stroke(width = 2f * .655f * width * cell, cap = StrokeCap.Butt))
+            drawPath(sc.tRibbonFill!!, lerp(rib, edge, .38f))
+            drawPath(sc.tInnerFill!!, rib)
             // 兩條細線（離中心 0.68 個半寬）
             val fc = lerp(rib, fine, .42f)
-            drawPath(tFineA, fc, style = Stroke(width = fineW, cap = StrokeCap.Butt))
-            drawPath(tFineB, fc, style = Stroke(width = fineW, cap = StrokeCap.Butt))
+            drawPath(sc.tFineAFill!!, fc)
+            drawPath(sc.tFineBFill!!, fc)
         }
     }
 
     // ───────────── 漩渦（三色九瓣被攪拌捲進中心） ─────────────
 
     /** 每條交界線取幾個點（中心附近密、外面疏）。 */
-    private const val SW_PTS = 56
+    private const val SW_PTS = 40
 
     /**
      * 九條交界線各自的「原始角度」（流體沒被捲之前，以攪拌中心為圓心的角度）：
