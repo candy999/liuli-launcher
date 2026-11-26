@@ -405,7 +405,7 @@ object GlBackground {
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, noiseTex)
         // 玻璃小圖（120×68）用粗網格：密網格的頂點計算跟畫面大小無關，小圖照樣要算一整張（扭曲色帶 96×54 光這一步就 7ms）
-        val g = if (w * h <= 200 * 120) prog.small else prog.full
+        val g = if (w * h <= 200 * 120) prog.small else if (w * h >= 900 * 500) prog.dense ?: prog.full else prog.full
         prog.bind(w, h, work, g.grid, flipY)
         GLES20.glDrawElements(GLES20.GL_TRIANGLES, g.n, GLES20.GL_UNSIGNED_SHORT, g.idx)
         if (workStyle == BgStyle.WATERCOLOR) drawDrops(w, h, flipY)
@@ -864,6 +864,14 @@ void main() {
     }
 
     /**
+     * 扭曲色帶（只有半精度、扭曲在頂點算的 GPU）在 960×540 以上改用 160×90 的網格：96×54 每格約 20 像素，
+     * 扭曲很急、色帶對折的地方，細的深色線會變成一節一節的折線（海信看得出鋸齒）；160×90 每格 12 像素就平順了。
+     * 海信 960×540：16→21ms。操作中的低解析度照舊用 96×54（像素本來就大，頂點成本固定，省下來給介面）。
+     */
+    private fun denseSize(style: BgStyle): Pair<Int, Int>? =
+        if (style == BgStyle.WARP && !fragHighp && debugGrid == 0) 160 to 90 else null
+
+    /**
      * 一個著色器樣式：全螢幕網格＋頂點／片段著色器。uniform：u_res（像素）、u_noise（雜訊貼圖）、
      * u_p[0..PARAMS／4)（片段著色器用的樣式參數，vec4 陣列）、u_w／u_v1（頂點著色器用，＝u_p[0]／u_p[1]；分開宣告，兩邊的精度才不會衝突）、
      * u_noiseL（線性內插的雜訊貼圖，第 1 個貼圖單元）。
@@ -887,10 +895,12 @@ void main() {
         }
     }
 
-    private class Program(vert: String, frag: String, gx: Int, gy: Int) {
-        constructor(style: BgStyle) : this(style.glVertex(), style.glShader(), gridSize(style).first, gridSize(style).second)
+    private class Program(vert: String, frag: String, gx: Int, gy: Int, dense: Pair<Int, Int>? = null) {
+        constructor(style: BgStyle) : this(style.glVertex(), style.glShader(), gridSize(style).first, gridSize(style).second, denseSize(style))
         val id: Int
         val full = Grid(gx, gy)
+        /** 高解析度（960×540 以上）用的密網格：頂點內插的折角在大圖上看得出來（只有部分樣式有）。 */
+        val dense = dense?.let { Grid(it.first, it.second) }
         /** 玻璃小圖用的粗網格（最多 32×18）。 */
         val small = if (gx <= 32) full else Grid(32, 18)
         val grid get() = full.grid
