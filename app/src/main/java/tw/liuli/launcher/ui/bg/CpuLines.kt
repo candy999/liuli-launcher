@@ -34,7 +34,7 @@ import kotlin.math.sqrt
  * 座標是邏輯畫布 [w]×[h]（480×270，見 [BackgroundEngine.LOGICAL_W]），畫布會再縮放到實際解析度。
  *
  * 成本的做法：
- * - 螺旋：整條螺旋是一個固定的填色外框（描邊只做一次），只有平移（中心）與旋轉（相位），路徑本身不重建。
+ * - 螺旋：整條畫成一張圓形遮罩（背景執行緒），每格只旋轉、平移。
  * - 特魯謝緞帶：整片畫成三張遮罩（背景執行緒），每格只平移疊上；寬度不跟脈動變。
  * - 漸層百葉：每片一個帶漸層的矩形，約三十片。
  */
@@ -53,6 +53,9 @@ internal object CpuLines {
         /** 緞帶整片畫好的遮罩（見 [TMask]）；背景執行緒畫好才換上。 */
         @Volatile var tMask: TMask? = null
         @Volatile var tBuilding = false
+        /** 螺旋整條畫好的圓形遮罩（見 [SMask]）。 */
+        @Volatile var sMask: SMask? = null
+        @Volatile var sBuilding = false
         val tmp = FloatArray(64)
         val swirlPaths = arrayOf(Path(), Path(), Path())
         val curve = FloatArray(GlStyles.Sauce.WEDGES * SW_PTS * 2)
@@ -90,11 +93,60 @@ internal object CpuLines {
      */
     private fun DrawScope.forGlass() = size.width < 200f
 
+    /**
+     * 螺旋整條畫成一張圓形遮罩（只有透明度），之後每格只旋轉、平移：以前每格把上萬個點的外框重新塗一次
+     * （畫布的工作執行緒每秒忙 0.75 秒）。遮罩半徑涵蓋畫面對角線（焦點在哪裡都夠），解析度上限每個邏輯單位 2.5 像素
+     * （約 2.8K 見方、7.6MB）：原生解析度時邊緣比直接畫稍軟，仍比 GPU 版的 960 銳利。在背景執行緒畫，畫好才換上。
+     */
+    private class SMask(val u: Float, val scale: Float, val r: Float, val img: ImageBitmap)
+
+    private fun buildSpiralMask(sc: Scratch, u: Float, r: Float, scale: Float) {
+        sc.sBuilding = true
+        maskExec.execute {
+            try {
+                val size = kotlin.math.ceil(2 * r * scale).toInt()
+                val line = android.graphics.Path()
+                var a = 0.0; var first = true
+                val turns = r / u + 1
+                while (a > -2.0 * PI * turns) {
+                    val rr = u * (-a / (2 * PI))
+                    val x = (rr * cos(a)).toFloat(); val y = (rr * sin(a)).toFloat()
+                    if (first) { line.moveTo(x, y); first = false } else line.lineTo(x, y)
+                    a -= min(.3, 4.0 / max(rr, 1.0))
+                }
+                val b = android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ALPHA_8)
+                val c = android.graphics.Canvas(b)
+                c.scale(scale, scale); c.translate(r, r)
+                c.drawPath(line, android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                    style = android.graphics.Paint.Style.STROKE; strokeCap = android.graphics.Paint.Cap.BUTT; strokeWidth = u * .5f
+                })
+                sc.sMask = SMask(u, scale, r, b.asImageBitmap())
+            } catch (_: Throwable) {
+            } finally { sc.sBuilding = false }
+        }
+    }
+
     fun DrawScope.spiral(st: BgState, w: Float, h: Float) {
         val sc = scratch.get()!!
         val u = h / 5.6f   // 一圈的間距＝畫面高度 ÷ 5.6，和 GPU 版一樣
         drawRect(col(st, 0f, .85f, .09f), size = Size(w, h))
         val phase0 = ((st.at * .2 + st.ripple * .8) % (2 * PI)) / (2 * PI)
+        if (!forGlass()) {
+            val scale = min(size.width / w, 2.5f)
+            val m = sc.sMask
+            if ((m == null || m.u != u || kotlin.math.abs(m.scale - scale) > scale * .05f) && !sc.sBuilding)
+                buildSpiralMask(sc, u, kotlin.math.hypot(w, h), scale)
+            if (m != null && m.u == u) {
+                withTransform({
+                    translate(st.fx * w, st.fy * h)
+                    rotate((phase0 * 360.0).toFloat(), Offset.Zero)
+                    scale(1f / m.scale, 1f / m.scale, Offset.Zero)
+                }) {
+                    drawImage(m.img, topLeft = Offset(-m.r * m.scale, -m.r * m.scale), colorFilter = ColorFilter.tint(col(st, 15f, .75f, .50f), BlendMode.SrcIn))
+                }
+                return
+            }
+        }
         if (forGlass()) {
             // 玻璃小圖：每段 12 個邏輯單位（小圖上約 3 像素）、直接描邊
             val gp = sc.spiralGlass.takeIf { sc.spiralGlassUnit == u } ?: Path().also { p ->
