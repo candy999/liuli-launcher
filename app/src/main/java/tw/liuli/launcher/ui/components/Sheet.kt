@@ -196,6 +196,7 @@ fun GlassSheet(
     androidx.compose.runtime.CompositionLocalProvider(
         tw.liuli.launcher.ui.components.LocalFocusSnap provides { slide.value > 0.001f || asLayer },
         tw.liuli.launcher.ui.glass.LocalGlassHidden provides { false },
+        tw.liuli.launcher.ui.glass.LocalGlassFade provides { true },   // 側邊欄本身不透明，淡化照常
     ) {
     Box(
         Modifier

@@ -597,6 +597,7 @@ fun AppDrawer(
         // 收起來的抽屜（透明度 0、一直擺著）：玻璃當成看不見——不然背景每換一次色，抽屜的玻璃就跟著重畫、重錄繪圖指令
         // （海信實測：主畫面上背景在動時，每一格主執行緒都在重錄這一片 1840×976 的玻璃）
         tw.liuli.launcher.ui.glass.LocalGlassHidden provides drawerGlassHidden,
+        tw.liuli.launcher.ui.glass.LocalGlassFade provides { true },   // 抽屜本身不透明，淡化照常
     ) {
     Box(
         Modifier

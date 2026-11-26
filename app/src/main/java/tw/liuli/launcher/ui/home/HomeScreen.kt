@@ -1338,10 +1338,15 @@ fun HomeScreen(
     // 主畫面被抽屜完全蓋住（透明度 0）時，主畫面上的玻璃不重畫、不重烘（抽屜、側邊欄自己另外設成「看得到」）
     val homeGlassHidden = remember { androidx.compose.runtime.derivedStateOf { homeHide.value > .999f } }
     val glassHidden: () -> Boolean = remember { { homeGlassHidden.value } }
+    // 主畫面完全不透明時玻璃才交叉淡化（半透明時淡化的兩層各乘一次透明度，背景透出來、亮度跟著淡化進度抖）
+    val glassFade: () -> Boolean = remember {
+        { recede.value < .001f && homeHide.value < .001f && minimalT.value < .001f && visNow.value() > .999f }
+    }
     CompositionLocalProvider(
         LocalBringIntoViewSpec provides keepVisible,
         tw.liuli.launcher.ui.components.LocalTileShadow provides tileShadow,
         tw.liuli.launcher.ui.glass.LocalGlassHidden provides glassHidden,
+        tw.liuli.launcher.ui.glass.LocalGlassFade provides glassFade,
     ) {
         Box(
             Modifier

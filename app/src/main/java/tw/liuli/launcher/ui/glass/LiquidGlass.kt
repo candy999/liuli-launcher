@@ -54,6 +54,13 @@ class GlassBackdrop(
  */
 val LocalGlassHidden = staticCompositionLocalOf<() -> Boolean> { { false } }
 
+/**
+ * 玻璃可以交叉淡化＝true（在繪製階段讀取）。所在的畫面整個半透明時（側邊欄、抽屜開著主畫面變淡、精簡模式切換、整頁淡入淡出）
+ * 要回 false：半透明是「每一筆繪圖各自乘透明度」，淡化畫的兩層（上一張＋新的一張疊上去）各乘一次，底下的背景會透出來、
+ * 透出的量跟著淡化進度變——每次玻璃更新就閃一下（技術宅狀態列在側邊欄開著時亮度一直抖）。這時直接換圖。
+ */
+val LocalGlassFade = staticCompositionLocalOf<() -> Boolean> { { true } }
+
 val LocalGlassBackdrop = staticCompositionLocalOf { GlassBackdrop(null, { 0L }, Size.Zero, false) }
 
 /**
@@ -91,6 +98,7 @@ fun Modifier.liquidGlass(
 ): Modifier = composed {
     val backdrop = LocalGlassBackdrop.current
     val hidden = LocalGlassHidden.current
+    val fadeOk = LocalGlassFade.current
     var origin by remember { mutableStateOf(Offset.Zero) }
     val bake = remember(backdrop.image) { GlassBake(backdrop, edge) }
     bake.gate = gate
@@ -143,7 +151,7 @@ fun Modifier.liquidGlass(
                 // 交叉淡化：新的一張從上一張淡進來（玻璃每秒只換 10 次，中間靠淡化補，看起來是連續流動的）。
                 // 兩張都是不透明的圖：先畫上一張、再用透明度 a 蓋上新的一張＝兩張照比例混合
                 @Suppress("UNUSED_VARIABLE") val f = bake.frame   // 淡化中每格重畫
-                val a = bake.fadeAlpha()
+                val a = if (fadeOk()) bake.fadeAlpha() else 1f
                 val prev = if (paint != null && a < 1f) bake.prevPaint(matrix) else null
                 if (paint != null) drawIntoCanvas {
                     val c = it.nativeCanvas
