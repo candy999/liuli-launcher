@@ -39,6 +39,8 @@ internal object CpuLines {
     private class Scratch {
         var spiralPath: Path? = null
         var spiralUnit = 0f
+        var spiralGlass: Path? = null
+        var spiralGlassUnit = 0f
         val tRibbon = Path(); val tFineA = Path(); val tFineB = Path()
         var tKey = Long.MIN_VALUE
         // 特魯謝緞帶描邊後的填色外框（捲過一格或寬度換檔才重建）
@@ -75,10 +77,34 @@ internal object CpuLines {
 
     // ───────────── 螺旋 ─────────────
 
+    /**
+     * 這一次是在畫玻璃小圖（120×68，之後還要模糊）：CPU 版的樣式用簡化的畫法——軟體畫布上畫完整細節很貴
+     * （螺旋一次 47ms，玻璃只剩每秒 17 次、背景執行緒吃掉 0.85 個核心），小圖模糊後也看不出差別。
+     */
+    private fun DrawScope.forGlass() = size.width < 200f
+
     fun DrawScope.spiral(st: BgState, w: Float, h: Float) {
         val sc = scratch.get()!!
         val u = h / 5.6f   // 一圈的間距＝畫面高度 ÷ 5.6，和 GPU 版一樣
         drawRect(col(st, 0f, .85f, .09f), size = Size(w, h))
+        val phase0 = ((st.at * .2 + st.ripple * .8) % (2 * PI)) / (2 * PI)
+        if (forGlass()) {
+            // 玻璃小圖：每段 12 個邏輯單位（小圖上約 3 像素）、直接描邊
+            val gp = sc.spiralGlass.takeIf { sc.spiralGlassUnit == u } ?: Path().also { p ->
+                var a = 0.0; var first = true
+                while (a > -2.0 * PI * 14) {
+                    val r = (u * (-a / (2 * PI))).toFloat()
+                    val x = (r * cos(a)).toFloat(); val y = (r * sin(a)).toFloat()
+                    if (first) { p.moveTo(x, y); first = false } else p.lineTo(x, y)
+                    a -= min(.5, 12.0 / max(r.toDouble(), 1.0))
+                }
+                sc.spiralGlass = p; sc.spiralGlassUnit = u
+            }
+            withTransform({ translate(st.fx * w, st.fy * h); rotate((phase0 * 360.0).toFloat(), Offset.Zero) }) {
+                drawPath(gp, col(st, 15f, .75f, .50f), style = Stroke(width = u * .5f, cap = StrokeCap.Butt))
+            }
+            return
+        }
         // 阿基米德螺旋 r＝u·(−α／2π)：每轉一圈往外一個 u，線寬半個 u（GPU 版 stripe 的一半）。
         // 固定的路徑：相位＝整條旋轉、焦點＝平移，所以只在第一次（或畫布比例變了）建一次——而且直接存成描邊後的填色外框
         val path = sc.spiralPath.takeIf { sc.spiralUnit == u } ?: Path().let { p ->
@@ -154,6 +180,8 @@ internal object CpuLines {
             sc.tFineBFill = sc.toFill(tFineB, fineW)
         }
         withTransform({ translate(w / 2 - ((t - i0) * cell).toFloat(), h / 2) }) {
+            // 玻璃小圖：只畫緞帶本體（亮面與細線在 120×68 上看不到，模糊後更看不出來）
+            if (forGlass()) { drawPath(sc.tRibbonFill!!, lerp(rib, edge, .2f)); return@withTransform }
             // 緞帶：外緣帶一點外緣色（GPU 版的 ridge 以外 ×0.38），中間是緞帶色
             drawPath(sc.tRibbonFill!!, lerp(rib, edge, .38f))
             drawPath(sc.tInnerFill!!, rib)
