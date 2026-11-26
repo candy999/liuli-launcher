@@ -51,7 +51,7 @@ internal object GlStyles {
         private const val Q = .02                              // 往內吸的面積流量（畫面高度 0.8 的單位）
         private const val RC2 = .0225                          // 中心 rc＝0.15
         private const val R2 = 3.61                            // 外緣 R＝1.9（整個畫面都在裡面）
-        private const val K_MAX = 3.0                          // 完全捲緊時，從外緣到中心大約繞 2.5 圈
+        private const val K_MAX = 1.2                          // 完全捲緊時，從外緣到中心大約繞一圈（以前 3.0、2.5 圈太多）
         // 外緣顏料的四個波隨時間變化的速度：慢（半徑方向只有兩三圈），主要的形狀是被捲起來的螺旋臂。
         // 以前 0.7～1.1：半徑方向十幾圈，像一圈圈的標靶，半精度的誤差也被放大成毛邊
         private val A = doubleArrayOf(.25, .15, .2, .3)
