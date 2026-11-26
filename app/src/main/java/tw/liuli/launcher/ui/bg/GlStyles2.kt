@@ -174,7 +174,7 @@ void main() {
          * （頂點版的網格 96×54，每格約 20 像素；扭曲很彎的地方色帶的邊會變成一格一格的階梯）。
          * 座標用 gl_FragCoord 換算（全精度），時間與比例用和頂點著色器同名、同為全精度的 u_w／u_v1。
          */
-        const val SHADER_HP = HEAD + """
+        const val SHADER_HP = "#extension GL_OES_standard_derivatives : enable\n" + HEAD + """
 precision highp float;
 uniform vec4 u_w;
 uniform vec4 u_v1;
@@ -199,16 +199,23 @@ void main() {
   vec2 cs = uv * 0.85;
   float shape = 0.5 + 0.5 * sin(cs.x) * cos(cs.y) - 0.1073;
   float mixer = shape * 3.0;
+  // 柔化：色帶對折、變化很急的地方（一個像素裡跨過大半條色帶，會出現鋸齒與斑點），把交界的漸層加寬到約 1.5 個像素；
+  // 平緩的地方寬度不變（＝原本的樣子）
+#ifdef GL_OES_standard_derivatives
+  float sw2 = max(1.0, 4.5 * fwidth(shape));
+#else
+  float sw2 = 1.0;
+#endif
   vec3 col = u_p[2].rgb;
-  col = mix(col, u_p[3].rgb, clamp(mixer, 0.0, 1.0));
-  col = mix(col, u_p[4].rgb, clamp(mixer - 1.0, 0.0, 1.0));
-  col = mix(col, u_p[5].rgb, clamp(mixer - 2.0, 0.0, 1.0));
+  col = mix(col, u_p[3].rgb, clamp((mixer - 0.5) / sw2 + 0.5, 0.0, 1.0));
+  col = mix(col, u_p[4].rgb, clamp((mixer - 1.5) / sw2 + 0.5, 0.0, 1.0));
+  col = mix(col, u_p[5].rgb, clamp((mixer - 2.5) / sw2 + 0.5, 0.0, 1.0));
   """ + DITHER + """
   gl_FragColor = vec4(col, 1.0);
 }
 """
 
-        const val SHADER = HEAD + """
+        const val SHADER = "#extension GL_OES_standard_derivatives : enable\n" + HEAD + """
 varying vec2 v_cs;
 void main() {
   vec2 uv = v_cs;
@@ -225,10 +232,17 @@ void main() {
   vec2 cs = uv * 0.85;
   float shape = 0.5 + 0.5 * sin(cs.x) * cos(cs.y) - 0.1073;
   float mixer = shape * 3.0;
+  // 柔化：色帶對折、變化很急的地方（一個像素裡跨過大半條色帶，會出現鋸齒與斑點），把交界的漸層加寬到約 1.5 個像素；
+  // 平緩的地方寬度不變（＝原本的樣子）
+#ifdef GL_OES_standard_derivatives
+  float sw2 = max(1.0, 4.5 * fwidth(shape));
+#else
+  float sw2 = 1.0;
+#endif
   vec3 col = u_p[2].rgb;
-  col = mix(col, u_p[3].rgb, clamp(mixer, 0.0, 1.0));
-  col = mix(col, u_p[4].rgb, clamp(mixer - 1.0, 0.0, 1.0));
-  col = mix(col, u_p[5].rgb, clamp(mixer - 2.0, 0.0, 1.0));
+  col = mix(col, u_p[3].rgb, clamp((mixer - 0.5) / sw2 + 0.5, 0.0, 1.0));
+  col = mix(col, u_p[4].rgb, clamp((mixer - 1.5) / sw2 + 0.5, 0.0, 1.0));
+  col = mix(col, u_p[5].rgb, clamp((mixer - 2.5) / sw2 + 0.5, 0.0, 1.0));
   """ + DITHER + """
   gl_FragColor = vec4(col, 1.0);
 }
