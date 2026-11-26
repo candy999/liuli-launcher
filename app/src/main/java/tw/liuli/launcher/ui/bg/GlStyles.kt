@@ -3,7 +3,7 @@ package tw.liuli.launcher.ui.bg
 import androidx.compose.ui.graphics.Color
 
 /**
- * 第二批著色器樣式：漩渦（顏料被吸進排水口的流場）、漸層百葉，都是琉璃自己寫的。
+ * 第二批著色器樣式：漩渦（攪拌濃稠的雙色流體）、漸層百葉，都是琉璃自己寫的。
  * （墨流 Subframe ink-current 試過拿掉了：它好看在原生解析度的細墨邊，Mali-470 只付得起 480×270，放大後邊界變成一格一格的方塊。）
  * 共同規則見 [GlBackground]：時間在 CPU 端算好取模、低頻的座標變換放在頂點著色器（全精度），片段著色器只用 mediump、
  * 亂數一律查雜訊貼圖（u_noise：最近鄰，抖色用；u_noiseL：線性內插，當作 value noise 用）。
@@ -26,35 +26,29 @@ internal object GlStyles {
     /** 共用的抖色：±½ 階雜訊（最近鄰貼圖）。 */
     private const val DITHER = GlBackground.TONE + "col += (texture2D(u_noise, gl_FragCoord.xy / 64.0).rgb - 0.5) / 255.0;"
 
-    // ───────────── 漩渦（顏料被吸進排水口） ─────────────
+    // ───────────── 漩渦（攪拌濃稠的雙色流體） ─────────────
 
     /**
-     * 漩渦：水裡的排水口。外圍一直有顏料流進來，一邊繞著中心轉（越靠內轉得越快）、一邊被往中心吸，最後在中心被吸掉。
-     * 每個像素的顏色＝回推「這團顏料是什麼時候、從哪個角度流進來的」：
-     * - 流場：往內吸的面積流量 Q（r² 每秒減少 2Q）、繞轉 ω(r)＝Γ／(r²＋rc²)（中心 rc 以內接近整塊轉，不會無限快）。
-     *   從外緣 R 流到半徑 r 要 (R²−r²)／2Q 秒，這段時間轉過 k·ln((R²＋rc²)／(r²＋rc²))（k＝Γ／2Q）。
-     * - 流進來的顏料是雙色巧克力：外緣上半邊深、半邊淺，交界帶一點起伏，跟著時間慢慢變；
-     *   回推之後就是深淺交錯、粗細不一的雙色螺旋，一直往內流——不會越纏越緊，也不是整片在轉。
-     * - 兩種顏色由主色推出（深＝巧克力、淺＝奶油）；中心是暗的眼（顏料被吸掉了）。
-     * 移動（換格子）：中心像彈簧一樣追過去（會稍微超過再回來）；外圈慢慢拖過去，中間被拉長；移動中旋臂鬆開、
-     * 後方拖出尾巴，抵達後再慢慢捲緊。流動的時間與捲緊程度逐格累加（速度會變，不能用時間 × 速度）。
+     * 漩渦：畫面上鋪著一層濃稠的雙色流體（巧克力與奶油的寬條紋，交界帶一點起伏），本身不動；
+     * 只有攪拌的中心（焦點）會動——中心附近的流體被捲進去（越靠中心轉得越多，最多約一圈）、也稍微被往中心吸，
+     * 離中心遠的地方完全不受影響，外緣永遠是原本的樣子。
+     * 每個像素回推「這裡的流體原本在哪」：以中心為圓心，倒轉 a(r)＝A·exp(−r²／σ²) 的角度、往外放大 1＋P·exp(−r²／σ²) 倍，
+     * 再到固定的雙色條紋上取色。
+     * 移動（換格子）：攪拌中心像阻尼彈簧一樣追過去（稍微超過再回來）；外圈的中心慢慢跟上，中間被拉長；
+     * 移動中捲紋鬆開（舊位置慢慢回到原狀），後方拖出一點尾巴；停下來後新位置再慢慢捲緊。停著時捲紋輕輕呼吸。
      * 琉璃自己寫的（以前改寫自 Paper Shaders 的 swirl，太規則、整片在轉，已經整個換掉）。
      */
     object Swirl {
-        private var cx = Float.NaN; private var cy = 0f        // 內圈中心（彈簧）
-        private var vx = 0f; private var vy = 0f               // 內圈中心的速度
-        private var ox = 0f; private var oy = 0f               // 外圈中心（慢慢跟上內圈）
-        private var wind = 1f                                  // 捲緊程度 0～1
-        private var flow = 0.0                                 // 流動的時間（秒，已乘上速度）
+        private var cx = Float.NaN; private var cy = 0f        // 攪拌中心（彈簧）
+        private var vx = 0f; private var vy = 0f               // 攪拌中心的速度
+        private var ox = 0f; private var oy = 0f               // 外圈的中心（慢慢跟上）
+        private var wind = 0f                                  // 捲緊程度 0～1
+        private var breath = 0.0                               // 呼吸的相位
         private var lastAt = Float.NaN
 
-        private const val Q = .02                              // 往內吸的面積流量（畫面高度 0.8 的單位）
-        private const val RC2 = .0225                          // 中心 rc＝0.15
-        private const val R2 = 3.61                            // 外緣 R＝1.9（整個畫面都在裡面）
-        private const val K_MAX = 1.2                          // 完全捲緊時，從外緣到中心大約繞一圈（以前 3.0、2.5 圈太多）
-        // 外緣顏料的四個波隨時間變化的速度：慢（半徑方向只有兩三圈），主要的形狀是被捲起來的螺旋臂。
-        // 以前 0.7～1.1：半徑方向十幾圈，像一圈圈的標靶，半精度的誤差也被放大成毛邊
-        private val A = doubleArrayOf(.25, .15, .2, .3)
+        private const val TURNS = 1.0                          // 完全捲緊時中心轉幾圈
+        private const val SIGMA2 = .12f                        // 影響範圍 σ²（σ≈0.35，畫面高度 0.8 的單位）
+        private const val PULL = .6f                           // 往中心吸：中心取樣放大 1.6 倍
 
         fun params(st: BgState, out: FloatArray) {
             // 時鐘只往前走：玻璃小圖用的是稍早的狀態快照，拿它來算不能把時鐘往回撥
@@ -62,7 +56,7 @@ internal object GlStyles {
             if (lastAt.isNaN() || st.at > lastAt) lastAt = st.at
             val tx = st.fx * 16f / 9f * .8f; val ty = st.fy * .8f
             if (cx.isNaN()) { cx = tx; cy = ty; ox = tx; oy = ty }
-            // 內圈中心：阻尼彈簧（ω＝5、ζ＝0.55，約 0.6 秒到、稍微超過一點再回來）；拆小步才穩
+            // 攪拌中心：阻尼彈簧（ω＝5、ζ＝0.55，約 0.6 秒到、稍微超過一點再回來）；拆小步才穩
             var left = dt
             while (left > 0f) {
                 val h = kotlin.math.min(left, 1f / 120f); left -= h
@@ -71,31 +65,22 @@ internal object GlStyles {
                 vy += (w0 * w0 * (ty - cy) - 2f * z * w0 * vy) * h
                 cx += vx * h; cy += vy * h
             }
-            // 外圈中心：慢慢跟上（2.5 秒），中間的顏料被拉長
+            // 外圈的中心：慢慢跟上（2.5 秒），中間被拉長
             val kOut = 1f - kotlin.math.exp(-dt / 2.5f)
             ox += (cx - ox) * kOut; oy += (cy - oy) * kOut
             val lag = (kotlin.math.hypot(cx - ox, cy - oy) / .5f).coerceIn(0f, 1f)
-            // 捲緊程度：被拖動時很快鬆開（0.4 秒），停下來慢慢捲緊（3 秒）
-            val wT = 1f - .7f * lag
+            // 捲緊程度：移動中很快鬆開（0.4 秒），停下來慢慢捲緊（3 秒）
+            val wT = 1f - .8f * lag
             wind += (wT - wind) * (1f - kotlin.math.exp(-dt / if (wT < wind) .4f else 3f))
-            // 流動：很慢（以前太快）；焦點脈動時稍微快一點
-            flow += dt * (.5 + .25 * st.pulse)
-            for (i in 0..3) {
-                // 外緣顏料的相位：a·t − a·R²／2Q（著色器再加 a·r²／2Q），在 CPU 取模，數字小、半精度才準
-                val ph = A[i] * flow - A[i] * R2 / (2 * Q)
-                out[i] = (((ph % TAU) + TAU) % TAU).toFloat()
-            }
+            breath += dt * .7
+            val a = (TAU * TURNS * wind * (1 + .06 * kotlin.math.sin(breath) + .15 * st.pulse)).toFloat()
             out[4] = cx; out[5] = cy; out[6] = ox; out[7] = oy
-            put(out, 8, st.col(0f, .7f, .07f))      // 中心的眼（顏料被吸掉了）
             put(out, 12, st.col(-10f, .75f, .16f))  // 深（巧克力）
             put(out, 16, st.col(8f, .7f, .66f))     // 淺（奶油）
-            out[24] = (K_MAX * wind).toFloat()       // k：從外緣流到這裡轉了幾弧度 ÷ ln(...)
-            out[25] = RC2.toFloat()
-            out[26] = (1.0 / (2 * Q)).toFloat()
-            out[27] = kotlin.math.ln(R2 + RC2).toFloat()
-            // 尾巴：沿移動方向往回取樣（後方的顏料被拉長），最多 0.25
+            out[24] = a; out[25] = SIGMA2; out[26] = PULL * wind; out[27] = 0f
+            // 尾巴：攪拌中心附近沿移動方向往回取樣（後方的流體被拖長），最多 0.2
             val sp = kotlin.math.hypot(vx, vy)
-            val s = if (sp > 1e-4f) kotlin.math.min(.25f, sp * .2f) / sp else 0f
+            val s = if (sp > 1e-4f) kotlin.math.min(.2f, sp * .15f) / sp else 0f
             out[28] = vx * s; out[29] = vy * s; out[30] = 0f; out[31] = 0f
         }
 
@@ -119,22 +104,22 @@ uniform vec4 u_p[16];
 varying vec2 v_q;
 void main() {
   vec2 ci = u_p[1].xy;
-  // 中心依距離在內圈（快）與外圈（慢）兩個中心之間內插：移動時外圈落後，中間被拉長
-  float w = smoothstep(0.05, 0.9, length(v_q - ci));
-  vec2 d = v_q - mix(ci, u_p[1].zw, w) + u_p[7].xy * w;
-  float r2 = dot(d, d);
-  // 這團顏料流進來時的角度（回推轉過的角度）與流進來的時間（r²／2Q，乘上各波的速度）
-  float ph = atan(d.y, d.x) - u_p[6].x * (u_p[6].w - log(r2 + u_p[6].y));
-  float rr = r2 * u_p[6].z;
-  // 雙色巧克力：外圍流進來的顏料半邊深、半邊淺（1 倍角），交界帶一點 2 倍角的起伏，捲進去後粗細不一
-  float v = sin(ph + u_p[0].x + 0.25 * rr + 0.55 * sin(2.0 * ph - u_p[0].y - 0.15 * rr));
-  // 交界：柔和但清楚（約 2 個像素＋一點點奶油般的過渡）；淺色那邊靠近交界稍微亮一點，像奶油的光澤
+  // 中心依距離在攪拌中心（快）與外圈的中心（慢）之間內插：移動時外圈落後，中間被拉長
+  float wg = smoothstep(0.05, 0.9, length(v_q - ci));
+  vec2 c = mix(ci, u_p[1].zw, wg);
+  vec2 d = v_q - c;
+  float f = exp(-dot(d, d) / u_p[6].y);
+  // 回推這裡的流體原本在哪：倒轉 a(r)、往外放大（往中心吸），再加上移動時的尾巴；離中心遠的地方 f≈0，原樣不動
+  float a = u_p[6].x * f;
+  float cs = cos(a);
+  float sn = sin(a);
+  vec2 s = c + vec2(cs * d.x - sn * d.y, sn * d.x + cs * d.y) * (1.0 + u_p[6].z * f) + u_p[7].xy * f;
+  // 固定的雙色寬條紋（巧克力與奶油），交界帶一點起伏
+  float v = sin(4.5 * s.x + 0.9 * sin(1.6 * s.y + 0.7) + 0.6 * s.y);
   float fw = 0.75 * fwidth(v) + 0.03;
   float m = smoothstep(-fw, fw, v);
   vec3 col = mix(u_p[3].rgb, u_p[4].rgb, m);
   col += u_p[4].rgb * 0.08 * m * (1.0 - smoothstep(0.0, 0.5, v));
-  // 中心的眼：顏料在這裡被吸掉
-  col = mix(u_p[2].rgb, col, smoothstep(0.03, 0.15, sqrt(r2)));
   """ + DITHER + """
   gl_FragColor = vec4(col, 1.0);
 }
