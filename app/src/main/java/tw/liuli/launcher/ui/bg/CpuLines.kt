@@ -28,15 +28,16 @@ import kotlin.math.sin
 import kotlin.math.sqrt
 
 /**
- * 有明確線條的著色器樣式的 CPU 對照版（螺旋、特魯謝緞帶、漩渦、漸層百葉）：形狀在 CPU 算成向量路徑，
- * 由 Compose 的畫布（硬體加速）填色——線條邊緣由路徑反鋸齒，任何解析度都銳利，不受半精度與網格內插影響。
- * 參數、顏色、動態和 GPU 版相同（[GlStyles]／[GlStyles2] 的 params），方便兩邊直接比較。
+ * 用 CPU 算形狀、畫成向量路徑的樣式：螺旋、特魯謝緞帶、三色濃醬（只有這個版本，GPU 版已拿掉）。
+ * 形狀在 CPU 算成向量路徑，由 Compose 的畫布（硬體加速）填色——邊緣由路徑反鋸齒，任何解析度都銳利，不受半精度影響。
  * 座標是邏輯畫布 [w]×[h]（480×270，見 [BackgroundEngine.LOGICAL_W]），畫布會再縮放到實際解析度。
+ * 特魯謝緞帶的外觀（緞帶的外緣、亮面與兩條細線）參照 Subframe 的 truchet-ribbon（MIT License，全文見 assets/licenses/subframe-LICENSE.txt）。
  *
  * 成本的做法：
  * - 螺旋：整條畫成一張圓形遮罩（背景執行緒），每格只旋轉、平移。
- * - 特魯謝緞帶：整片畫成三張遮罩（背景執行緒），每格只平移疊上；寬度不跟脈動變。
- * - 漸層百葉：每片一個帶漸層的矩形，約三十片。
+ * - 特魯謝緞帶：整片畫成三張遮罩（背景執行緒），每格只平移疊上。
+ * - 三色濃醬：九條交界線每格重建（約七百個點），停穩之後引擎不再重畫。
+ * - 玻璃小圖（120×68、之後還要模糊）一律畫簡化版。
  */
 internal object CpuLines {
     /** 每條執行緒各一份（主畫面在主執行緒畫、玻璃小圖在背景執行緒畫，路徑不能共用）。 */
@@ -49,7 +50,7 @@ internal object CpuLines {
         var tKey = Long.MIN_VALUE
         // 特魯謝緞帶描邊後的填色外框（捲過一格或寬度換檔才重建）
         var tRibbonFill: Path? = null; var tInnerFill: Path? = null; var tFineAFill: Path? = null; var tFineBFill: Path? = null
-        val strokePaint = android.graphics.Paint().apply { style = android.graphics.Paint.Style.STROKE; strokeCap = android.graphics.Paint.Cap.BUTT }
+        val strokePaint = android.graphics.Paint().apply { style = android.graphics.Paint.Style.STROKE; strokeCap = android.graphics.Paint.Cap.BUTT; strokeJoin = android.graphics.Paint.Join.ROUND }
         /** 緞帶整片畫好的遮罩（見 [TMask]）；背景執行緒畫好才換上。 */
         @Volatile var tMask: TMask? = null
         @Volatile var tBuilding = false
@@ -112,13 +113,16 @@ internal object CpuLines {
                     val rr = u * (-a / (2 * PI))
                     val x = (rr * cos(a)).toFloat(); val y = (rr * sin(a)).toFloat()
                     if (first) { line.moveTo(x, y); first = false } else line.lineTo(x, y)
-                    a -= min(.3, 4.0 / max(rr, 1.0))
+                    // 每段約 2 個邏輯單位；中心那幾圈半徑小、轉得急，角度一步最多 0.06 弧度——太稀的話中心會變成折線、
+                    // 粗線在急轉處冒出尖角（破圖）
+                    a -= min(.06, 2.0 / max(rr, 2.0))
                 }
                 val b = android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ALPHA_8)
                 val c = android.graphics.Canvas(b)
                 c.scale(scale, scale); c.translate(r, r)
                 c.drawPath(line, android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
                     style = android.graphics.Paint.Style.STROKE; strokeCap = android.graphics.Paint.Cap.BUTT; strokeWidth = u * .5f
+                    strokeJoin = android.graphics.Paint.Join.ROUND
                 })
                 sc.sMask = SMask(u, scale, r, b.asImageBitmap())
             } catch (_: Throwable) {
@@ -177,7 +181,7 @@ internal object CpuLines {
                 if (first) { p.moveTo(x, y); first = false } else p.lineTo(x, y)
                 // 每段約 6 個邏輯單位：弦的誤差＝段長²／(8·半徑)，半徑 20 以上就不到 0.2 個邏輯單位（÷2 時 0.4 像素），
                 // 點數比每段 3 少一半，畫布每格切三角形的工作也少一半
-                a -= min(.3, 6.0 / max(r.toDouble(), 1.0))
+                a -= min(.06, 6.0 / max(r.toDouble(), 6.0))
             }
             sc.toFill(p, u * .5f).also { sc.spiralPath = it; sc.spiralUnit = u }
         }
@@ -389,51 +393,6 @@ internal object CpuLines {
         drawPath(sc.swirlPaths[0], col(tmp, 12))   // 深（巧克力）
         drawPath(sc.swirlPaths[1], col(tmp, 20))   // 中（焦糖）
         drawPath(sc.swirlPaths[2], col(tmp, 16))   // 淺（奶油）
-    }
-
-    // ───────────── 漸層百葉 ─────────────
-
-    fun DrawScope.blinds(st: BgState, w: Float, h: Float) {
-        val base = col(st, 0f, .6f, .025f); val blade = col(st, -12f, .95f, .38f); val hi = col(st, 14f, .6f, .86f)
-        drawRect(base, size = Size(w, h))
-        val n = 7f                                 // 每單位長度（畫面高度）幾片
-        val slide = (st.ripple % 8f) * .07f        // 每次換焦點，葉片輕輕滑一點
-        val ang = -.62f                            // 傾斜角（弧度）
-        val spread = 2.2f - .8f * st.pulse
-        fun shade(lum: Float): Color {
-            val c1 = lerp(base, blade, (lum * 1.6f).coerceIn(0f, 1f))
-            return lerp(c1, hi, (lum * lum * 1.3f).coerceIn(0f, 1f))
-        }
-        // 在「葉片座標」裡畫：原點在焦點、1 單位＝畫面高度、轉到葉片的方向（GPU 版 r＝旋轉(p)）
-        withTransform({
-            translate(st.fx * w, st.fy * h)
-            scale(h, h, Offset.Zero)
-            rotate((-ang * 180f / PI.toFloat()), Offset.Zero)
-        }) {
-            val reach = 2.2f
-            val k0 = floor(-reach * n + slide).toInt(); val k1 = floor(reach * n + slide).toInt()
-            val fxs = floatArrayOf(0f, .2f, .4f, .6f, .8f, .86f, .93f, 1f)
-            for (kk in k0..k1) {
-                val x0 = (kk - slide) / n; val x1 = (kk + 1 - slide) / n
-                val cx = (kk + .5f - slide) / n
-                val across = exp(-cx * cx * spread)
-                if (across < .01f) continue
-                // 葉片橫向的明暗（GPU 版 prof）：0～0.8 漸亮、0.86～1 收暗
-                val stops = Array(fxs.size) { i ->
-                    val f = fxs[i]
-                    val prof = smoothF(0f, .8f, f) * (1f - smoothF(.86f, 1f, f))
-                    f to shade(prof * across)
-                }
-                drawRect(Brush.horizontalGradient(*stops, startX = x0, endX = x1), Offset(x0, -reach), Size(x1 - x0, reach * 2))
-            }
-            // 沿著葉片離焦點越遠越暗（GPU 版 along＝exp(−r.y²·1.4)）：疊一層往兩端加深的底色
-            val ys = floatArrayOf(-reach, -1.6f, -1.2f, -.8f, -.4f, 0f, .4f, .8f, 1.2f, 1.6f, reach)
-            val fade = Array(ys.size) { i ->
-                val y = ys[i]
-                ((y + reach) / (2 * reach)) to base.copy(alpha = 1f - exp(-y * y * 1.4f))
-            }
-            drawRect(Brush.verticalGradient(*fade, startY = -reach, endY = reach), Offset(-reach, -reach), Size(reach * 2, reach * 2))
-        }
     }
 
     private fun smoothF(e0: Float, e1: Float, x: Float): Float {

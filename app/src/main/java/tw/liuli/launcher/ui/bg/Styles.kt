@@ -154,10 +154,9 @@ private fun DrawScope.drawStyleRaw(style: BgStyle, st: BgState, skipFront: Boole
         BgStyle.BEAMS -> beams(st)
         BgStyle.SOLID -> solid(st)
         BgStyle.BLACK -> black(st)
-        BgStyle.SPIRAL_CPU -> with(CpuLines) { spiral(st, W, H) }
-        BgStyle.TRUCHET_CPU -> with(CpuLines) { truchet(st, W, H) }
-        BgStyle.BLINDS_CPU -> with(CpuLines) { blinds(st, W, H) }
-        BgStyle.SAUCE_CPU -> with(CpuLines) { swirl(st, W, H) }
+        BgStyle.SPIRAL -> with(CpuLines) { spiral(st, W, H) }
+        BgStyle.TRUCHET -> with(CpuLines) { truchet(st, W, H) }
+        BgStyle.SAUCE -> with(CpuLines) { swirl(st, W, H) }
         else -> if (style.gl) glStyle(style, st)
     }
 }

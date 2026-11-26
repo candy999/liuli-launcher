@@ -26,7 +26,7 @@ internal object GlStyles {
     /** 共用的抖色：±½ 階雜訊（最近鄰貼圖）。 */
     private const val DITHER = GlBackground.TONE + "col += (texture2D(u_noise, gl_FragCoord.xy / 64.0).rgb - 0.5) / 255.0;"
 
-    // ───────────── 漩渦（攪拌濃稠的雙色流體） ─────────────
+    // ───────────── 三色濃醬的動態（畫在 CpuLines.swirl） ─────────────
 
     /**
      * 漩渦：一層濃稠的三色流體，以攪拌中心為圓心分成九瓣（巧克力、焦糖、奶油依序交錯，每色三瓣，瓣寬帶一點變化），本身不動；
@@ -97,103 +97,6 @@ internal object GlStyles {
             out[56] = vx * s; out[57] = vy * s; out[58] = 0f; out[59] = 0f
             settling = kotlin.math.abs(wT - wind) > .01f || sp > .002f || kotlin.math.hypot(tx - cx, ty - cy) > .002f || lag > .02f
         }
-
-        /**
-         * 半精度的對策：整個流場（中心內插、倒轉、往中心吸、尾巴、atan、瓣的相位）都在頂點著色器用全精度算，
-         * 瓣的相位 ψ＝2π·t／3（三色一循環）換成單位向量 (cos ψ, sin ψ) 交給 GPU 內插——分量永遠在 ±1 之間，半精度不失準。
-         * 網格 96×54：捲得最快的地方每格相位也只轉約 0.35 弧度，內插後的角度誤差可以忽略（只有攪拌中心一兩格附近不準）。
-         * 片段著色器只判斷向量落在哪個扇區、切交界（見 [PICK]）。
-         */
-        const val VERTEX = """
-attribute vec2 a_pos;
-uniform float u_fy;
-uniform vec4 u_w;
-uniform vec4 u_v1;
-uniform vec4 u_vt;
-varying vec2 v_ph;
-void main() {
-  vec2 uv = a_pos * 0.5 + 0.5;
-  vec2 q = uv * vec2(1.7777778, 1.0) * 0.8;
-  vec2 ci = u_v1.xy;
-  // 中心依距離在攪拌中心（快）與外圈的中心（慢）之間內插：移動時外圈落後，中間被拉長
-  float wg = smoothstep(0.05, 0.9, length(q - ci));
-  vec2 c = mix(ci, u_v1.zw, wg);
-  vec2 d = q - c;
-  float f = exp(-dot(d, d) / u_w.y);
-  // 回推這裡的流體原本在哪（相對攪拌中心）：倒轉 a(r)、往外放大（往中心吸），再加上移動時的尾巴
-  float a = u_w.x * f;
-  vec2 e = vec2(cos(a) * d.x - sin(a) * d.y, sin(a) * d.x + cos(a) * d.y) * (1.0 + u_w.z * f) + u_vt.xy * f;
-  float th = atan(e.y, e.x);
-  // 九瓣（三色各三瓣，瓣寬帶一點變化）：t＝(9θ＋1.5·sin(2θ＋0.7))／2π，ψ＝2π·t／3
-  float ps = 3.0 * th + 0.5 * sin(2.0 * th + 0.7);
-  v_ph = vec2(cos(ps), sin(ps));
-  gl_Position = vec4(a_pos.x, a_pos.y * u_fy, 0.0, 1.0);
-}
-"""
-
-        /**
-         * 由瓣的相位向量決定顏色（片段著色器共用）：三色各佔 120°，扇區中心在 60°、180°、300°。
-         * 向量最接近哪個中心就是哪一瓣；再轉到那個中心算角度（一定在 ±60° 以內，碰不到 atan 的 ±π 接縫——
-         * Mali 半精度在接縫偶爾算錯，接縫在瓣中間會冒虛線點、在交界上會變成階梯），兩側交界各和前、後一色混合，交界上剛好各半。
-         * 柔邊（弧度）用向量分量的變化量算（處處連續），再加一點點固定的柔和。
-         */
-        private const val PICK = """
-vec3 pick(vec2 v) {
-  vec2 u0 = vec2(0.5, 0.8660254);
-  vec2 u1 = vec2(-1.0, 0.0);
-  vec2 u2 = vec2(0.5, -0.8660254);
-  float d0 = dot(v, u0);
-  float d1 = dot(v, u1);
-  float d2 = dot(v, u2);
-  vec2 u = u2;
-  vec3 cp = u_p[5].rgb; vec3 ca = u_p[4].rgb; vec3 cn = u_p[3].rgb;
-  if (d0 >= d1 && d0 >= d2) { u = u0; cp = u_p[4].rgb; ca = u_p[3].rgb; cn = u_p[5].rgb; }
-  else if (d1 >= d2) { u = u1; cp = u_p[3].rgb; ca = u_p[5].rgb; cn = u_p[4].rgb; }
-  float phi = atan(u.x * v.y - u.y * v.x, dot(u, v));
-  float w = 0.85 * (fwidth(v.x) + fwidth(v.y)) / max(length(v), 0.2) + 0.063;
-  vec3 col = mix(ca, cn, smoothstep(-w, w, phi - 1.0471976));
-  return mix(cp, col, smoothstep(-w, w, phi + 1.0471976));
-}
-"""
-
-        const val SHADER = """#extension GL_OES_standard_derivatives : enable
-precision mediump float;
-uniform sampler2D u_noise;
-uniform vec4 u_p[16];
-varying vec2 v_ph;
-""" + PICK + """
-void main() {
-  vec3 col = pick(v_ph);
-  """ + DITHER + """
-  gl_FragColor = vec4(col, 1.0);
-}
-"""
-
-        /** B 方案第一段（分兩段，見 GlBackground.SPLIT）：頂點算好的相位向量（除成單位長）存成 cos、sin 各 16 位元。 */
-        const val FIELD = """precision mediump float;
-varying vec2 v_ph;
-vec2 enc(float v) { v = clamp(v * 0.5 + 0.5, 0.0, 0.999); return vec2(floor(v * 255.0) / 255.0, fract(v * 255.0)); }
-void main() {
-  vec2 v = v_ph / max(length(v_ph), 0.2);
-  gl_FragColor = vec4(enc(v.x), enc(v.y));
-}
-"""
-
-        /** B 方案第二段：讀回相位、換回三色裡的哪一瓣，在這個解析度的像素上切交界（寬度用 fwidth）。 */
-        const val EDGE = """#extension GL_OES_standard_derivatives : enable
-precision mediump float;
-uniform sampler2D u_noise;
-uniform sampler2D u_field;
-uniform vec4 u_p[16];
-varying vec2 v_uv;
-""" + PICK + """
-void main() {
-  vec4 q = texture2D(u_field, v_uv);
-  vec3 col = pick(vec2((q.r + q.g / 255.0) * 2.0 - 1.0, (q.b + q.a / 255.0) * 2.0 - 1.0));
-  """ + DITHER + """
-  gl_FragColor = vec4(col, 1.0);
-}
-"""
     }
 
     // ───────────── 漸層百葉（琉璃自己寫） ─────────────

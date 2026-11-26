@@ -128,8 +128,8 @@ object GlBackground {
      * 色塊雜訊、扭曲色帶、水彩（每滴只畫自己的範圍）、柔極光（帶子的形狀在頂點算）640 約 14～16ms；極光簾 320 約 18ms。
      */
     private fun startLevel(style: BgStyle) = when (style) {
-        BgStyle.SPIRAL, BgStyle.TRUCHET, BgStyle.BLINDS, BgStyle.LIQUID -> 2
-        BgStyle.SAUCE, BgStyle.SIMPLEX, BgStyle.WARP, BgStyle.SOFTAURORA, BgStyle.WATERCOLOR -> 3
+        BgStyle.BLINDS, BgStyle.LIQUID -> 2
+        BgStyle.SIMPLEX, BgStyle.WARP, BgStyle.SOFTAURORA, BgStyle.WATERCOLOR -> 3
         BgStyle.CURTAIN -> 5
         else -> 4
     } - 1
@@ -462,7 +462,7 @@ object GlBackground {
     // 場是平滑的（相位的 cos、到圓弧的距離、雜訊值），雙線性放大不會有鋸齒；最貴的計算還是在低解析度做，
     // 第二段每個像素只讀一次貼圖、做幾次比較。海信（Mali-470）原生走一遍要 10ms 以上付不起，所以邊緣是形狀的兩倍解析度
     /** 分兩段畫的樣式（有明確邊緣的）。 */
-    private val SPLIT = setOf(BgStyle.SPIRAL, BgStyle.TRUCHET, BgStyle.SIMPLEX, BgStyle.SAUCE)
+    private val SPLIT = setOf(BgStyle.SIMPLEX)
     private var splitFailed = false
     private val fieldProgs = HashMap<BgStyle, Program>()
     private val edgeProgs = HashMap<BgStyle, Program>()
@@ -843,10 +843,7 @@ void main() {
      */
     private fun gridSize(style: BgStyle) = when (style) {
         BgStyle.WARP -> if (debugGrid > 0) debugGrid to debugGrid * 9 / 16 else if (fragHighp) 32 to 18 else 96 to 54
-        // 相位在頂點算成單位向量再內插的樣式：每格相位轉的角度要小，內插才準（見 GlStyles2.Spiral、GlStyles.Sauce）
-        BgStyle.SPIRAL -> 64 to 36
-        BgStyle.MESH -> 96 to 54        // 整個顏色在頂點算（MeshGradient），片段只內插
-        BgStyle.SAUCE -> 96 to 54
+                BgStyle.MESH -> 96 to 54        // 整個顏色在頂點算（MeshGradient），片段只內插
         BgStyle.SIMPLEX -> 64 to 36
         else -> 32 to 18
     }
@@ -1030,8 +1027,6 @@ void main() { v_uv = a_pos * 0.5 + 0.5; gl_Position = vec4(a_pos.x, a_pos.y * u_
 
 /** 著色器樣式的頂點著色器。 */
 internal fun BgStyle.glVertex(): String = when (this) {
-    BgStyle.SAUCE -> GlStyles.Sauce.VERTEX
-    BgStyle.SPIRAL -> GlStyles2.Spiral.VERTEX
     BgStyle.MESH -> MeshGradient.VERTEX
     BgStyle.BLINDS -> GlStyles.Blinds.VERTEX
     BgStyle.SIMPLEX -> GlStyles2.Simplex.VERTEX
@@ -1042,34 +1037,25 @@ internal fun BgStyle.glVertex(): String = when (this) {
 
 /** B 方案第一段：把形狀的「場」編成 16 位元寫進離屏貼圖。 */
 internal fun BgStyle.splitField(): String = when (this) {
-    BgStyle.SPIRAL -> GlStyles2.Spiral.FIELD
-    BgStyle.TRUCHET -> GlStyles2.Truchet.FIELD
     BgStyle.SIMPLEX -> GlStyles2.Simplex.FIELD
-    BgStyle.SAUCE -> GlStyles.Sauce.FIELD
     else -> throw IllegalArgumentException("$id 不分兩段")
 }
 
 /** B 方案第二段：讀場、在較高解析度切邊緣上色。 */
 internal fun BgStyle.splitEdge(): String = when (this) {
-    BgStyle.SPIRAL -> GlStyles2.Spiral.EDGE
-    BgStyle.TRUCHET -> GlStyles2.Truchet.EDGE
     BgStyle.SIMPLEX -> GlStyles2.Simplex.EDGE
-    BgStyle.SAUCE -> GlStyles.Sauce.EDGE
     else -> throw IllegalArgumentException("$id 不分兩段")
 }
 
 /** 著色器樣式的片段著色器原始碼。 */
 internal fun BgStyle.glShader(): String = when (this) {
     BgStyle.MESH -> MeshGradient.SHADER
-    BgStyle.SAUCE -> GlStyles.Sauce.SHADER
     BgStyle.WATERCOLOR -> Watercolor.SHADER
     BgStyle.SIMPLEX -> GlStyles2.Simplex.SHADER
     BgStyle.WARP -> if (GlBackground.fragHighp) GlStyles2.Warp.SHADER_HP else GlStyles2.Warp.SHADER
     BgStyle.SOFTAURORA -> GlStyles2.SoftAurora.SHADER
     BgStyle.CURTAIN -> GlStyles2.Curtain.SHADER
     BgStyle.LIQUID -> LiquidEther.SHADER
-    BgStyle.SPIRAL -> GlStyles2.Spiral.SHADER
-    BgStyle.TRUCHET -> GlStyles2.Truchet.SHADER
     BgStyle.BLINDS -> GlStyles.Blinds.SHADER
     else -> error("不是著色器樣式：$id")
 }
@@ -1077,15 +1063,12 @@ internal fun BgStyle.glShader(): String = when (this) {
 /** 著色器樣式的參數（主執行緒每格算一次：時間相位取模、色點軌跡、調色盤）。 */
 internal fun BgStyle.glParams(st: BgState, out: FloatArray) = when (this) {
     BgStyle.MESH -> MeshGradient.params(st, out)
-    BgStyle.SAUCE -> GlStyles.Sauce.params(st, out)
     BgStyle.WATERCOLOR -> Watercolor.params(st, out)
     BgStyle.SIMPLEX -> GlStyles2.Simplex.params(st, out)
     BgStyle.WARP -> GlStyles2.Warp.params(st, out)
     BgStyle.SOFTAURORA -> GlStyles2.SoftAurora.params(st, out)
     BgStyle.CURTAIN -> GlStyles2.Curtain.params(st, out)
     BgStyle.LIQUID -> LiquidEther.params(st, out)
-    BgStyle.SPIRAL -> GlStyles2.Spiral.params(st, out)
-    BgStyle.TRUCHET -> GlStyles2.Truchet.params(st, out)
     BgStyle.BLINDS -> GlStyles.Blinds.params(st, out)
     else -> Unit
 }

@@ -48,19 +48,15 @@ enum class BgStyle(val id: String, val label: String, val note: String, val ambi
     TRIANGLES("triangles", "幾何三角", "曲面隆起並跟著焦點移動，三角面拉伸變形"),
     MESH("mesh", "網格漸層", "幾團顏色沿著各自的軌跡緩緩流動、互相暈染，最亮的那團跟著焦點", ambient = true, gl = true),
     WATERCOLOR("watercolor", "水彩暈染", "焦點換到哪，就在那裡滴下一滴顏料慢慢暈開；邊緣柔，乾掉的水痕顏色較深", ambient = true, gl = true),
-    SAUCE("sauce", "三色濃醬", "巧克力、焦糖、奶油三色交錯，焦點是攪拌的中心，越靠中心捲得越多；移過去時舊的捲紋慢慢鬆開", ambient = true, gl = true),
-    SAUCE_CPU("sauce_cpu", "三色濃醬", "巧克力、焦糖、奶油三色交錯被攪拌捲進中心（CPU 畫的對照版：向量曲面，任何解析度邊緣都銳利；停穩後不再重畫）"),
+    SAUCE("sauce", "三色濃醬", "巧克力、焦糖、奶油三色交錯，焦點是攪拌的中心，越靠中心捲得越多；移過去時舊的捲紋慢慢鬆開"),
     SIMPLEX("simplex", "色塊雜訊", "幾種顏色像地圖色塊一樣分層，慢慢流動", ambient = true, gl = true),
     WARP("warp", "扭曲色帶", "棋盤圖樣被一層層漩渦扭成流動的絲狀色帶", ambient = true, gl = true),
     SOFTAURORA("softaurora", "柔極光", "暗色天空上三條柔和的極光帶起伏飄動", ambient = true, gl = true),
     CURTAIN("curtain", "極光簾", "極光的簾腳彎曲起伏，往上透出帶細絲的光幕", ambient = true, gl = true),
     LIQUID("liquid", "液態以太", "流體模擬：焦點移動時把彩色的流體推開，閒置時輕輕攪動", ambient = true, gl = true),
-    SPIRAL("spiral", "螺旋", "一條螺旋線繞著焦點慢慢轉", ambient = true, gl = true),
-    SPIRAL_CPU("spiral_cpu", "螺旋", "一條螺旋線繞著焦點慢慢轉（CPU 畫的對照版：向量線條）", ambient = true),
-    TRUCHET("truchet", "特魯謝緞帶", "隨機拼接的圓弧連成蜿蜒的緞帶，整片慢慢捲動", ambient = true, gl = true),
-    TRUCHET_CPU("truchet_cpu", "特魯謝緞帶", "隨機拼接的圓弧連成蜿蜒的緞帶，整片慢慢捲動（CPU 畫的對照版：向量線條）", ambient = true),
+    SPIRAL("spiral", "螺旋", "一條螺旋線繞著焦點慢慢轉", ambient = true),
+    TRUCHET("truchet", "特魯謝緞帶", "隨機拼接的圓弧連成蜿蜒的緞帶，整片慢慢捲動", ambient = true),
     BLINDS("blinds", "漸層百葉", "一排直立的百葉片，朝向焦點的那一側亮起，焦點處聚光", gl = true),
-    BLINDS_CPU("blinds_cpu", "漸層百葉", "一排直立的百葉片，朝向焦點的那一側亮起，焦點處聚光（CPU 畫的對照版）"),
     SOLID("solid", "純色", "雙色漸層純色"),
     BLACK("black", "純黑（OLED）", "幾乎全黑，焦點下方一抹主色");
 
@@ -69,8 +65,7 @@ enum class BgStyle(val id: String, val label: String, val note: String, val ambi
         const val RANDOM_ID = "random"
 
         /** 隨機的預設範圍：純色、純黑以外全部。 */
-        // CPU 對照版（_cpu）不預設加入隨機：和 GPU 版是同一個樣式
-        val DEFAULT_POOL: Set<String> get() = entries.filter { it != SOLID && it != BLACK && !it.id.endsWith("_cpu") }.map { it.id }.toSet()
+        val DEFAULT_POOL: Set<String> get() = entries.filter { it != SOLID && it != BLACK }.map { it.id }.toSet()
 
         /** 從 [pool]（使用者勾選的樣式 id）隨機抽一個，不和 [except]（上一次抽到的）重複；只勾一個就是那一個。 */
         fun random(except: BgStyle? = null, pool: Set<String> = DEFAULT_POOL): BgStyle {
@@ -654,9 +649,9 @@ class BackgroundEngine {
                     stepBounce(t)
                     // 持續動畫的樣式（星空、深海、光束）與簡潔模式的彈跳點：追上目標也不停
                     val settled = step(t)
-                    // 三色濃醬的 CPU 版：攪拌中心還在動、還沒捲緊或鬆完就繼續畫（彈簧與捲緊要 3 秒左右，比轉場長）；
+                    // 三色濃醬：攪拌中心還在動、還沒捲緊或鬆完就繼續畫（彈簧與捲緊要 3 秒左右，比轉場長）；
                     // 停穩後才停，之後補一張原生解析度、不再重畫（向量路徑每格重填很吃畫面執行緒）
-                    done = settled && t > holdUntil && !style.ambient && !bounce && !(style == BgStyle.SAUCE_CPU && GlStyles.Sauce.settling)
+                    done = settled && t > holdUntil && !style.ambient && !bounce && !(style == BgStyle.SAUCE && GlStyles.Sauce.settling)
                     if (done) snapToTarget()
                     // 累加用雙精度（單精度一路加上去，幾個小時後每一格加的量會被捨入吃掉一部分，流動就不均勻）
                     // 持續流動也跟著播放速度（跟不上每秒 30 格時放慢，每格的變化量不變大）
