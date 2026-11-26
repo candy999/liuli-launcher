@@ -101,29 +101,43 @@ internal object CpuLines {
      */
     private class SMask(val u: Float, val scale: Float, val r: Float, val img: ImageBitmap)
 
+    /**
+     * 螺旋條紋的實際形狀：中心線 r＝u·s／2π（角度 −s），條紋是中心線內外各 ¼ 圈（u／4）圍成的帶——
+     * 外緣 r＝u(s／2π＋¼)、內緣 r＝u(s／2π−¼)（s＜π／2 時內緣在中心）。和 GPU 版的條紋（stripe 的一半）一模一樣，
+     * 中心那一段也是正確的尖端。以前用粗線沿中心線描：中心那圈的半徑比線寬小，線自己疊在一起，形狀亂掉。
+     * 每段弧長最多 [seg] 個邏輯單位、角度一步最多 0.04 弧度（中心轉得急，靠角度限制取樣夠密）。
+     */
+    private fun spiralBand(u: Float, rMax: Float, seg: Double): android.graphics.Path {
+        val p = android.graphics.Path()
+        val sEnd = 2 * PI * (rMax / u + .25)
+        val q = u / (2 * PI)
+        p.moveTo(0f, 0f)
+        var t = 0.0
+        while (true) {
+            val r = u * .25 + q * t
+            p.lineTo((r * cos(-t)).toFloat(), (r * sin(-t)).toFloat())
+            if (t >= sEnd) break
+            t = min(sEnd, t + min(.04, seg / max(r, 1.0)))
+        }
+        t = sEnd
+        while (t > PI / 2) {
+            val r = q * t - u * .25
+            p.lineTo((r * cos(-t)).toFloat(), (r * sin(-t)).toFloat())
+            t -= min(.04, seg / max(r, 1.0))
+        }
+        p.close()
+        return p
+    }
+
     private fun buildSpiralMask(sc: Scratch, u: Float, r: Float, scale: Float) {
         sc.sBuilding = true
         maskExec.execute {
             try {
                 val size = kotlin.math.ceil(2 * r * scale).toInt()
-                val line = android.graphics.Path()
-                var a = 0.0; var first = true
-                val turns = r / u + 1
-                while (a > -2.0 * PI * turns) {
-                    val rr = u * (-a / (2 * PI))
-                    val x = (rr * cos(a)).toFloat(); val y = (rr * sin(a)).toFloat()
-                    if (first) { line.moveTo(x, y); first = false } else line.lineTo(x, y)
-                    // 每段約 2 個邏輯單位；中心那幾圈半徑小、轉得急，角度一步最多 0.06 弧度——太稀的話中心會變成折線、
-                    // 粗線在急轉處冒出尖角（破圖）
-                    a -= min(.06, 2.0 / max(rr, 2.0))
-                }
                 val b = android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ALPHA_8)
                 val c = android.graphics.Canvas(b)
                 c.scale(scale, scale); c.translate(r, r)
-                c.drawPath(line, android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-                    style = android.graphics.Paint.Style.STROKE; strokeCap = android.graphics.Paint.Cap.BUTT; strokeWidth = u * .5f
-                    strokeJoin = android.graphics.Paint.Join.ROUND
-                })
+                c.drawPath(spiralBand(u, r, 1.0), android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG))
                 sc.sMask = SMask(u, scale, r, b.asImageBitmap())
             } catch (_: Throwable) {
             } finally { sc.sBuilding = false }
@@ -153,38 +167,18 @@ internal object CpuLines {
         }
         if (forGlass()) {
             // 玻璃小圖：每段 12 個邏輯單位（小圖上約 3 像素）、直接描邊
-            val gp = sc.spiralGlass.takeIf { sc.spiralGlassUnit == u } ?: Path().also { p ->
-                var a = 0.0; var first = true
-                while (a > -2.0 * PI * 14) {
-                    val r = (u * (-a / (2 * PI))).toFloat()
-                    val x = (r * cos(a)).toFloat(); val y = (r * sin(a)).toFloat()
-                    if (first) { p.moveTo(x, y); first = false } else p.lineTo(x, y)
-                    a -= min(.5, 12.0 / max(r.toDouble(), 1.0))
-                }
-                sc.spiralGlass = p; sc.spiralGlassUnit = u
-            }
+            val gp = sc.spiralGlass.takeIf { sc.spiralGlassUnit == u }
+                ?: spiralBand(u, kotlin.math.hypot(w, h), 12.0).asComposePath().also { sc.spiralGlass = it; sc.spiralGlassUnit = u }
             withTransform({ translate(st.fx * w, st.fy * h); rotate((phase0 * 360.0).toFloat(), Offset.Zero) }) {
-                drawPath(gp, col(st, 15f, .75f, .50f), style = Stroke(width = u * .5f, cap = StrokeCap.Butt))
+                drawPath(gp, col(st, 15f, .75f, .50f))
             }
             return
         }
         // 阿基米德螺旋 r＝u·(−α／2π)：每轉一圈往外一個 u，線寬半個 u（GPU 版 stripe 的一半）。
         // 固定的路徑：相位＝整條旋轉、焦點＝平移，所以只在第一次（或畫布比例變了）建一次——而且直接存成描邊後的填色外框
-        val path = sc.spiralPath.takeIf { sc.spiralUnit == u } ?: Path().let { p ->
-            val turns = 14
-            var first = true
-            var a = 0.0
-            val end = -2.0 * PI * turns
-            while (a > end) {
-                val r = (u * (-a / (2 * PI))).toFloat()
-                val x = (r * cos(a)).toFloat(); val y = (r * sin(a)).toFloat()
-                if (first) { p.moveTo(x, y); first = false } else p.lineTo(x, y)
-                // 每段約 6 個邏輯單位：弦的誤差＝段長²／(8·半徑)，半徑 20 以上就不到 0.2 個邏輯單位（÷2 時 0.4 像素），
-                // 點數比每段 3 少一半，畫布每格切三角形的工作也少一半
-                a -= min(.06, 6.0 / max(r.toDouble(), 6.0))
-            }
-            sc.toFill(p, u * .5f).also { sc.spiralPath = it; sc.spiralUnit = u }
-        }
+        // 遮罩還沒畫好（剛切過來）：直接填條紋的形狀
+        val path = sc.spiralPath.takeIf { sc.spiralUnit == u }
+            ?: spiralBand(u, kotlin.math.hypot(w, h), 3.0).asComposePath().also { sc.spiralPath = it; sc.spiralUnit = u }
         val phase = ((st.at * .2 + st.ripple * .8) % (2 * PI)) / (2 * PI)
         withTransform({
             translate(st.fx * w, st.fy * h)
@@ -379,18 +373,25 @@ internal object CpuLines {
             }
         }
         for (p in sc.swirlPaths) p.reset()
-        // 瓣 i：交界 i（t＝m）到交界 i＋1（t＝m＋1）之間，顏色＝m 除以 3 的餘數（0 深、1 中、2 淺，同 GPU 版）
-        for (i in 0 until GlStyles.Sauce.WEDGES) {
-            val j = (i + 1) % GlStyles.Sauce.WEDGES
-            val p = sc.swirlPaths[Math.floorMod(boundM[i], 3)]
-            var o = i * SW_PTS * 2
+        // 瓣 i：交界 i（t＝m）到交界 i＋1（t＝m＋1）之間，顏色＝m 除以 3 的餘數（0 深、1 中、2 淺），依序循環。
+        // 堆疊：整面先鋪深色；中間色的瓣延伸到它後面那一瓣（淺色）的範圍；最後鋪淺色。
+        // 以前三色各自一塊、互相貼齊：交界兩邊的反鋸齒各透一半，把最底下的底色透出來，變成一條深色線（綠色主題特別明顯）。
+        // 現在每條交界只有上面那一層是半透明邊，底下墊的是正確的顏色
+        fun wedge(p: Path, from: Int, to: Int) {
+            var o = from * SW_PTS * 2
             p.moveTo(cv[o], cv[o + 1])
             for (k in 1 until SW_PTS) { o += 2; p.lineTo(cv[o], cv[o + 1]) }
-            o = (j * SW_PTS + SW_PTS - 1) * 2
+            o = (to * SW_PTS + SW_PTS - 1) * 2
             for (k in SW_PTS - 1 downTo 0) { p.lineTo(cv[o], cv[o + 1]); o -= 2 }
             p.close()
         }
-        drawPath(sc.swirlPaths[0], col(tmp, 12))   // 深（巧克力）
+        for (i in 0 until GlStyles.Sauce.WEDGES) {
+            when (Math.floorMod(boundM[i], 3)) {
+                1 -> wedge(sc.swirlPaths[1], i, (i + 2) % GlStyles.Sauce.WEDGES)   // 中間色＋後面的淺色瓣
+                2 -> wedge(sc.swirlPaths[2], i, (i + 1) % GlStyles.Sauce.WEDGES)
+            }
+        }
+        drawRect(col(tmp, 12), size = Size(w, h))  // 深（巧克力）鋪底
         drawPath(sc.swirlPaths[1], col(tmp, 20))   // 中（焦糖）
         drawPath(sc.swirlPaths[2], col(tmp, 16))   // 淺（奶油）
     }
