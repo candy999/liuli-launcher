@@ -66,10 +66,10 @@ object GlBackground {
 
     /**
      * 動態解析度（規則和 CPU 樣式的背景引擎一樣，見 BackgroundEngine.run 的排程原則）：
-     * - 每個樣式記住一個「學到的檔位」（[SIZES] 的索引，0＝原生 1920×1080 … 6＝320×180），起點見 [startLevel]
+     * - 每個樣式記住一個「學到的檔位」（[SIZES] 的索引，0＝原生（背景實際的畫面大小）… 最後＝320×180），起點見 [startLevel]
      * - 每約 1 秒一窗（每 3 張量一次 GPU 時間、取 10 次的中位數）：超過 [SLOW_MS] 連續兩窗（或超過 [VERY_SLOW_MS] 一窗）降一檔；
      *   升檔前先推估上一檔的成本（約 70% 跟像素數成正比），推估在 [UP_MS] 以內、連續兩窗才升；剛升就變慢＝試探失敗，退避時間加倍。
-     *   上限是原生解析度：GPU 夠強的電視會一路升到 1080p
+     *   上限是原生解析度（電視實際的畫面大小）：GPU 夠強的電視會一路升到原生
      * - 操作中、面板／抽屜開著：降到 640×360（[BUSY_LEVEL]），每秒 30 格不變；便宜的樣式（一張 [CHEAP_MS] 以內）不降。
      *   操作結束每 [RAMP_STEP_MS] 拉回一檔
      * - 只在轉場時動的樣式（漸層百葉）停下來、遙控器閒置一下之後，補畫一張原生解析度（[request] 的 still）
@@ -79,7 +79,8 @@ object GlBackground {
     @Volatile var debugLevel = -1
     /** 每個樣式最近在學到的檔位量到的 GPU 時間（毫秒；-1＝還沒量）：判斷「便宜的樣式不降」。 */
     private val lastCost = FloatArray(BgStyle.entries.size) { -1f }
-    private const val BUSY_LEVEL = 4
+    /** 操作中降到的檔位：640×360 */
+    private val BUSY_LEVEL get() = lvFor(640)
     private const val CHEAP_MS = 12f
     private const val UP_MS = 16f
     private const val VERY_SLOW_MS = 36f
@@ -102,18 +103,18 @@ object GlBackground {
     private var lastLevelLog = 0L
 
     /**
-     * 起始檔位（[SIZES] 的索引；0＝1920×1080、2＝960×540、3＝800×450、4＝640×360、5＝480×270、6＝320×180）。
+     * 起始檔位（用寬度指定，換成 [SIZES] 的索引；原生比較小的機器會落在不超過那個寬度的第一檔）。
      * 全部每秒 30 格（以前有些樣式每秒 15 格換解析度，流動看得出卡），解析度照 30 格的 GPU 預算（一張 20ms 以內）挑。
      * 海信 Mali-470 實測（一張的 GPU 時間）：螺旋 960 約 9ms、特魯謝緞帶 14ms、液態以太 13ms、漩渦 960 要 21ms → 800；
      * 色塊雜訊、扭曲色帶、水彩（每滴只畫自己的範圍）、柔極光（帶子的形狀在頂點算）640 約 14～16ms；極光簾 320 約 18ms。
      */
-    private fun startLevel(style: BgStyle) = when (style) {
-        BgStyle.SPIRAL, BgStyle.TRUCHET, BgStyle.BLINDS, BgStyle.LIQUID -> 2
-        BgStyle.SWIRL -> 3
-        BgStyle.SIMPLEX, BgStyle.WARP, BgStyle.SOFTAURORA, BgStyle.WATERCOLOR -> 4
-        BgStyle.CURTAIN -> 6
-        else -> 5
-    }
+    private fun startLevel(style: BgStyle) = lvFor(when (style) {
+        BgStyle.SPIRAL, BgStyle.TRUCHET, BgStyle.BLINDS, BgStyle.LIQUID -> 960
+        BgStyle.SWIRL -> 800
+        BgStyle.SIMPLEX, BgStyle.WARP, BgStyle.SOFTAURORA, BgStyle.WATERCOLOR -> 640
+        BgStyle.CURTAIN -> 320
+        else -> 480
+    })
 
     /** 每幾次要求才真的畫一張：現在全部每秒 30 格（保留這個介面給量測與儀表）。 */
     @Suppress("UNUSED_PARAMETER")
@@ -122,8 +123,29 @@ object GlBackground {
     private var reqN = 0
     private var measuredStyle: BgStyle? = null
     private var slowWins = 0
-    /** 解析度檔位：越後面越小。放大到 1080p 時，畫面上有銳利邊緣的樣式（色帶、線條）要 960×540 以上才不糊。 */
-    private val SIZES = arrayOf(intArrayOf(1920, 1080), intArrayOf(1280, 720), intArrayOf(960, 540), intArrayOf(800, 450), intArrayOf(640, 360), intArrayOf(480, 270), intArrayOf(320, 180))
+    /** 原生以下的固定檔位（16:9）。放大到 1080p 時，畫面上有銳利邊緣的樣式（色帶、線條）要 960×540 以上才不糊。 */
+    private val BASE = arrayOf(intArrayOf(1920, 1080), intArrayOf(1280, 720), intArrayOf(960, 540), intArrayOf(800, 450), intArrayOf(640, 360), intArrayOf(480, 270), intArrayOf(320, 180))
+    /**
+     * 解析度檔位：0＝原生（背景實際的畫面大小，TextureView 一好就換成它），接著是比原生小的 [BASE]，越後面越小。
+     * 1080p 的電視＝1920×1080 … 320×180；介面只有 720p 的機上盒最高就是 1280×720（不畫比螢幕還大的圖）；
+     * 介面是 4K 的電視最高 3840×2160（GPU 付得起才會升上去）。
+     */
+    @Volatile private var SIZES = BASE
+
+    /** 第一個寬度不超過 [width] 的檔位（操作中的 640×360、讀回模式的 480×270、各樣式的起點都用寬度指定，不受原生大小影響）。 */
+    private fun lvFor(width: Int, sz: Array<IntArray> = SIZES): Int {
+        for (i in sz.indices) if (sz[i][0] <= width) return i
+        return sz.size - 1
+    }
+
+    /** 背景實際的畫面大小（主執行緒）：和目前的原生不同就重建檔位，各樣式重新從起點學。 */
+    private fun setNative(w: Int, h: Int) {
+        if (w < 320 || h < 180) return
+        if (SIZES[0][0] == w && SIZES[0][1] == h) return
+        SIZES = arrayOf(intArrayOf(w, h)) + BASE.filter { it[0] < w && it[1] < h }
+        levels.fill(-1); lastCost.fill(-1f); shownLevel = -1
+        Log.i(TAG, "原生 ${w}x$h，檔位 ${SIZES.joinToString(" ") { "${it[0]}" }}")
+    }
     private const val SLOW_MS = 24f
 
     private val main = Handler(Looper.getMainLooper())
@@ -192,6 +214,7 @@ object GlBackground {
     /** 給 TextureView 用的監聽器：SurfaceTexture 準備好就交給 GL 執行緒，銷毀時等 GL 放掉才回傳。 */
     val textureListener = object : android.view.TextureView.SurfaceTextureListener {
         override fun onSurfaceTextureAvailable(st: android.graphics.SurfaceTexture, w: Int, h: Int) {
+            setNative(w, h)
             ensureThread().post { destroyWindow(); tex = st; winLevel = -1 }
             // 只在轉場時動的樣式（百葉）：背景停著就不會再來要求，新的 TextureView 要用最後一次的參數補畫一張
             val go = synchronized(lock) {
@@ -207,7 +230,7 @@ object GlBackground {
             latch.await(500, java.util.concurrent.TimeUnit.MILLISECONDS)
             return true
         }
-        override fun onSurfaceTextureSizeChanged(st: android.graphics.SurfaceTexture, w: Int, h: Int) {}
+        override fun onSurfaceTextureSizeChanged(st: android.graphics.SurfaceTexture, w: Int, h: Int) { setNative(w, h) }
         override fun onSurfaceTextureUpdated(st: android.graphics.SurfaceTexture) {}
     }
 
@@ -228,7 +251,7 @@ object GlBackground {
         if (every(style) > 1 && reqN++ % every(style) != 0 && currentStyle == style && current != null) return
         val si = style.ordinal
         if (levels[si] < 0) levels[si] = startLevel(style)
-        val learned = levels[si]
+        val learned = levels[si].coerceIn(0, SIZES.size - 1)
         val cheap = lastCost[si] in 0f..CHEAP_MS
         val target = if (busy && !cheap) maxOf(learned, BUSY_LEVEL) else learned
         val now = SystemClock.uptimeMillis()
@@ -413,9 +436,10 @@ object GlBackground {
 
     private fun draw(style: BgStyle): Bitmap? {
         if (levels[style.ordinal] < 0) levels[style.ordinal] = startLevel(style)
-        val lv = workLevel.coerceIn(0, SIZES.size - 1)
-        var w = SIZES[lv][0]
-        var h = SIZES[lv][1]
+        val sz = SIZES
+        val lv = workLevel.coerceIn(0, sz.size - 1)
+        var w = sz[lv][0]
+        var h = sz[lv][1]
         val t = tex
         // 液態以太：流體模擬在這條執行緒推進（不佔主執行緒），算完上傳
         if (style == BgStyle.LIQUID) LiquidEther.simulate()
@@ -437,7 +461,7 @@ object GlBackground {
                 }
             }
             if (win != EGL14.EGL_NO_SURFACE) {
-                if (winLevel != lv) { t.setDefaultBufferSize(w, h); winLevel = lv }
+                if (winLevel != w * 10000 + h) { t.setDefaultBufferSize(w, h); winLevel = w * 10000 + h }
                 if (!EGL14.eglMakeCurrent(dpy, win, win, ctx)) throw IllegalStateException("eglMakeCurrent(window)")
                 val prog = programs.getOrPut(style) { Program(style) }
                 // 每 3 張量一次 GPU 耗時（glFinish 會讓這條執行緒等 GPU，平常不用）；只量「穩定在學到的檔位」的張
@@ -466,7 +490,8 @@ object GlBackground {
             }
         }
         // 讀回模式（沒有 TextureView）：大圖讀回付不起，最多 480×270
-        if (lv < 5) { w = SIZES[5][0]; h = SIZES[5][1] }
+        val rb = lvFor(480, sz)
+        if (lv < rb) { w = sz[rb][0]; h = sz[rb][1] }
         if (!ensureGl(w, h)) return null
         if (!EGL14.eglMakeCurrent(dpy, surf, surf, ctx)) throw IllegalStateException("eglMakeCurrent")
         val prog = programs.getOrPut(style) { Program(style) }
@@ -511,6 +536,8 @@ object GlBackground {
     /** [read]：讀回（直接顯示時＝交換緩衝）；[copy]：直接顯示時＝玻璃小圖（畫＋讀回）。升降檔的判斷見 [levels]。 */
     private fun measure(style: BgStyle, lv: Int, w: Int, h: Int, gpu: Long, read: Long, copy: Long, direct: Boolean) {
         val si = style.ordinal
+        val sz = SIZES
+        if (lv >= sz.size) return   // 原生大小剛換過，檔位重建了
         if (style != measuredStyle || lv != measuredLevel) {
             // 換樣式、換檔位：重新量（剛換的前幾張特別慢：編譯著色器、配置緩衝）
             if (style != measuredStyle) { slowWins = 0; fastWins = 0 }
@@ -531,17 +558,17 @@ object GlBackground {
         val slow = g > SLOW_MS
         val verySlow = g > VERY_SLOW_MS
         // 升檔要「推估」付得起：約 30% 是固定成本、70% 跟像素數成正比
-        val canUp = lv > 0 && g * (.3f + .7f * px(lv - 1) / px(lv)) <= UP_MS
+        val canUp = lv > 0 && g * (.3f + .7f * px(sz, lv - 1) / px(sz, lv)) <= UP_MS
         when {
             slow -> {
                 fastWins = 0
-                if ((++slowWins >= 2 || verySlow) && lv < SIZES.size - 1) {
+                if ((++slowWins >= 2 || verySlow) && lv < sz.size - 1) {
                     slowWins = 0
                     levels[si] = lv + 1
                     lastCost[si] = -1f
                     upBackoff = if (now - lastUpMs < 1500) minOf(upBackoff * 2, 60_000L) else 3000L
                     upBlockedUntil = now + upBackoff
-                    Log.i(TAG, "${style.id} 太慢（%.1fms），降到 ${SIZES[lv + 1][0]}x${SIZES[lv + 1][1]}".format(g))
+                    Log.i(TAG, "${style.id} 太慢（%.1fms），降到 ${sz[lv + 1][0]}x${sz[lv + 1][1]}".format(g))
                 }
             }
             canUp -> {
@@ -551,7 +578,7 @@ object GlBackground {
                     levels[si] = lv - 1
                     lastCost[si] = -1f
                     lastUpMs = now
-                    Log.i(TAG, "${style.id} 付得起（%.1fms），升到 ${SIZES[lv - 1][0]}x${SIZES[lv - 1][1]}".format(g))
+                    Log.i(TAG, "${style.id} 付得起（%.1fms），升到 ${sz[lv - 1][0]}x${sz[lv - 1][1]}".format(g))
                 }
             }
             else -> { slowWins = 0; fastWins = 0 }
@@ -559,7 +586,7 @@ object GlBackground {
     }
 
     private var measuredLevel = -1
-    private fun px(lv: Int) = (SIZES[lv][0] * SIZES[lv][1]).toFloat()
+    private fun px(sz: Array<IntArray>, lv: Int) = (sz[lv][0] * sz[lv][1]).toFloat()
 
     // ───────────── EGL ─────────────
 
