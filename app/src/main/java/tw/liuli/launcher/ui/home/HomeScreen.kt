@@ -1039,9 +1039,9 @@ fun HomeScreen(
             listOf(
                 SheetItem("Paper Shaders", subtitle = "Apache License 2.0・github.com/paper-design/shaders") { },
                 SheetItem("Powered by Paper Shaders", subtitle = "https://shaders.paper.design") { },
-                SheetItem("Paper 改寫的部分", subtitle = "「網格漸層」「漩渦」「色塊雜訊」「扭曲色帶」「螺旋」背景：改寫成 OpenGL ES 2.0、時間與軌跡改在 CPU 計算、雜訊改成查貼圖、顏色跟著主色。授權全文附在 App 裡（assets/licenses）") { },
+                SheetItem("Paper 改寫的部分", subtitle = "「網格漸層」「色塊雜訊」「扭曲色帶」背景：改寫成 OpenGL ES 2.0、時間與軌跡改在 CPU 計算、雜訊改成查貼圖、顏色跟著主色。授權全文附在 App 裡（assets/licenses）") { },
                 SheetItem("Subframe（aurora-curtain、truchet-ribbon）", subtitle = "MIT License・Copyright (c) 2026 Subframe") { },
-                SheetItem("Subframe 改寫的部分", subtitle = "「極光簾」「特魯謝緞帶」背景：雜湊改成查雜訊貼圖、細節加粗配合低解析度、顏色跟著主色") { },
+                SheetItem("Subframe 改寫的部分", subtitle = "「極光簾」背景：簾腳與細絲改在 CPU 逐欄算好、顏色跟著主色；「特魯謝緞帶」的樣子：改成向量路徑繪製、顏色跟著主色") { },
             ),
             key = "licenses", reopen = { licenseSheet() },
         ), gearReq)
@@ -1154,6 +1154,8 @@ fun HomeScreen(
                 "gllog" -> tw.liuli.launcher.ui.bg.GlBackground.verbose = arg == "1"
                 // glassfade:0＝毛玻璃不交叉淡化（量測對照用，不存）
                 "glassfade" -> tw.liuli.launcher.ui.glass.GlassRate.fade = arg != "0"
+                // glassmax:N＝毛玻璃每秒最多 N 次（0＝照負載；量測對照用，不存）
+                "glassmax" -> tw.liuli.launcher.ui.glass.GlassRate.debugMax = arg.toFloatOrNull() ?: 0f
                 // glassdump＝把玻璃取樣的小圖（模糊前的 GL 小圖與模糊後的玻璃圖）存成 PNG（files/shots/），檢查玻璃顏色對不對
                 "glassdump" -> Thread {
                     runCatching {

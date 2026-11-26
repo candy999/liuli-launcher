@@ -29,6 +29,10 @@ object GlassRate {
     /** 交叉淡化（adb ACTION=glassfade:0 關掉做對照，不存）。 */
     @Volatile var fade = true
 
+    /** 量測用：adb ACTION=glassmax:N 把上限壓到每秒 N 次（0＝不限；不存）。 */
+    @Volatile var debugMax = 0f
+        set(v) { field = v; if (v > 0f) perSec = min(perSec, max(MIN, v)) }
+
     /** 操作中（按鍵後一小段時間、面板開著）：不升。主執行緒寫入。 */
     @Volatile var busy = false
 
@@ -54,7 +58,7 @@ object GlassRate {
         if (n < 3) return
         val costMs = c / 1e6f / n
         val load = costMs * perSec / 1000f   // 照目前頻率要幾個核心
-        val target = (BUDGET * 1000f / max(costMs, .1f)).coerceIn(MIN, MAX)
+        val target = (BUDGET * 1000f / max(costMs, .1f)).coerceIn(MIN, if (debugMax > 0f) max(MIN, debugMax) else MAX)
         val old = perSec
         perSec = when {
             target < perSec -> target
