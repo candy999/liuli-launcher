@@ -12,6 +12,7 @@ import kotlin.math.min
  * 玻璃的負載＝背景小圖（畫樣式＋模糊）＋每一片玻璃重新取色，都在背景執行緒，用執行緒 CPU 時間量。
  * - 每約 1 秒算一次：超過預算立刻照比例降；有餘裕慢慢升（每秒最多多 3 次）；操作中只降不升（主執行緒留給按鍵）。
  * - 用每次的成本推估（趕不上時次數會變少，直接看用了多少會誤判成付得起）；背景靜止、一秒不到 3 次的那一窗不算。
+ * - 背景優先（[yieldToBackground]）：背景跟不上時先降玻璃，到最低才讓背景降畫質。
  * - 範圍每秒 [MIN]～[MAX] 次。低於 [FADE_BELOW] 次時玻璃在兩次之間交叉淡化（[GlassBake]），看起來仍然連續；
  *   15 次以上直接換（間隔夠短看不出跳，淡化每格要畫兩層，海信上會把背景擠掉一兩檔解析度）。
  */
@@ -35,6 +36,24 @@ object GlassRate {
 
     /** 操作中（按鍵後一小段時間、面板開著）：不升。主執行緒寫入。 */
     @Volatile var busy = false
+
+    /** 背景跟不上時讓出來之後，這個時間（uptime 毫秒）之前不升。 */
+    @Volatile private var holdUntil = 0L
+
+    /**
+     * 背景優先：背景（CPU 或著色器樣式）這一窗跟不上、準備降畫質時先呼叫。毛玻璃還在最低次數以上就先降它（乘 0.6，
+     * 之後 30 秒不升）並回傳 true（背景這一窗不降）；已經到最低了才回傳 false，讓背景照常降。
+     * 毛玻璃更新一次，所有玻璃都要重畫：海信 Mali-470 上每秒 27 次時，CPU 樣式（星空銀河）每格要 65ms。
+     */
+    fun yieldToBackground(): Boolean {
+        val now = SystemClock.uptimeMillis()
+        holdUntil = now + 30_000L
+        if (perSec <= MIN + .5f) return false
+        val old = perSec
+        perSec = max(MIN, perSec * .6f)
+        Log.i("LiuliGlass", "背景跟不上，玻璃讓出：%.1f/s → %.1f/s".format(old, perSec))
+        return true
+    }
 
     private val cpuNs = AtomicLong()
     private val updates = AtomicInteger()
@@ -62,7 +81,7 @@ object GlassRate {
         val old = perSec
         perSec = when {
             target < perSec -> target
-            busy -> perSec
+            busy || now < holdUntil -> perSec
             else -> min(target, perSec + 3f)
         }
         if (tw.liuli.launcher.ui.bg.GlBackground.verbose || (old - perSec) > 2f)

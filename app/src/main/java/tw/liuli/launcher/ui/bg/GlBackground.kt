@@ -697,6 +697,8 @@ void main() {
         // 升檔要「推估」付得起：約 30% 是固定成本、70% 跟像素數成正比
         val canUp = lv > 0 && g * (.3f + .7f * cost(style, sz, lv - 1) / cost(style, sz, lv)) <= UP_MS
         when {
+            // 背景優先於毛玻璃：跟不上時先降毛玻璃的更新次數，到最低了才降解析度（剛升完檔就跟不上是試探失敗，照常退回）
+            slow && now - lastUpMs > 4000 && tw.liuli.launcher.ui.glass.GlassRate.yieldToBackground() -> { slowWins = 0; fastWins = 0 }
             slow -> {
                 fastWins = 0
                 if ((++slowWins >= 2 || verySlow) && lv < sz.size - 1) {

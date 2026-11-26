@@ -739,6 +739,8 @@ class BackgroundEngine {
                     val cost = if (lat >= 0f) lat else avg
                     val slow = avg > interval * SLOW_RATIO || lat > interval * LAT_SLOW
                     val verySlow = avg > interval * VERY_SLOW_RATIO || lat > interval * LAT_VERY_SLOW
+                    // 背景優先於毛玻璃：跟不上時先降毛玻璃的更新次數，到最低了才降背景（剛升完檔就跟不上是試探失敗，照常退回）
+                    if (slow && android.os.SystemClock.uptimeMillis() - lastUpgradeAt > 4000 && tw.liuli.launcher.ui.glass.GlassRate.yieldToBackground()) { slowWins = 0; skipMeasure = 2; continue }
                     // 升檔要「推估」付得起：先加回更新率，再加解析度
                     val canUp = avg < interval * FAST_RATIO && when {
                         iv > 0 -> lat < 0f || lat <= INTERVALS[iv - 1] * LAT_UP
