@@ -37,6 +37,13 @@ varying vec2 v_uv;
 """ + GlBackground.NOISE
     private const val DITHER = GlBackground.TONE + "col += (texture2D(u_noise, gl_FragCoord.xy / 64.0).rgb - 0.5) / 255.0;"
 
+    // ── B 方案（分兩段，見 GlBackground.SPLIT）共用 ──
+    /** 第一段：0～1 的場編成 16 位元（R＝高 8 位、G＝低 8 位）。雙線性內插對兩個通道各自是線性的，解回來仍然正確。 */
+    private const val ENC = "vec4 enc(float v) { v = clamp(v, 0.0, 0.999); return vec4(floor(v * 255.0) / 255.0, fract(v * 255.0), 0.0, 1.0); }\n"
+    /** 第二段：讀場（u_field，第 4 個貼圖單元）；邊緣寬度用 fwidth（OES_standard_derivatives，兩台電視都有；沒有就編譯失敗、改回一層）。 */
+    private const val EDGE_HEAD = "#extension GL_OES_standard_derivatives : enable\n" + HEAD +
+        "uniform sampler2D u_field;\nfloat dec() { vec4 t = texture2D(u_field, v_uv); return t.r + t.g / 255.0; }\n"
+
     // ───────────── 色塊雜訊（Paper simplex-noise） ─────────────
 
     /**
@@ -101,6 +108,38 @@ float ss(float m) {
 }
 void main() {
   float shape = 0.5 + 0.5 * v_n;
+  float mixer = (shape - 0.1) * 5.0;
+  vec3 col = u_p[2].rgb;
+  col = mix(col, u_p[3].rgb, ss(clamp(mixer, 0.0, 1.0)));
+  col = mix(col, u_p[4].rgb, ss(clamp(mixer - 1.0, 0.0, 1.0)));
+  col = mix(col, u_p[5].rgb, ss(clamp(mixer - 2.0, 0.0, 1.0)));
+  col = mix(col, u_p[6].rgb, ss(clamp(mixer - 3.0, 0.0, 1.0)));
+  if (mixer < 0.0) col = mix(u_p[6].rgb, u_p[2].rgb, ss(clamp(mixer + 1.0, 0.0, 1.0)));
+  if (mixer > 4.0) col = mix(u_p[6].rgb, u_p[2].rgb, ss(clamp(mixer - 4.0, 0.0, 1.0)));
+  """ + DITHER + """
+  gl_FragColor = vec4(col, 1.0);
+}
+"""
+
+        /** B 方案第一段：雜訊值（形狀）。 */
+        const val FIELD = HEAD + """
+varying float v_n;
+""" + ENC + """
+void main() { gl_FragColor = enc(0.5 + 0.5 * v_n); }
+"""
+
+        /** B 方案第二段：讀形狀、在這個解析度的像素上分色階（柔邊約 1.5 個像素，用 fwidth）。 */
+        const val EDGE = EDGE_HEAD + """
+float hw;
+float ss(float m) {
+  float st = floor(m * 2.0) / 2.0;
+  float f = m * 2.0 - floor(m * 2.0);
+  return st + smoothstep(0.5 - hw, 0.5 + hw, f) / 2.0;
+}
+void main() {
+  float shape = dec();
+  // f＝(形狀−0.1)×10 的小數：每個像素變 10·fwidth(形狀)；半寬取 0.75 個像素
+  hw = clamp(7.5 * fwidth(shape), 0.002, 0.25);
   float mixer = (shape - 0.1) * 5.0;
   vec3 col = u_p[2].rgb;
   col = mix(col, u_p[3].rgb, ss(clamp(mixer, 0.0, 1.0)));
@@ -278,6 +317,27 @@ void main() {
   gl_FragColor = vec4(col, 1.0);
 }
 """
+
+        /** B 方案第一段：線的相位換成 0.5＋0.5·cos(2π·stripe)（平滑、不會在 0／1 之間跳），大於 0.5 的地方是線。 */
+        const val FIELD = HEAD + ENC + """
+void main() {
+  vec2 uv = (v_uv - u_p[0].yz) * vec2(u_p[0].x, 1.0) * 5.6;
+  float l = max(length(uv), 0.001);
+  float stripe = fract(l + atan(uv.y, uv.x) / 6.2831853 - u_p[1].x);
+  gl_FragColor = enc(0.5 + 0.5 * cos(6.2831853 * stripe));
+}
+"""
+
+        /** B 方案第二段：場大於 0.5 是線，柔邊約 1.5 個像素（fwidth）。 */
+        const val EDGE = EDGE_HEAD + """
+void main() {
+  float v = dec();
+  float fw = max(0.75 * fwidth(v), 0.0005);
+  vec3 col = mix(u_p[2].rgb, u_p[3].rgb, smoothstep(0.5 - fw, 0.5 + fw, v));
+  """ + DITHER + """
+  gl_FragColor = vec4(col, 1.0);
+}
+"""
     }
 
     // ───────────── 柔極光（琉璃自己寫，只參考效果） ─────────────
@@ -444,6 +504,36 @@ void main() {
   float width = u_p[1].y;
   float aa = 7.0 / u_res.y;
   float ribbon = 1.0 - smoothstep(width - aa, width + aa, d);
+  float ridge = 1.0 - smoothstep(width * 0.56, width * 0.75, d);
+  vec3 col = mix(u_p[2].rgb, u_p[3].rgb, ribbon);
+  col = mix(col, u_p[4].rgb, ribbon * (1.0 - ridge) * 0.38);
+  float fw = max(0.012, 1.5 * aa);
+  float fine = 1.0 - smoothstep(fw, fw + aa, abs(d - width * 0.68));
+  col = mix(col, u_p[5].rgb, fine * ribbon * 0.42);
+  """ + DITHER + """
+  gl_FragColor = vec4(col, 1.0);
+}
+"""
+
+        /** B 方案第一段：到最近圓弧的距離（格子單位，÷0.3 存成 0～1；緞帶最寬 0.23，超過 0.3 的都一樣）。 */
+        const val FIELD = HEAD + ENC + """
+void main() {
+  vec2 p = (v_uv - 0.5) * vec2(u_p[0].x, 1.0) * 7.0 + vec2(u_p[15].x, 0.0);
+  vec2 id = mod(floor(p) + vec2(u_p[14].x, 0.0), 64.0);
+  vec2 q = fract(p);
+  if (texture2D(u_noise, (id + 0.5) / 64.0).a > 0.5) q.x = 1.0 - q.x;
+  float d = min(abs(length(q) - 0.5), abs(length(q - 1.0) - 0.5));
+  gl_FragColor = enc(d / 0.3);
+}
+"""
+
+        /** B 方案第二段：由距離畫緞帶、外緣、細線（反鋸齒寬度＝這個解析度的一個像素，fwidth）。 */
+        const val EDGE = EDGE_HEAD + """
+void main() {
+  float d = dec() * 0.3;
+  float aa = max(fwidth(d), 0.0002);
+  float width = u_p[1].y;
+  float ribbon = 1.0 - smoothstep(width - 0.75 * aa, width + 0.75 * aa, d);
   float ridge = 1.0 - smoothstep(width * 0.56, width * 0.75, d);
   vec3 col = mix(u_p[2].rgb, u_p[3].rgb, ribbon);
   col = mix(col, u_p[4].rgb, ribbon * (1.0 - ridge) * 0.38);

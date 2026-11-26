@@ -192,6 +192,8 @@ object GlBackground {
     private var pendLevel = 4
     private var workLevel = 4
     private var pendStable = false
+    private var pendSplit = true
+    private var workSplit = true
     private var workStable = false
     private var lastGlassNs = 0L
 
@@ -280,6 +282,8 @@ object GlBackground {
             style.glParams(st, pend)
             pendLevel = lv
             pendStable = !still && debugLevel < 0 && lv == learned
+            // 操作中、面板開著（降到 ÷3 讓路的時候）只畫一層，GPU 讓給介面；平常才分兩段（見 [SPLIT]）
+            pendSplit = !(busy && !cheap)
             pendStyle = style
             hasPending = true
             if (inFlight) return
@@ -345,6 +349,7 @@ object GlBackground {
             workStyle = pendStyle
             workLevel = pendLevel
             workStable = pendStable
+            workSplit = pendSplit
             hasPending = false
         }
         val style = workStyle
@@ -408,7 +413,8 @@ object GlBackground {
     private var blurProg: Program? = null
     private var blurFailed = false
 
-    private fun passBlurred(prog: Program, w: Int, h: Int) {
+    /** 離屏貼圖（模糊、分兩段共用；兩種樣式不會同時出現）：大小不對就重配。不完整回傳 false。 */
+    private fun offscreen(w: Int, h: Int): Boolean {
         if (blurTex == 0) {
             val ids = IntArray(1)
             GLES20.glGenTextures(1, ids, 0); blurTex = ids[0]
@@ -426,13 +432,16 @@ object GlBackground {
             val st = GLES20.glCheckFramebufferStatus(GLES20.GL_FRAMEBUFFER)
             GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
             if (st != GLES20.GL_FRAMEBUFFER_COMPLETE) {
-                Log.w(TAG, "模糊用的離屏緩衝不完整 0x${Integer.toHexString(st)}，扭曲色帶不模糊")
-                blurFailed = true
-                pass(prog, w, h, flipY = true)
-                return
+                Log.w(TAG, "離屏緩衝不完整 0x${Integer.toHexString(st)}，改回一層直接畫")
+                return false
             }
             blurW = w; blurH = h
         }
+        return true
+    }
+
+    private fun passBlurred(prog: Program, w: Int, h: Int) {
+        if (!offscreen(w, h)) { blurFailed = true; pass(prog, w, h, flipY = true); return }
         GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, blurFbo)
         pass(prog, w, h, flipY = false)
         GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
@@ -443,6 +452,46 @@ object GlBackground {
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, blurTex)
         bp.bind(w, h, work, bp.grid, flipY = true)
         GLES20.glDrawElements(GLES20.GL_TRIANGLES, bp.gridN, GLES20.GL_UNSIGNED_SHORT, bp.gridIdx)
+    }
+
+    // ── B 方案（分兩段）：有明確邊緣的樣式，形狀在低解析度算成一張平滑的「場」（離屏貼圖，16 位元拆兩個通道），
+    // 再用較高的解析度（[edgeLevel]，最高原生）讀這張場、在那個解析度的像素上判斷邊緣與反鋸齒（fwidth）。
+    // 場是平滑的（相位的 cos、到圓弧的距離、雜訊值），雙線性放大不會有鋸齒；最貴的計算還是在低解析度做，
+    // 第二段每個像素只讀一次貼圖、做幾次比較。海信（Mali-470）原生走一遍要 10ms 以上付不起，所以邊緣是形狀的兩倍解析度
+    /** 分兩段畫的樣式（有明確邊緣的；漩渦要重做，之後再加）。 */
+    private val SPLIT = setOf(BgStyle.SPIRAL, BgStyle.TRUCHET, BgStyle.SIMPLEX)
+    private var splitFailed = false
+    private val fieldProgs = HashMap<BgStyle, Program>()
+    private val edgeProgs = HashMap<BgStyle, Program>()
+
+    /** 形狀在 ÷(lv+1) 算時，邊緣在幾檔切：解析度兩倍（÷2→原生、÷3／÷4→÷2、÷5→÷3）。 */
+    private fun edgeLevel(lv: Int) = (lv + 2) / 2 - 1
+
+    /** 分兩段畫到畫面（fw×fh 的場、w×h 的邊緣）。編譯失敗、離屏緩衝不能用就回傳 false（照舊一層畫）。 */
+    private fun passSplit(style: BgStyle, fw: Int, fh: Int, w: Int, h: Int): Boolean {
+        val fp: Program
+        val ep: Program
+        try {
+            fp = fieldProgs.getOrPut(style) { Program(style.glVertex(), style.splitField(), gridSize(style).first, gridSize(style).second) }
+            ep = edgeProgs.getOrPut(style) { Program(VERTEX, style.splitEdge(), 1, 1) }
+        } catch (e: Exception) {
+            Log.w(TAG, "分兩段的著色器不能用，改回一層：${e.message}")
+            splitFailed = true
+            return false
+        }
+        if (!offscreen(fw, fh)) { splitFailed = true; return false }
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, blurFbo)
+        pass(fp, fw, fh, flipY = false)
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
+        GLES20.glViewport(0, 0, w, h)
+        GLES20.glUseProgram(ep.id)
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE4)
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, blurTex)
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, noiseTex)
+        ep.bind(w, h, work, ep.grid, flipY = true)
+        GLES20.glDrawElements(GLES20.GL_TRIANGLES, ep.gridN, GLES20.GL_UNSIGNED_SHORT, ep.gridIdx)
+        return true
     }
 
     /** 3×3 高斯（1-2-1）：四次雙線性取樣，各往對角偏半個像素。u_noise 這裡是要模糊的那張圖（第 0 個貼圖單元）。 */
@@ -509,8 +558,11 @@ void main() {
         if (levels[style.ordinal] < 0) levels[style.ordinal] = startLevel(style)
         val sz = SIZES
         val lv = workLevel.coerceIn(0, sz.size - 1)
-        var w = sz[lv][0]
-        var h = sz[lv][1]
+        // 分兩段（B 方案）：形狀在 lv 算，邊緣在 [edgeLevel] 切；畫面緩衝是切邊緣的大小
+        val split = workSplit && lv > 0 && style in SPLIT && !splitFailed
+        val el = if (split) edgeLevel(lv) else lv
+        var w = sz[el][0]
+        var h = sz[el][1]
         val t = tex
         // 液態以太：流體模擬在這條執行緒推進（不佔主執行緒），算完上傳
         if (style == BgStyle.LIQUID) LiquidEther.simulate()
@@ -539,7 +591,11 @@ void main() {
                 val n = frameNo++
                 val timed = workStable && n % 3 == 0L
                 val t0 = SystemClock.elapsedRealtimeNanos()
-                if (style == BgStyle.WARP && !blurFailed) passBlurred(prog, w, h) else pass(prog, w, h, flipY = true)
+                when {
+                    split && passSplit(style, sz[lv][0], sz[lv][1], w, h) -> {}
+                    style == BgStyle.WARP && !blurFailed -> passBlurred(prog, w, h)
+                    else -> pass(prog, w, h, flipY = true)
+                }
                 if (timed) GLES20.glFinish()
                 val tg = SystemClock.elapsedRealtimeNanos()
                 if (!EGL14.eglSwapBuffers(dpy, win)) {
@@ -557,7 +613,7 @@ void main() {
                     pass(prog, BackgroundEngine.GLASS_W, BackgroundEngine.GLASS_H, flipY = false)
                     bmp = readBack(BackgroundEngine.GLASS_W, BackgroundEngine.GLASS_H)
                 }
-                if (timed) measure(style, lv, w, h, tg - t0, t1 - tg, SystemClock.elapsedRealtimeNanos() - t1, direct = true)
+                if (timed && split == (style in SPLIT && !splitFailed && lv > 0)) measure(style, lv, w, h, tg - t0, t1 - tg, SystemClock.elapsedRealtimeNanos() - t1, direct = true)
                 return bmp
             }
         }
@@ -630,7 +686,7 @@ void main() {
         val slow = g > SLOW_MS
         val verySlow = g > VERY_SLOW_MS
         // 升檔要「推估」付得起：約 30% 是固定成本、70% 跟像素數成正比
-        val canUp = lv > 0 && g * (.3f + .7f * px(sz, lv - 1) / px(sz, lv)) <= UP_MS
+        val canUp = lv > 0 && g * (.3f + .7f * cost(style, sz, lv - 1) / cost(style, sz, lv)) <= UP_MS
         when {
             slow -> {
                 fastWins = 0
@@ -659,6 +715,9 @@ void main() {
 
     private var measuredLevel = -1
     private fun px(sz: Array<IntArray>, lv: Int) = (sz[lv][0] * sz[lv][1]).toFloat()
+    /** 推估成本用的像素數：分兩段的樣式＝場的像素＋切邊緣的像素 ×0.35（第二段每個像素只讀一次貼圖）。 */
+    private fun cost(style: BgStyle, sz: Array<IntArray>, lv: Int) =
+        if (style in SPLIT && !splitFailed && lv > 0) px(sz, lv) + .35f * px(sz, edgeLevel(lv)) else px(sz, lv)
 
     // ───────────── EGL ─────────────
 
@@ -741,7 +800,7 @@ void main() {
         val rg = IntArray(2); val pr = IntArray(1)
         GLES20.glGetShaderPrecisionFormat(GLES20.GL_FRAGMENT_SHADER, GLES20.GL_HIGH_FLOAT, rg, 0, pr, 0)
         val hp = pr[0] >= 20 && !debugNoHighp
-        if (hp != fragHighp) { fragHighp = hp; programs.clear(); dropProg = null }
+        if (hp != fragHighp) { fragHighp = hp; programs.clear(); dropProg = null; fieldProgs.clear(); edgeProgs.clear() }
         Log.i(TAG, "fragment highp precision ${pr[0]} bits → ${if (fragHighp) "扭曲色帶逐像素算" else "扭曲色帶頂點算"}")
         val ext = GLES20.glGetString(GLES20.GL_EXTENSIONS) ?: ""
         Log.i(TAG, "GL ${GLES20.glGetString(GLES20.GL_RENDERER)} / ${GLES20.glGetString(GLES20.GL_VERSION)}, derivatives=${ext.contains("GL_OES_standard_derivatives")}")
@@ -752,6 +811,7 @@ void main() {
         programs.clear()
         dropProg = null
         blurProg = null; blurTex = 0; blurFbo = 0; blurW = 0; blurH = 0
+        fieldProgs.clear(); edgeProgs.clear()
         noiseTex = 0
         noiseTexL = 0
         noiseTexQ = 0
@@ -823,6 +883,7 @@ void main() {
         private val uNoiseQ: Int
         private val uVt: Int
         private val uVf: Int
+        private val uField: Int
 
         init {
             val vs = compile(GLES20.GL_VERTEX_SHADER, vert)
@@ -848,6 +909,7 @@ void main() {
             uNoiseQ = GLES20.glGetUniformLocation(id, "u_noiseQ")
             uVt = GLES20.glGetUniformLocation(id, "u_vt")
             uVf = GLES20.glGetUniformLocation(id, "u_vf")
+            uField = GLES20.glGetUniformLocation(id, "u_field")
         }
 
         fun bind(w: Int, h: Int, p: FloatArray, quad: FloatBuffer, flipY: Boolean) {
@@ -864,6 +926,7 @@ void main() {
             if (uNoiseQ >= 0) GLES20.glUniform1i(uNoiseQ, 3)
             if (uVt >= 0) GLES20.glUniform4fv(uVt, 1, p, 56)
             if (uVf >= 0) GLES20.glUniform4fv(uVf, 1, p, 60)
+            if (uField >= 0) GLES20.glUniform1i(uField, 4)
             GLES20.glEnableVertexAttribArray(aPos)
             GLES20.glVertexAttribPointer(aPos, 2, GLES20.GL_FLOAT, false, 0, quad)
         }
@@ -959,6 +1022,22 @@ internal fun BgStyle.glVertex(): String = when (this) {
     BgStyle.WARP -> if (GlBackground.fragHighp) GlBackground.VERTEX else GlStyles2.Warp.VERTEX
     BgStyle.SOFTAURORA -> GlStyles2.SoftAurora.VERTEX
     else -> GlBackground.VERTEX
+}
+
+/** B 方案第一段：把形狀的「場」編成 16 位元寫進離屏貼圖。 */
+internal fun BgStyle.splitField(): String = when (this) {
+    BgStyle.SPIRAL -> GlStyles2.Spiral.FIELD
+    BgStyle.TRUCHET -> GlStyles2.Truchet.FIELD
+    BgStyle.SIMPLEX -> GlStyles2.Simplex.FIELD
+    else -> throw IllegalArgumentException("$id 不分兩段")
+}
+
+/** B 方案第二段：讀場、在較高解析度切邊緣上色。 */
+internal fun BgStyle.splitEdge(): String = when (this) {
+    BgStyle.SPIRAL -> GlStyles2.Spiral.EDGE
+    BgStyle.TRUCHET -> GlStyles2.Truchet.EDGE
+    BgStyle.SIMPLEX -> GlStyles2.Simplex.EDGE
+    else -> throw IllegalArgumentException("$id 不分兩段")
 }
 
 /** 著色器樣式的片段著色器原始碼。 */
