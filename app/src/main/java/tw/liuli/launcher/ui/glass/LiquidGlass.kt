@@ -413,7 +413,8 @@ private class GlassBake(private val backdrop: GlassBackdrop, private val edge: B
             val cur0 = bitmap
             // 只換色（形狀沒變）而且已經有一張同樣大小的：新的寫進另一張，從目前這張淡化過去。
             // 淡化時間＝這次和上次的間隔（每秒 10 次≈0.1 秒；背景變得慢、隔比較久才烘一張，就淡得慢一點，最多 0.3 秒）
-            val fade = GlassRate.fade && reuse && cur0 != null && cur0.width == bw && cur0.height == bh && gap in 1..2000
+            // 玻璃每秒 15 次以上不淡化：間隔夠短、看不出跳；淡化每格要畫兩層，海信上背景會被擠掉一兩檔解析度
+            val fade = GlassRate.fade && GlassRate.perSec < GlassRate.FADE_BELOW && reuse && cur0 != null && cur0.width == bw && cur0.height == bh && gap in 1..2000
             if (fade) {
                 var pb = prevBitmap
                 if (pb == null || pb.width != bw || pb.height != bh) {
