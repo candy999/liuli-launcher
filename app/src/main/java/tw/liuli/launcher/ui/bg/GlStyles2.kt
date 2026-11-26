@@ -169,9 +169,11 @@ void main() {
             val t = .0625 * (st.at * .5 + 118.0)
             out[4] = wrap(t, 64.0); out[5] = wrap(t, TAU)
             out[6] = .25f + .15f * st.pulse; out[7] = .8f
-            put(out, 8, c(st, 0f, .25f, .07f))
+            // 深色帶有色相（以前是飽和度 .25 的近黑灰，和亮色混出來的過渡是灰濁的，看起來髒）；
+            // 第三段改成較深的同色系（以前又是近黑，畫面上大塊黑斑）
+            put(out, 8, c(st, 0f, .7f, .10f))
             put(out, 12, c(st, 0f, .95f, .70f))
-            put(out, 16, c(st, 0f, .25f, .07f))
+            put(out, 16, c(st, 12f, .85f, .32f))
             put(out, 20, c(st, -10f, 1f, .58f))
         }
 
@@ -246,10 +248,11 @@ void main() {
 #else
   float sw2 = 1.0;
 #endif
+  // 過渡用 smoothstep（以前線性：每段交界的斜率突然改變，看得到一條條折痕）
   vec3 col = u_p[2].rgb;
-  col = mix(col, u_p[3].rgb, clamp((mixer - 0.5) / sw2 + 0.5, 0.0, 1.0));
-  col = mix(col, u_p[4].rgb, clamp((mixer - 1.5) / sw2 + 0.5, 0.0, 1.0));
-  col = mix(col, u_p[5].rgb, clamp((mixer - 2.5) / sw2 + 0.5, 0.0, 1.0));
+  col = mix(col, u_p[3].rgb, smoothstep(0.0, 1.0, (mixer - 0.5) / sw2 + 0.5));
+  col = mix(col, u_p[4].rgb, smoothstep(0.0, 1.0, (mixer - 1.5) / sw2 + 0.5));
+  col = mix(col, u_p[5].rgb, smoothstep(0.0, 1.0, (mixer - 2.5) / sw2 + 0.5));
   """ + DITHER + """
   gl_FragColor = vec4(col, 1.0);
 }
@@ -273,10 +276,11 @@ void main() {
 #else
   float sw2 = 1.0;
 #endif
+  // 過渡用 smoothstep（以前線性：每段交界的斜率突然改變，看得到一條條折痕）
   vec3 col = u_p[2].rgb;
-  col = mix(col, u_p[3].rgb, clamp((mixer - 0.5) / sw2 + 0.5, 0.0, 1.0));
-  col = mix(col, u_p[4].rgb, clamp((mixer - 1.5) / sw2 + 0.5, 0.0, 1.0));
-  col = mix(col, u_p[5].rgb, clamp((mixer - 2.5) / sw2 + 0.5, 0.0, 1.0));
+  col = mix(col, u_p[3].rgb, smoothstep(0.0, 1.0, (mixer - 0.5) / sw2 + 0.5));
+  col = mix(col, u_p[4].rgb, smoothstep(0.0, 1.0, (mixer - 1.5) / sw2 + 0.5));
+  col = mix(col, u_p[5].rgb, smoothstep(0.0, 1.0, (mixer - 2.5) / sw2 + 0.5));
   """ + DITHER + """
   gl_FragColor = vec4(col, 1.0);
 }
