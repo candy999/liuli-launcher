@@ -477,9 +477,10 @@ object GlBackground {
                 }
                 val t1 = SystemClock.elapsedRealtimeNanos()
                 var bmp: Bitmap? = null
-                // 玻璃小圖每秒 10 張（照時間，不照張數：操作中、每秒畫幾張都一樣），引擎每收到一張就更新玻璃（玻璃在兩張之間交叉淡化）
+                // 玻璃小圖照 GlassRate 的間隔（依負載每秒 8～30 張；照時間，不照張數：操作中、每秒畫幾張都一樣；容許早 8ms），
+                // 引擎每收到一張就更新玻璃（玻璃在兩張之間交叉淡化）
                 val now = SystemClock.elapsedRealtimeNanos()
-                if (now - lastGlassNs >= 96_000_000L || current == null) {
+                if (now - lastGlassNs >= ((tw.liuli.launcher.ui.glass.GlassRate.intervalMs - 8f) * 1e6f).toLong() || current == null) {
                     lastGlassNs = now
                     if (!EGL14.eglMakeCurrent(dpy, surf, surf, ctx)) throw IllegalStateException("eglMakeCurrent(pbuffer)")
                     pass(prog, BackgroundEngine.GLASS_W, BackgroundEngine.GLASS_H, flipY = false)

@@ -399,9 +399,11 @@ private class GlassBake(private val backdrop: GlassBackdrop, private val edge: B
             BakeStats.note(if (reuse) 1 else 2, bw * bh, if (reuse) null else whyNew(r))
             withContext(Dispatchers.Default) {
                 val t0 = android.os.SystemClock.currentThreadTimeMillis()
+                val n0 = android.os.Debug.threadCpuTimeNanos()
                 val g = if (reuse) g0!! else Geo(bw * bh).also { buildGeo(it, bw, bh, nq, r, sx, sy, sw, sh, edge) }
                 shade(out, g, bw, bh)
                 BakeStats.ns += (android.os.SystemClock.currentThreadTimeMillis() - t0) * 1_000_000L
+                GlassRate.addCpu(android.os.Debug.threadCpuTimeNanos() - n0)
                 if (!reuse) { geo = g; geoFor = r; geoQ = nq; geoSw = sw; geoSh = sh }
             }
             rememberBackdrop()
@@ -450,11 +452,11 @@ private class GlassBake(private val backdrop: GlassBackdrop, private val edge: B
             // 背景在動時每秒最多烘十幾次：玻璃後面是模糊的背景，慢一兩格看不出來
             // 面板上的光正在移動：馬上接著烘下一張（不然光是一段一段跳過去的）
             val lightMoving = wanted?.let { it.lx != r.lx } == true
-            // 下一張只是背景換了顏色（形狀沒變）：跟著背景小圖每秒 10 張（取色是整數運算、幾何有快取，抽屜一張約幾毫秒），中間交叉淡化。
+            // 下一張只是背景換了顏色（形狀沒變）：跟著背景小圖（每秒幾張見 GlassRate；取色是整數運算、幾何有快取，抽屜一張約幾毫秒），中間交叉淡化。
             // （以前限制每秒 5 張、大片 3 張、直接換，抽屜的玻璃看起來一頓一頓）
             // 海信實測：主畫面十幾片玻璃，每秒各取色 10 次要 0.4 個 CPU 核心
             val onlyColor = wanted?.sameGeo(r) == true
-            delay(if (lightMoving) 1 else if (nq >= 3 && !onlyColor) 120 else 60)
+            delay(if (lightMoving) 1L else if (nq >= 3 && !onlyColor) 120L else (GlassRate.intervalMs * .5f).toLong().coerceIn(15L, 60L))
         }
     }
 

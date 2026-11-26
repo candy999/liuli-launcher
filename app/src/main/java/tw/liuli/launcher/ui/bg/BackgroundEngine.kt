@@ -589,6 +589,7 @@ class BackgroundEngine {
             var nextRestoreT = 0L
             var bgTicks = 0
             var lastGlassGl = -1L
+            var lastGlassMs = 0L
             var skipMeasure = 2
             var winSum = 0f
             var winN = 0
@@ -692,16 +693,22 @@ class BackgroundEngine {
                     // 操作中（按鍵後一小段時間、面板開著）讓路：每兩格才畫一張，GPU 留給焦點動畫與捲動
                     // 讓路的方式和 CPU 樣式一樣：重的樣式降一檔解析度，每秒 30 格不變（以前是每兩格才畫一張，抽屜打開時背景只剩每秒 15 格）
                     if (style.gl) GlBackground.request(style, st, busy)
-                    // 玻璃每秒更新 10 次（每秒 60 格的樣式每 6 格、其他每 3 格）。每更新一次，畫面上每一片液態玻璃都要重新取色，
-                    // 玻璃在兩次之間交叉淡化（見 LiquidGlass 的 GlassBake），看起來是連續的（以前每秒 15 次、直接換，主畫面烘玻璃要 0.6 個核心）。
-                    // 著色器樣式：GL 那邊每畫好一張玻璃小圖（每秒 10 張）就更新一次——以前照引擎的格數另外抽，
+                    // 玻璃每秒更新幾次由 GlassRate 依負載決定（玻璃總共最多用掉一個核心的 80%，每秒 8～30 次）。
+                    // 每更新一次，畫面上每一片液態玻璃都要重新取色；玻璃在兩次之間交叉淡化（見 LiquidGlass 的 GlassBake），任何頻率看起來都連續。
+                    // 照時間抽（不照格數）；容許早 8ms，不然每秒 30 格時 66.7ms 的間隔常常要等到第三格
+                    // 著色器樣式：GL 那邊照同一個間隔畫玻璃小圖，每畫好一張就更新一次——以前照引擎的格數另外抽，
                     // 和 GL 的節奏對不上，有時拿到同一張、有時跳過，實際只剩每秒 3～5 次
-                    val glassEvery = if (fast) 6 else 3
+                    tw.liuli.launcher.ui.glass.GlassRate.busy = busy
+                    val glassNow = android.os.SystemClock.uptimeMillis()
+                    val glassDue = glassNow - lastGlassMs >= tw.liuli.launcher.ui.glass.GlassRate.intervalMs - 8f
                     if (style.gl) {
                         val gv = GlBackground.version
                         if (done || gv != lastGlassGl) { lastGlassGl = gv; requestGlass() }
                         bgTicks++
-                    } else if (done || bgTicks++ % glassEvery == 0) requestGlass()
+                    } else {
+                        bgTicks++
+                        if (done || glassDue) { lastGlassMs = glassNow; requestGlass() }
+                    }
                     if (blur) blurReq.trySend(Unit)
                     if (glassDirty) { glassDirty = false; glassVersion++ }
                     // 這一格的實際耗時稍後由 FrameMetrics 送回；只採計「穩定在同一檔、不在操作中」的格
@@ -962,6 +969,7 @@ class BackgroundEngine {
             val revealed = started.isCompleted
             withContext(Dispatchers.Default) {
                 val c0 = android.os.SystemClock.currentThreadTimeMillis()
+                val n0 = android.os.Debug.threadCpuTimeNanos()
                 try {
                 if (!revealed) {
                     // 冷啟動、背景還是黑的：玻璃也只透出黑色（不然時鐘的焦點玻璃會先露出彩色背景）
@@ -980,7 +988,10 @@ class BackgroundEngine {
                     }
                 }
                 expose(px)
-                } finally { gCpu += android.os.SystemClock.currentThreadTimeMillis() - c0 }
+                } finally {
+                    gCpu += android.os.SystemClock.currentThreadTimeMillis() - c0
+                    tw.liuli.launcher.ui.glass.GlassRate.addCpu(android.os.Debug.threadCpuTimeNanos() - n0)
+                }
             }
             // 量測：玻璃小圖每張的 CPU 成本（畫樣式／模糊＋過曝）與每秒張數，每 60 張印一次
             val g2 = System.nanoTime()
@@ -994,6 +1005,7 @@ class BackgroundEngine {
             // 轉場中：等下一格背景一起重畫（省一次整個畫面的重繪）；靜止時立刻更新
             tw.liuli.launcher.ui.bg.UiTrace.hit("glassImg")
             if (moving) glassDirty = true else glassVersion++
+            tw.liuli.launcher.ui.glass.GlassRate.updated()
         }
     }
 
