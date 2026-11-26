@@ -76,6 +76,7 @@ uniform vec4 u_v1;
 varying vec2 v_uv;
 varying float v_n;
 vec2 hg(vec2 i) {
+  i = mod(i, 64.0);   // 時間相位取模 64，雜訊也要每 64 格重複，歸零時才不會整片跳
   float a = fract(sin(dot(i, vec2(127.1, 311.7))) * 43758.5453) * 6.2831853;
   return vec2(cos(a), sin(a));
 }

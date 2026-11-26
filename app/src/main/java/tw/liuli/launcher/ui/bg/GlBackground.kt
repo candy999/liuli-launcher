@@ -602,16 +602,21 @@ void main() {
             if (win != EGL14.EGL_NO_SURFACE) {
                 if (winLevel != w * 10000 + h) { t.setDefaultBufferSize(w, h); winLevel = w * 10000 + h; sizedAt = frameNo }
                 if (!EGL14.eglMakeCurrent(dpy, win, win, ctx)) throw IllegalStateException("eglMakeCurrent(window)")
-                // 保險：實際的緩衝大小和這張要畫的不同（被別人改掉了）就再設一次。剛設過的幾張還是舊大小（緩衝早一張就拿好了），不算
-                if (frameNo - sizedAt > 3 && EGL14.eglQuerySurface(dpy, win, EGL14.EGL_WIDTH, qs, 0) &&
-                    EGL14.eglQuerySurface(dpy, win, EGL14.EGL_HEIGHT, qs, 1) && (qs[0] != w || qs[1] != h)) {
-                    Log.i(TAG, "畫面緩衝被改成 ${qs[0]}x${qs[1]}，改回 ${w}x$h")
-                    t.setDefaultBufferSize(w, h); sizedAt = frameNo
+                // 這一張實際的緩衝大小和要畫的不同：剛換檔（緩衝早一張就拿好了，還是舊大小），或被別人改掉（TextureView 重建圖層時
+                // 會改回 View 的大小，不會通知）。這張照實際大小畫（不然只畫到左下角、閃一下）；不是剛換檔的就再設一次大小
+                var odd = false
+                if (EGL14.eglQuerySurface(dpy, win, EGL14.EGL_WIDTH, qs, 0) && EGL14.eglQuerySurface(dpy, win, EGL14.EGL_HEIGHT, qs, 1) &&
+                    qs[0] > 0 && qs[1] > 0 && (qs[0] != w || qs[1] != h)) {
+                    if (frameNo - sizedAt > 3) {
+                        Log.i(TAG, "畫面緩衝被改成 ${qs[0]}x${qs[1]}，改回 ${w}x$h")
+                        t.setDefaultBufferSize(w, h); sizedAt = frameNo
+                    }
+                    w = qs[0]; h = qs[1]; odd = true
                 }
                 val prog = programs.getOrPut(style) { Program(style) }
                 // 每 3 張量一次 GPU 耗時（glFinish 會讓這條執行緒等 GPU，平常不用）；只量「穩定在學到的檔位」的張
                 val n = frameNo++
-                val timed = workStable && n % 3 == 0L
+                val timed = workStable && n % 3 == 0L && !odd
                 val t0 = SystemClock.elapsedRealtimeNanos()
                 when {
                     split && passSplit(style, sz[lv][0], sz[lv][1], w, h) -> {}
@@ -1014,10 +1019,14 @@ float gnt(vec2 p, vec2 ti) {
      * 低頻、平滑的量（位移場、扭曲座標）放在頂點算再內插：片段著色器是半精度，這些量算到後面誤差會被放大成鋸齒。
      * u_vt／u_vf＝u_p[14]／u_p[15]（[putTimes] 的時間整數／小數，頂點這邊加起來就是全精度的時間）。
      */
+    /**
+     * 頂點用的數值雜訊。格點先取模 64：時間相位都是取模 64 傳進來的（大約二十到三十多分鐘歸零一次），
+     * 雜訊本身要每 64 格重複，歸零那一下才接得上——以前沒取模，扭曲色帶、柔極光、水彩暈染每隔一段時間整片突然跳一下。
+     */
     const val VNOISE = """
 uniform vec4 u_vt;
 uniform vec4 u_vf;
-float hv(vec2 i) { return fract(sin(dot(i, vec2(127.1, 311.7))) * 43758.5453); }
+float hv(vec2 i) { i = mod(i, 64.0); return fract(sin(dot(i, vec2(127.1, 311.7))) * 43758.5453); }
 float gv(vec2 p) {
   vec2 i = floor(p);
   vec2 f = p - i;
