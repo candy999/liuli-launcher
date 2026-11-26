@@ -98,8 +98,11 @@ object GlBackground {
     /** 操作中、面板／抽屜開著降到的檔位：原生 ÷3（和 CPU 樣式的 BackgroundEngine.BUSY_DIV 一樣；1080p＝640×360） */
     private const val BUSY_LEVEL = 2
     private const val CHEAP_MS = 12f
-    private const val UP_MS = 16f
-    private const val VERY_SLOW_MS = 36f
+    // 閒置（沒在操作）時盡量升到最高畫質：每秒 20 格以上就可以（跟不上 30 格的部分，引擎把動畫等比放慢，看起來不卡）。
+    // 學到的檔位只在閒置時量；操作中、面板開著另外降到 ÷3、每秒 30 格（[BUSY_LEVEL]），所以這裡的預算是閒置的預算。
+    // 以前照每秒 30 格的預算（降 24ms、升 16ms），150 這種 GPU 也停在 960，閒置時白白浪費畫質
+    private const val UP_MS = 36f
+    private const val VERY_SLOW_MS = 66f
     private const val RAMP_STEP_MS = 200L
     // 主執行緒：目前顯示的檔位（操作中降下去、結束後逐檔拉回）
     private var shownLevel = -1
@@ -155,7 +158,7 @@ object GlBackground {
         levels.fill(-1); lastCost.fill(-1f); shownLevel = -1
         Log.i(TAG, "原生 ${w}x$h，檔位 ÷1～÷$MAX_DIV")
     }
-    private const val SLOW_MS = 24f
+    private const val SLOW_MS = 46f
 
     private val main = Handler(Looper.getMainLooper())
     private var handler: Handler? = null
