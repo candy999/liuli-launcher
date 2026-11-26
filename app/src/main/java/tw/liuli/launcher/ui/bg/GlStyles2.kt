@@ -303,28 +303,46 @@ void main() {
             put(out, 12, c(st, 15f, .75f, .50f))
         }
 
-        const val SHADER = HEAD + """
+        /**
+         * 半精度的對策：條紋的相位 s＝半徑＋角度／2π−轉動（外圈的半徑到 11 左右，半精度只準到 1／128，邊緣抖一兩個像素）
+         * 在頂點著色器用全精度算好，換成單位向量 (cos 2πs, sin 2πs) 交給 GPU 內插——向量的分量永遠在 ±1 之間，半精度不失準；
+         * 網格 64×36，每格相位轉不到 0.7 弧度，內插後的角度誤差不到 0.2 個像素（只有中心一兩格附近不準）。
+         * 線＝cos 2πs 大於 0 的地方（等於原本 stripe 靠近 0／1 的那一半）。
+         */
+        const val VERTEX = """
+attribute vec2 a_pos;
+uniform float u_fy;
+uniform vec4 u_w;
+uniform vec4 u_v1;
+varying vec2 v_uv;
+varying vec2 v_ph;
 void main() {
-  vec2 uv = (v_uv - u_p[0].yz) * vec2(u_p[0].x, 1.0) * 5.6;
+  v_uv = a_pos * 0.5 + 0.5;
+  vec2 uv = (v_uv - u_w.yz) * vec2(u_w.x, 1.0) * 5.6;
   float l = max(length(uv), 0.001);
-  float stripe = fract(l + atan(uv.y, uv.x) / 6.2831853 - u_p[1].x);
-  float shape = 2.0 * abs(stripe - 0.5);
-  // 柔邊約 2.2 個像素：半徑 ×5.6 之後在半精度下只準到約 0.004，柔邊太窄邊緣會起毛
-  float px = 2.2 * (5.6 * u_p[0].x / u_res.x) * (1.0 + 0.16 / l);
-  float res = smoothstep(0.5 - px, 0.5 + px, shape);
-  vec3 col = mix(u_p[2].rgb, u_p[3].rgb, res);
+  float s = 6.2831853 * (l - u_v1.x) + atan(uv.y, uv.x);
+  v_ph = vec2(cos(s), sin(s));
+  gl_Position = vec4(a_pos.x, a_pos.y * u_fy, 0.0, 1.0);
+}
+"""
+
+        const val SHADER = "#extension GL_OES_standard_derivatives : enable\n" + HEAD + """
+varying vec2 v_ph;
+void main() {
+  // 內插後的向量長度略小於 1，除掉再用；柔邊約 1.5 個像素（fwidth）
+  float c = v_ph.x / max(length(v_ph), 0.2);
+  float fw = 0.75 * fwidth(c) + 0.0005;
+  vec3 col = mix(u_p[2].rgb, u_p[3].rgb, smoothstep(-fw, fw, c));
   """ + DITHER + """
   gl_FragColor = vec4(col, 1.0);
 }
 """
 
-        /** B 方案第一段：線的相位換成 0.5＋0.5·cos(2π·stripe)（平滑、不會在 0／1 之間跳），大於 0.5 的地方是線。 */
+        /** B 方案第一段：線的相位（頂點算好的 cos 2πs）存成 0.5＋0.5·cos，大於 0.5 的地方是線。 */
         const val FIELD = HEAD + ENC + """
+varying vec2 v_ph;
 void main() {
-  vec2 uv = (v_uv - u_p[0].yz) * vec2(u_p[0].x, 1.0) * 5.6;
-  float l = max(length(uv), 0.001);
-  float stripe = fract(l + atan(uv.y, uv.x) / 6.2831853 - u_p[1].x);
-  gl_FragColor = enc(0.5 + 0.5 * cos(6.2831853 * stripe));
+  gl_FragColor = enc(0.5 + 0.5 * v_ph.x / max(length(v_ph), 0.2));
 }
 """
 

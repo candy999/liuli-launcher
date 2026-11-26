@@ -180,7 +180,7 @@ internal object CpuLines {
         GlStyles.Sauce.params(st, tmp)
         val unit = h / .8f                                   // GPU 版 v_q 的 1 單位＝畫面高度 ÷ 0.8
         val cix = tmp[4]; val ciy = tmp[5]; val cox = tmp[6]; val coy = tmp[7]
-        val amp = tmp[24].toDouble(); val s2 = tmp[25].toDouble()
+        val amp = tmp[0].toDouble(); val s2 = tmp[1].toDouble()
         val sig = sqrt(s2)
         val rMax = 3.0                                       // 畫面對角線約 1.63，取 3 確保瓣的外緣在畫面外
         // 每條交界線的點：r 從 0 到 3σ 密（a(r) 在這裡變化），3σ 到 rMax 疏

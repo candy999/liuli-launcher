@@ -89,88 +89,93 @@ internal object GlStyles {
             put(out, 12, st.col(-10f, .75f, .16f))  // 深（巧克力）
             put(out, 16, st.col(8f, .7f, .66f))     // 淺（奶油）
             put(out, 20, st.col(30f, .8f, .40f))    // 中（焦糖：色相往暖偏一點）
-            out[24] = a; out[25] = SIGMA2; out[26] = PULL * wind; out[27] = 0f
+            // 頂點著色器只讀得到 u_w（out[0..3]）、u_v1（out[4..7]）、u_vt（out[56..59]）：流場的參數都放在這幾格
+            out[0] = a; out[1] = SIGMA2; out[2] = PULL * wind; out[3] = 0f
             // 尾巴：攪拌中心附近沿移動方向往回取樣（後方的流體被拖長），最多 0.2
             val sp = kotlin.math.hypot(vx, vy)
             val s = if (sp > 1e-4f) kotlin.math.min(.2f, sp * .15f) / sp else 0f
-            out[28] = vx * s; out[29] = vy * s; out[30] = 0f; out[31] = 0f
+            out[56] = vx * s; out[57] = vy * s; out[58] = 0f; out[59] = 0f
             settling = kotlin.math.abs(wT - wind) > .01f || sp > .002f || kotlin.math.hypot(tx - cx, ty - cy) > .002f || lag > .02f
         }
 
-        // v_q：畫面座標（寬高比校正、×0.8：畫面高度＝0.8 單位）
+        /**
+         * 半精度的對策：整個流場（中心內插、倒轉、往中心吸、尾巴、atan、瓣的相位）都在頂點著色器用全精度算，
+         * 瓣的相位 ψ＝2π·t／3（三色一循環）換成單位向量 (cos ψ, sin ψ) 交給 GPU 內插——分量永遠在 ±1 之間，半精度不失準。
+         * 網格 96×54：捲得最快的地方每格相位也只轉約 0.35 弧度，內插後的角度誤差可以忽略（只有攪拌中心一兩格附近不準）。
+         * 片段著色器只判斷向量落在哪個扇區、切交界（見 [PICK]）。
+         */
         const val VERTEX = """
 attribute vec2 a_pos;
 uniform float u_fy;
-varying vec2 v_q;
+uniform vec4 u_w;
+uniform vec4 u_v1;
+uniform vec4 u_vt;
+varying vec2 v_ph;
 void main() {
   vec2 uv = a_pos * 0.5 + 0.5;
-  v_q = uv * vec2(1.7777778, 1.0) * 0.8;
+  vec2 q = uv * vec2(1.7777778, 1.0) * 0.8;
+  vec2 ci = u_v1.xy;
+  // 中心依距離在攪拌中心（快）與外圈的中心（慢）之間內插：移動時外圈落後，中間被拉長
+  float wg = smoothstep(0.05, 0.9, length(q - ci));
+  vec2 c = mix(ci, u_v1.zw, wg);
+  vec2 d = q - c;
+  float f = exp(-dot(d, d) / u_w.y);
+  // 回推這裡的流體原本在哪（相對攪拌中心）：倒轉 a(r)、往外放大（往中心吸），再加上移動時的尾巴
+  float a = u_w.x * f;
+  vec2 e = vec2(cos(a) * d.x - sin(a) * d.y, sin(a) * d.x + cos(a) * d.y) * (1.0 + u_w.z * f) + u_vt.xy * f;
+  float th = atan(e.y, e.x);
+  // 九瓣（三色各三瓣，瓣寬帶一點變化）：t＝(9θ＋1.5·sin(2θ＋0.7))／2π，ψ＝2π·t／3
+  float ps = 3.0 * th + 0.5 * sin(2.0 * th + 0.7);
+  v_ph = vec2(cos(ps), sin(ps));
   gl_Position = vec4(a_pos.x, a_pos.y * u_fy, 0.0, 1.0);
+}
+"""
+
+        /**
+         * 由瓣的相位向量決定顏色（片段著色器共用）：三色各佔 120°，扇區中心在 60°、180°、300°。
+         * 向量最接近哪個中心就是哪一瓣；再轉到那個中心算角度（一定在 ±60° 以內，碰不到 atan 的 ±π 接縫——
+         * Mali 半精度在接縫偶爾算錯，接縫在瓣中間會冒虛線點、在交界上會變成階梯），兩側交界各和前、後一色混合，交界上剛好各半。
+         * 柔邊（弧度）用向量分量的變化量算（處處連續），再加一點點固定的柔和。
+         */
+        private const val PICK = """
+vec3 pick(vec2 v) {
+  vec2 u0 = vec2(0.5, 0.8660254);
+  vec2 u1 = vec2(-1.0, 0.0);
+  vec2 u2 = vec2(0.5, -0.8660254);
+  float d0 = dot(v, u0);
+  float d1 = dot(v, u1);
+  float d2 = dot(v, u2);
+  vec2 u = u2;
+  vec3 cp = u_p[5].rgb; vec3 ca = u_p[4].rgb; vec3 cn = u_p[3].rgb;
+  if (d0 >= d1 && d0 >= d2) { u = u0; cp = u_p[4].rgb; ca = u_p[3].rgb; cn = u_p[5].rgb; }
+  else if (d1 >= d2) { u = u1; cp = u_p[3].rgb; ca = u_p[5].rgb; cn = u_p[4].rgb; }
+  float phi = atan(u.x * v.y - u.y * v.x, dot(u, v));
+  float w = 0.85 * (fwidth(v.x) + fwidth(v.y)) / max(length(v), 0.2) + 0.063;
+  vec3 col = mix(ca, cn, smoothstep(-w, w, phi - 1.0471976));
+  return mix(cp, col, smoothstep(-w, w, phi + 1.0471976));
 }
 """
 
         const val SHADER = """#extension GL_OES_standard_derivatives : enable
 precision mediump float;
 uniform sampler2D u_noise;
-uniform vec2 u_res;
 uniform vec4 u_p[16];
-varying vec2 v_q;
+varying vec2 v_ph;
+""" + PICK + """
 void main() {
-  vec2 ci = u_p[1].xy;
-  // 中心依距離在攪拌中心（快）與外圈的中心（慢）之間內插：移動時外圈落後，中間被拉長
-  float wg = smoothstep(0.05, 0.9, length(v_q - ci));
-  vec2 c = mix(ci, u_p[1].zw, wg);
-  vec2 d = v_q - c;
-  float f = exp(-dot(d, d) / u_p[6].y);
-  // 回推這裡的流體原本在哪：倒轉 a(r)、往外放大（往中心吸），再加上移動時的尾巴；離中心遠的地方 f≈0，原樣不動
-  float a = u_p[6].x * f;
-  float cs = cos(a);
-  float sn = sin(a);
-  vec2 s = c + vec2(cs * d.x - sn * d.y, sn * d.x + cs * d.y) * (1.0 + u_p[6].z * f) + u_p[7].xy * f;
-  // 以攪拌中心的角度分成九瓣：深、中、淺三色依序交錯，每色三瓣（外緣是直的扇形，往中心被捲進去）；瓣寬帶一點變化
-  vec2 e = s - c;
-  float th = atan(e.y, e.x);
-  // t：一圈 9 瓣的座標（整數＝瓣的交界）。atan 在 ±π 跳一圈時 t 跳 9（3 的倍數），顏色順序接得起來
-  float t = (9.0 * th + 1.5 * sin(2.0 * th + 0.7)) * 0.15915494;
-  // 交界的寬度：t 本身在 ±π 那條線上會跳、fract 在半格的地方會跳，兩個取小的就不會誤判
-  float w = min(fwidth(t), fwidth(fract(t + 0.5))) * 1.2 + 0.03;
-  float fr = fract(t);
-  float k = mod(floor(t), 3.0);
-  vec3 ca = k < 0.5 ? u_p[3].rgb : (k < 1.5 ? u_p[5].rgb : u_p[4].rgb);
-  vec3 cb = k < 0.5 ? u_p[5].rgb : (k < 1.5 ? u_p[4].rgb : u_p[3].rgb);
-  vec3 col = mix(ca, cb, smoothstep(1.0 - w, 1.0, fr));
+  vec3 col = pick(v_ph);
   """ + DITHER + """
   gl_FragColor = vec4(col, 1.0);
 }
 """
 
-        /**
-         * B 方案第一段（分兩段，見 GlBackground.SPLIT）：瓣的相位 ψ＝2π·t／3（三色一循環）存成 cos、sin 各 16 位元
-         * （R、G＝cos 的高低位，B、A＝sin 的高低位）——cos、sin 在任何地方都平滑，雙線性放大不會在交界或 atan 的接縫處出錯。
-         */
+        /** B 方案第一段（分兩段，見 GlBackground.SPLIT）：頂點算好的相位向量（除成單位長）存成 cos、sin 各 16 位元。 */
         const val FIELD = """precision mediump float;
-uniform vec4 u_p[16];
-varying vec2 v_q;
+varying vec2 v_ph;
 vec2 enc(float v) { v = clamp(v * 0.5 + 0.5, 0.0, 0.999); return vec2(floor(v * 255.0) / 255.0, fract(v * 255.0)); }
 void main() {
-  vec2 ci = u_p[1].xy;
-  // 中心依距離在攪拌中心（快）與外圈的中心（慢）之間內插：移動時外圈落後，中間被拉長
-  float wg = smoothstep(0.05, 0.9, length(v_q - ci));
-  vec2 c = mix(ci, u_p[1].zw, wg);
-  vec2 d = v_q - c;
-  float f = exp(-dot(d, d) / u_p[6].y);
-  // 回推這裡的流體原本在哪：倒轉 a(r)、往外放大（往中心吸），再加上移動時的尾巴；離中心遠的地方 f≈0，原樣不動
-  float a = u_p[6].x * f;
-  float cs = cos(a);
-  float sn = sin(a);
-  vec2 s = c + vec2(cs * d.x - sn * d.y, sn * d.x + cs * d.y) * (1.0 + u_p[6].z * f) + u_p[7].xy * f;
-  // 以攪拌中心的角度分成九瓣：深、中、淺三色依序交錯，每色三瓣（外緣是直的扇形，往中心被捲進去）；瓣寬帶一點變化
-  vec2 e = s - c;
-  float th = atan(e.y, e.x);
-  // t：一圈 9 瓣的座標（整數＝瓣的交界）。atan 在 ±π 跳一圈時 t 跳 9（3 的倍數），顏色順序接得起來
-  float t = (9.0 * th + 1.5 * sin(2.0 * th + 0.7)) * 0.15915494;
-  float ps = t * 2.0943951;
-  gl_FragColor = vec4(enc(cos(ps)), enc(sin(ps)));
+  vec2 v = v_ph / max(length(v_ph), 0.2);
+  gl_FragColor = vec4(enc(v.x), enc(v.y));
 }
 """
 
@@ -181,29 +186,10 @@ uniform sampler2D u_noise;
 uniform sampler2D u_field;
 uniform vec4 u_p[16];
 varying vec2 v_uv;
+""" + PICK + """
 void main() {
   vec4 q = texture2D(u_field, v_uv);
-  float c = (q.r + q.g / 255.0) * 2.0 - 1.0;
-  float sn = (q.b + q.a / 255.0) * 2.0 - 1.0;
-  // 不用 atan 判斷是哪一瓣（Mali 半精度在 atan 的 ±π 接縫偶爾算錯：接縫在瓣中間會冒虛線點、在交界上會變成階梯）：
-  // 三色各佔 120°，扇區中心在 60°、180°、300°。相位向量最接近哪個中心就是哪一瓣；再轉到那個中心算角度（一定在 ±60° 以內，
-  // 離接縫很遠），兩側交界各用柔邊和前、後一色混合——交界上剛好各半，兩邊算出來一樣
-  vec2 v = vec2(c, sn);
-  vec2 u0 = vec2(0.5, 0.8660254);
-  vec2 u1 = vec2(-1.0, 0.0);
-  vec2 u2 = vec2(0.5, -0.8660254);
-  float d0 = dot(v, u0);
-  float d1 = dot(v, u1);
-  float d2 = dot(v, u2);
-  vec2 u = u2;
-  vec3 cp = u_p[5].rgb; vec3 ca = u_p[4].rgb; vec3 cn = u_p[3].rgb;           // 淺（前：中、後：深）
-  if (d0 >= d1 && d0 >= d2) { u = u0; cp = u_p[4].rgb; ca = u_p[3].rgb; cn = u_p[5].rgb; }   // 深
-  else if (d1 >= d2) { u = u1; cp = u_p[3].rgb; ca = u_p[5].rgb; cn = u_p[4].rgb; }          // 中
-  float phi = atan(u.x * v.y - u.y * v.x, dot(u, v));
-  // 柔邊（弧度）：cos、sin 本身處處連續，用它們的變化量算每個像素轉了多少角度，再加一點點固定的柔和
-  float w = 0.85 * (fwidth(c) + fwidth(sn)) / max(length(v), 0.2) + 0.063;
-  vec3 col = mix(ca, cn, smoothstep(-w, w, phi - 1.0471976));
-  col = mix(cp, col, smoothstep(-w, w, phi + 1.0471976));
+  vec3 col = pick(vec2((q.r + q.g / 255.0) * 2.0 - 1.0, (q.b + q.a / 255.0) * 2.0 - 1.0));
   """ + DITHER + """
   gl_FragColor = vec4(col, 1.0);
 }
