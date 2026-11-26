@@ -103,8 +103,9 @@ internal object CpuLines {
 
     /**
      * 螺旋條紋的實際形狀：中心線 r＝u·s／2π（角度 −s），條紋是中心線內外各 ¼ 圈（u／4）圍成的帶——
-     * 外緣 r＝u(s／2π＋¼)、內緣 r＝u(s／2π−¼)（s＜π／2 時內緣在中心）。和 GPU 版的條紋（stripe 的一半）一模一樣，
-     * 中心那一段也是正確的尖端。以前用粗線沿中心線描：中心那圈的半徑比線寬小，線自己疊在一起，形狀亂掉。
+     * 外緣 r＝u(s／2π＋¼)（從 s＝−π／2 的中心開始）、內緣 r＝u(s／2π−¼)（到 s＝π／2 回到中心）：兩條邊在中心接成一條平滑的 S 形，
+     * 和 GPU 版的條紋（stripe 的一半）一模一樣。以前外緣從 s＝0（離中心 ¼ 圈）開始、用直線連回中心，精簡模式看得到那條直線；
+     * 更早用粗線沿中心線描，中心那圈的半徑比線寬小，線自己疊在一起。
      * 每段弧長最多 [seg] 個邏輯單位、角度一步最多 0.04 弧度（中心轉得急，靠角度限制取樣夠密）。
      */
     private fun spiralBand(u: Float, rMax: Float, seg: Double): android.graphics.Path {
@@ -112,7 +113,7 @@ internal object CpuLines {
         val sEnd = 2 * PI * (rMax / u + .25)
         val q = u / (2 * PI)
         p.moveTo(0f, 0f)
-        var t = 0.0
+        var t = -PI / 2
         while (true) {
             val r = u * .25 + q * t
             p.lineTo((r * cos(-t)).toFloat(), (r * sin(-t)).toFloat())
