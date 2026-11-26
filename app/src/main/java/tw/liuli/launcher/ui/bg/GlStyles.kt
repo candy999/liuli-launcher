@@ -3,7 +3,7 @@ package tw.liuli.launcher.ui.bg
 import androidx.compose.ui.graphics.Color
 
 /**
- * 第二批著色器樣式：漩渦（改寫自 Paper Shaders swirl，Apache-2.0）、漸層百葉（琉璃自己寫）。
+ * 第二批著色器樣式：漩渦（顏料被吸進排水口的流場）、漸層百葉，都是琉璃自己寫的。
  * （墨流 Subframe ink-current 試過拿掉了：它好看在原生解析度的細墨邊，Mali-470 只付得起 480×270，放大後邊界變成一格一格的方塊。）
  * 共同規則見 [GlBackground]：時間在 CPU 端算好取模、低頻的座標變換放在頂點著色器（全精度），片段著色器只用 mediump、
  * 亂數一律查雜訊貼圖（u_noise：最近鄰，抖色用；u_noiseL：線性內插，當作 value noise 用）。
@@ -26,56 +26,80 @@ internal object GlStyles {
     /** 共用的抖色：±½ 階雜訊（最近鄰貼圖）。 */
     private const val DITHER = GlBackground.TONE + "col += (texture2D(u_noise, gl_FragCoord.xy / 64.0).rgb - 0.5) / 255.0;"
 
-    // ───────────── 漩渦（Paper swirl） ─────────────
+    // ───────────── 漩渦（顏料被吸進排水口） ─────────────
 
     /**
-     * 漩渦（颱風）：兩條纏得很緊的對數螺旋色帶，一圈一圈往中心收進去（顏色被捲進颱風眼），中心就是焦點。
-     * 對數螺旋整片轉一點點＝整片往中心縮，所以旋臂纏得夠緊時看起來是「被吸進去」而不是「在轉」
-     * （以前是 4 條很鬆的旋臂，同樣的相位變化看起來就是整個樣式在旋轉）。
-     *
-     * 改寫自 Paper Shaders 的 swirl（Apache License 2.0）：保留三色三角波色帶、雜訊讓色帶邊緣起伏、柔邊的做法；
-     * 色帶的形狀由 pow(半徑, −扭轉)＋4 條旋臂改成 −K·log(半徑)＋2 條旋臂，相位往內流；中心加一個颱風眼。
+     * 漩渦：水裡的排水口。外圍一直有顏料流進來，一邊繞著中心轉（越靠內轉得越快）、一邊被往中心吸，最後在中心被吸掉。
+     * 每個像素的顏色＝回推「這團顏料是什麼時候、從哪個角度流進來的」：
+     * - 流場：往內吸的面積流量 Q（r² 每秒減少 2Q）、繞轉 ω(r)＝Γ／(r²＋rc²)（中心 rc 以內接近整塊轉，不會無限快）。
+     *   從外緣 R 流到半徑 r 要 (R²−r²)／2Q 秒，這段時間轉過 k·ln((R²＋rc²)／(r²＋rc²))（k＝Γ／2Q）。
+     * - 流進來的顏料在外緣上是幾個不同頻率的波疊起來（角度的整數倍，繞一圈接得起來），跟著時間慢慢變；
+     *   回推之後自然變成粗細、間距都不一樣的螺旋臂，而且一直往內流——不會越纏越緊，也不是整片在轉。
+     * - 四種顏料由主色推出；中心是暗的眼（顏料被吸掉了）。
+     * 移動（換格子）：中心像彈簧一樣追過去（會稍微超過再回來）；外圈慢慢拖過去，中間被拉長；移動中旋臂鬆開、
+     * 後方拖出尾巴，抵達後再慢慢捲緊。流動的時間與捲緊程度逐格累加（速度會變，不能用時間 × 速度）。
+     * 琉璃自己寫的（以前改寫自 Paper Shaders 的 swirl，太規則、整片在轉，已經整個換掉）。
      */
     object Swirl {
-        // 換位置像颱風移動：中心分內外兩個——內圈很快跟上焦點、外圈慢慢拖過去，中間的色帶被拉長；
-        // 移動中（內外中心還沒會合）纏得更緊、往內吸得更快，會合後慢慢鬆回來。流動的相位逐格累加（速度會變，不能用時間 × 速度）
-        private var inX = Float.NaN; private var inY = 0f
-        private var outX = 0f; private var outY = 0f
-        private var flow = 0.0
-        private var wind = 0f
+        private var cx = Float.NaN; private var cy = 0f        // 內圈中心（彈簧）
+        private var vx = 0f; private var vy = 0f               // 內圈中心的速度
+        private var ox = 0f; private var oy = 0f               // 外圈中心（慢慢跟上內圈）
+        private var wind = 1f                                  // 捲緊程度 0～1
+        private var flow = 0.0                                 // 流動的時間（秒，已乘上速度）
         private var lastAt = Float.NaN
 
+        private const val Q = .02                              // 往內吸的面積流量（畫面高度 0.8 的單位）
+        private const val RC2 = .0225                          // 中心 rc＝0.15
+        private const val R2 = 3.61                            // 外緣 R＝1.9（整個畫面都在裡面）
+        private const val K_MAX = 3.0                          // 完全捲緊時，從外緣到中心大約繞 2.5 圈
+        private val A = doubleArrayOf(.7, .4, .5, 1.1)         // 外緣顏料的四個波隨時間變化的速度
+
         fun params(st: BgState, out: FloatArray) {
-            // 時鐘只往前走：玻璃小圖用的是稍早的狀態快照，拿它來算不能把時鐘往回撥（CPU 版也共用這份狀態）
+            // 時鐘只往前走：玻璃小圖用的是稍早的狀態快照，拿它來算不能把時鐘往回撥
             val dt = if (lastAt.isNaN()) 0f else (st.at - lastAt).coerceIn(0f, .25f)
             if (lastAt.isNaN() || st.at > lastAt) lastAt = st.at
-            if (inX.isNaN()) { inX = st.fx; inY = st.fy; outX = st.fx; outY = st.fy }
-            val kIn = 1f - kotlin.math.exp(-dt / .35f)
-            val kOut = 1f - kotlin.math.exp(-dt / 1.6f)
-            inX += (st.fx - inX) * kIn; inY += (st.fy - inY) * kIn
-            outX += (inX - outX) * kOut; outY += (inY - outY) * kOut
-            // 內外中心差多遠（畫面高度為 1 的單位）＝颱風正在被拖動的程度
-            val lag = kotlin.math.sqrt(((inX - outX) * 16f / 9f).let { it * it } + (inY - outY).let { it * it }).coerceAtMost(.6f)
-            // 纏緊的程度：拖動時很快纏緊（0.3 秒），停下來慢慢鬆回（2 秒）
-            val wTarget = lag / .6f
-            wind += (wTarget - wind) * (1f - kotlin.math.exp(-dt / if (wTarget > wind) .3f else 2f))
-            // 往內流：平常每秒 0.12 圈色帶，拖動時最快每秒 0.9 圈
-            flow += dt * (.12 + .8 * wind + .15 * st.pulse)
-            out[0] = (((flow + st.ripple * .3) % 1.0)).toFloat()   // 相位 0～1（著色器裡各項先取小數再加，半精度才不會讓色帶邊緣鋸齒）
-            out[1] = 1.5f + 1.6f * wind + .2f * st.pulse            // K：每往內走 e 倍，色帶繞過幾圈（越大纏得越緊）
-            out[2] = 0f
-            out[3] = .008f
-            out[4] = inX * 16f / 9f * .8f; out[5] = inY * .8f; out[6] = outX * 16f / 9f * .8f; out[7] = outY * .8f
-            put(out, 8, st.col(0f, .7f, .09f))     // 底色（颱風眼）
-            put(out, 12, st.col(4f, .9f, .80f))    // 淡（Paper 預設 #ffd1d1）
-            put(out, 16, st.col(0f, .95f, .62f))   // 中（#ff8a8a）
-            put(out, 20, st.col(-6f, .9f, .21f))   // 深（#660000）
-            // 颱風眼：半徑 0.03 以內是底色，0.03～0.10 色帶漸漸出現（畫面高度 0.8 的單位）；拖動時眼縮小一點
-            val eye = .03f * (1f - .3f * wind)
-            out[24] = eye; out[25] = eye * 1.5f; out[26] = eye * 3.3f; out[27] = 0f
+            val tx = st.fx * 16f / 9f * .8f; val ty = st.fy * .8f
+            if (cx.isNaN()) { cx = tx; cy = ty; ox = tx; oy = ty }
+            // 內圈中心：阻尼彈簧（ω＝5、ζ＝0.55，約 0.6 秒到、稍微超過一點再回來）；拆小步才穩
+            var left = dt
+            while (left > 0f) {
+                val h = kotlin.math.min(left, 1f / 120f); left -= h
+                val w0 = 5f; val z = .55f
+                vx += (w0 * w0 * (tx - cx) - 2f * z * w0 * vx) * h
+                vy += (w0 * w0 * (ty - cy) - 2f * z * w0 * vy) * h
+                cx += vx * h; cy += vy * h
+            }
+            // 外圈中心：慢慢跟上（2.5 秒），中間的顏料被拉長
+            val kOut = 1f - kotlin.math.exp(-dt / 2.5f)
+            ox += (cx - ox) * kOut; oy += (cy - oy) * kOut
+            val lag = (kotlin.math.hypot(cx - ox, cy - oy) / .5f).coerceIn(0f, 1f)
+            // 捲緊程度：被拖動時很快鬆開（0.4 秒），停下來慢慢捲緊（3 秒）
+            val wT = 1f - .7f * lag
+            wind += (wT - wind) * (1f - kotlin.math.exp(-dt / if (wT < wind) .4f else 3f))
+            // 流動：很慢（以前太快）；焦點脈動時稍微快一點
+            flow += dt * (.5 + .25 * st.pulse)
+            for (i in 0..3) {
+                // 外緣顏料的相位：a·t − a·R²／2Q（著色器再加 a·r²／2Q），在 CPU 取模，數字小、半精度才準
+                val ph = A[i] * flow - A[i] * R2 / (2 * Q)
+                out[i] = (((ph % TAU) + TAU) % TAU).toFloat()
+            }
+            out[4] = cx; out[5] = cy; out[6] = ox; out[7] = oy
+            put(out, 8, st.col(0f, .7f, .07f))      // 中心的眼（顏料被吸掉了）
+            put(out, 12, st.col(-25f, .8f, .30f))   // 顏料：深
+            put(out, 16, st.col(0f, .9f, .52f))     // 顏料：主色
+            put(out, 20, st.col(30f, .85f, .66f))   // 顏料：偏暖
+            put(out, 32, st.col(-8f, .55f, .82f))   // 顏料：淡
+            out[24] = (K_MAX * wind).toFloat()       // k：從外緣流到這裡轉了幾弧度 ÷ ln(...)
+            out[25] = RC2.toFloat()
+            out[26] = (1.0 / (2 * Q)).toFloat()
+            out[27] = kotlin.math.ln(R2 + RC2).toFloat()
+            // 尾巴：沿移動方向往回取樣（後方的顏料被拉長），最多 0.25
+            val sp = kotlin.math.hypot(vx, vy)
+            val s = if (sp > 1e-4f) kotlin.math.min(.25f, sp * .2f) / sp else 0f
+            out[28] = vx * s; out[29] = vy * s; out[30] = 0f; out[31] = 0f
         }
 
-        // v_q：畫面座標（寬高比校正、×0.8，跟 Paper 的尺度一樣）；中心在片段著色器裡依半徑在內外兩個中心之間內插
+        // v_q：畫面座標（寬高比校正、×0.8：畫面高度＝0.8 單位）
         const val VERTEX = """
 attribute vec2 a_pos;
 uniform float u_fy;
@@ -87,36 +111,33 @@ void main() {
 }
 """
 
-        // Paper：shape 加上 0.2 × simplex(2.4·uv) 讓色帶邊緣起伏；這裡用線性內插的雜訊貼圖（value noise，−1～1）代替
-        const val SHADER = """
+        const val SHADER = """#extension GL_OES_standard_derivatives : enable
 precision mediump float;
 uniform sampler2D u_noise;
-uniform sampler2D u_noiseL;
 uniform vec2 u_res;
 uniform vec4 u_p[16];
 varying vec2 v_q;
-"""+ GlBackground.NOISE + """
 void main() {
   vec2 ci = u_p[1].xy;
-  float w = smoothstep(0.05, 0.75, length(v_q - ci));
-  vec2 v_p = v_q - mix(ci, u_p[1].zw, w);
-  float l = max(length(v_p), 0.002);
-  float K = u_p[0].y;
-  // 色帶座標 s ＝ −K·log(半徑)＋2 條旋臂的角度 − 相位：相位增加＝每條色帶往中心縮（顏色被捲進去）。
-  // 兩項各自先取小數再相加：加起來的數字小（＜2），半精度下的小數才夠準（不然色帶邊緣起毛）
-  float shape = fract(fract(-K * log(l)) + fract(atan(v_p.y, v_p.x) * 0.31830989 - u_p[0].x + 2.0));
-  shape = 1.0 - abs(2.0 * shape - 1.0);
-  shape += 0.14 * (2.0 * gt(v_p * 2.4, vec2(7.0)) - 1.0);
-  shape *= smoothstep(u_p[6].x, u_p[6].z, l);
-  float mixer = shape * 3.0;
-  // 柔邊（代替 fwidth）：s 每個繪製像素變 sqrt(K²＋(1/π)²)／半徑 × 0.8／解析度，mixer 是它的 6 倍；柔邊取約 0.7 個像素
-  float soft = clamp(3.4 * sqrt(K * K + 0.1) / (u_res.y * l), 0.016, 0.45);
-  float m1 = smoothstep(0.5 - soft, 0.5 + soft, clamp(mixer, 0.0, 1.0));
-  float m2 = smoothstep(0.5 - soft, 0.5 + soft, clamp(mixer - 1.0, 0.0, 1.0));
-  float m3 = smoothstep(0.5 - soft, 0.5 + soft, clamp(mixer - 2.0, 0.0, 1.0));
-  vec3 grad = mix(mix(u_p[3].rgb, u_p[4].rgb, m2), u_p[5].rgb, m3);
-  float outer = m1 * smoothstep(u_p[6].x, max(u_p[6].y, u_p[6].x + 1.5 * 0.8 / u_res.y), l);
-  vec3 col = mix(u_p[2].rgb, grad, outer);
+  // 中心依距離在內圈（快）與外圈（慢）兩個中心之間內插：移動時外圈落後，中間被拉長
+  float w = smoothstep(0.05, 0.9, length(v_q - ci));
+  vec2 d = v_q - mix(ci, u_p[1].zw, w) + u_p[7].xy * w;
+  float r2 = dot(d, d);
+  // 這團顏料流進來時的角度（回推轉過的角度）與流進來的時間（r²／2Q，乘上各波的速度）
+  float ph = atan(d.y, d.x) - u_p[6].x * (u_p[6].w - log(r2 + u_p[6].y));
+  float rr = r2 * u_p[6].z;
+  float v = 0.5
+    + 0.22 * sin(2.0 * ph + u_p[0].x + 0.7 * rr + 1.3 * sin(3.0 * ph - u_p[0].y - 0.4 * rr))
+    + 0.18 * sin(5.0 * ph + u_p[0].z + 0.5 * rr)
+    + 0.10 * sin(9.0 * ph + u_p[0].w + 1.1 * rr);
+  // 四種顏料（交界約 1.5 個像素的柔邊）
+  float fw = 0.75 * fwidth(v) + 0.002;
+  vec3 col = u_p[3].rgb;
+  col = mix(col, u_p[4].rgb, smoothstep(0.34 - fw, 0.34 + fw, v));
+  col = mix(col, u_p[5].rgb, smoothstep(0.50 - fw, 0.50 + fw, v));
+  col = mix(col, u_p[8].rgb, smoothstep(0.66 - fw, 0.66 + fw, v));
+  // 中心的眼：顏料在這裡被吸掉
+  col = mix(u_p[2].rgb, col, smoothstep(0.03, 0.15, sqrt(r2)));
   """ + DITHER + """
   gl_FragColor = vec4(col, 1.0);
 }

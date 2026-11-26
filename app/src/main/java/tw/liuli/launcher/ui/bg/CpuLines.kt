@@ -22,7 +22,7 @@ import kotlin.math.sin
 import kotlin.math.sqrt
 
 /**
- * 有明確線條的著色器樣式的 CPU 對照版（螺旋、特魯謝緞帶、漩渦、漸層百葉）：形狀在 CPU 算成向量路徑，
+ * 有明確線條的著色器樣式的 CPU 對照版（螺旋、特魯謝緞帶、漸層百葉）：形狀在 CPU 算成向量路徑，
  * 由 Compose 的畫布（硬體加速）填色——線條邊緣由路徑反鋸齒，任何解析度都銳利，不受半精度與網格內插影響。
  * 參數、顏色、動態和 GPU 版相同（[GlStyles]／[GlStyles2] 的 params），方便兩邊直接比較。
  * 座標是邏輯畫布 [w]×[h]（480×270，見 [BackgroundEngine.LOGICAL_W]），畫布會再縮放到實際解析度。
@@ -30,19 +30,15 @@ import kotlin.math.sqrt
  * 成本的做法：
  * - 螺旋：整條螺旋是一個固定的路徑，只有平移（中心）與旋轉（相位），路徑本身不重建。
  * - 特魯謝緞帶：所有圓弧合成四個路徑（底、亮面、兩條細線），只有捲過一整格才重建，其餘只平移。
- * - 漩渦：三條色帶（淡、中、深）各一個路徑，中心在動所以每格重建（約七千個點，CPU 約 1ms）。
  * - 漸層百葉：每片一個帶漸層的矩形，約三十片。
  */
 internal object CpuLines {
     /** 每條執行緒各一份（主畫面在主執行緒畫、玻璃小圖在背景執行緒畫，路徑不能共用）。 */
     private class Scratch {
-        val tmp = FloatArray(64)
         var spiralPath: Path? = null
         var spiralUnit = 0f
         val tRibbon = Path(); val tInner = Path(); val tFineA = Path(); val tFineB = Path()
         var tKey = Long.MIN_VALUE
-        val band = arrayOf(Path(), Path(), Path())
-        val xy = FloatArray(2)
     }
     private val scratch: ThreadLocal<Scratch> = ThreadLocal.withInitial { Scratch() }
 
@@ -79,7 +75,7 @@ internal object CpuLines {
             }
             sc.spiralPath = p; sc.spiralUnit = u
         }
-        val phase = ((st.at * .35 + st.ripple * .8) % (2 * PI)) / (2 * PI)
+        val phase = ((st.at * .2 + st.ripple * .8) % (2 * PI)) / (2 * PI)
         withTransform({
             translate(st.fx * w, st.fy * h)
             rotate((phase * 360.0).toFloat(), Offset.Zero)
@@ -141,71 +137,6 @@ internal object CpuLines {
             drawPath(tFineA, fc, style = Stroke(width = fineW, cap = StrokeCap.Butt))
             drawPath(tFineB, fc, style = Stroke(width = fineW, cap = StrokeCap.Butt))
         }
-    }
-
-    // ───────────── 漩渦（颱風） ─────────────
-
-    /** 三條色帶在一個週期裡的範圍（fract(s)）：淡 1/12～11/12、中 1/4～3/4、深 5/12～7/12（和 GPU 版的三角波＋三個門檻一樣）。 */
-    private val bandA = floatArrayOf(1f / 12, 1f / 4, 5f / 12)
-    private val bandB = floatArrayOf(11f / 12, 3f / 4, 7f / 12)
-
-    fun DrawScope.typhoon(st: BgState, w: Float, h: Float) {
-        // 動態（內外兩個中心、往內流的相位、纏緊程度）和 GPU 版共用同一份狀態
-        val sc = scratch.get()!!
-        val tmp = sc.tmp; val xy = sc.xy
-        GlStyles.Swirl.params(st, tmp)
-        val phi = tmp[0].toDouble(); val k = tmp[1].toDouble()
-        val unit = h / .8f                                   // GPU 版 v_q 的 1 單位＝畫面高度 ÷ 0.8
-        val cix = tmp[4] * unit; val ciy = tmp[5] * unit
-        val cox = tmp[6] * unit; val coy = tmp[7] * unit
-        val eye = tmp[24].toDouble()
-        drawRect(col(tmp, 8), size = Size(w, h))
-        val colors = arrayOf(col(tmp, 12), col(tmp, 16), col(tmp, 20))
-        val r0 = eye * 1.2; val rMax = 2.2
-        // 對數螺旋 s＝−K·ln r＋θ／π−φ：fract(s)＝a 的那條邊界是 r(θ)＝exp((θ／π−φ−a)／K)（θ 不取模，一直繞）。
-        // 第二條旋臂＝θ 加 π。色帶＝a 邊界（外）與 b 邊界（內）之間；中心依半徑在內外兩個中心之間內插（同 GPU 版）
-        val step = .06
-        for (bi in 0..2) {
-            val p = sc.band[bi]; p.reset()
-            val a = bandA[bi].toDouble(); val b = bandB[bi].toDouble()
-            val th0 = PI * (k * ln(r0) + phi + b)
-            val th1 = PI * (k * ln(rMax) + phi + a)
-            for (arm in 0..1) {
-                val off = arm * PI
-                var th = th0
-                var first = true
-                while (th <= th1) {
-                    pt(xy, th + off, (th / PI - phi - a) / k, cix, ciy, cox, coy, unit)
-                    if (first) { p.moveTo(xy[0], xy[1]); first = false } else p.lineTo(xy[0], xy[1])
-                    th += step
-                }
-                th = th1
-                while (th >= th0) {
-                    pt(xy, th + off, (th / PI - phi - b) / k, cix, ciy, cox, coy, unit)
-                    p.lineTo(xy[0], xy[1])
-                    th -= step
-                }
-                p.close()
-            }
-            drawPath(p, colors[bi])
-        }
-        // 颱風眼：中心附近色帶漸漸淡回底色（GPU 版 shape × smoothstep(眼, 3.3 眼, 半徑)）
-        val c = Offset(cix, ciy)
-        val e = (tmp[26] * unit)
-        drawCircle(Brush.radialGradient(0f to col(tmp, 8), .45f to col(tmp, 8), 1f to col(tmp, 8).copy(alpha = 0f), center = c, radius = e * 1.1f), e * 1.1f, c)
-    }
-
-    /** 颱風座標（角度 th、ln 半徑 lr）→ 畫面座標：中心依半徑在內圈（快）與外圈（慢）兩個中心之間內插。 */
-    private fun pt(out: FloatArray, th: Double, lr: Double, cix: Float, ciy: Float, cox: Float, coy: Float, unit: Float) {
-        val r = exp(lr)
-        val wgt = smooth(.05, .75, r).toFloat()
-        val cx = cix + (cox - cix) * wgt; val cy = ciy + (coy - ciy) * wgt
-        out[0] = cx + (r * cos(th)).toFloat() * unit; out[1] = cy + (r * sin(th)).toFloat() * unit
-    }
-
-    private fun smooth(e0: Double, e1: Double, x: Double): Double {
-        val t = ((x - e0) / (e1 - e0)).coerceIn(0.0, 1.0)
-        return t * t * (3 - 2 * t)
     }
 
     // ───────────── 漸層百葉 ─────────────

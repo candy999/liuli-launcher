@@ -298,7 +298,7 @@ void main() {
     object Spiral {
         fun params(st: BgState, out: FloatArray) {
             head(st, out)
-            out[4] = wrap(st.at * .35 + st.ripple * .8, TAU) / TAU.toFloat()
+            out[4] = wrap(st.at * .2 + st.ripple * .8, TAU) / TAU.toFloat()   // 轉速放慢（0.35 → 0.2）
             put(out, 8, c(st, 0f, .85f, .09f))
             put(out, 12, c(st, 15f, .75f, .50f))
         }
