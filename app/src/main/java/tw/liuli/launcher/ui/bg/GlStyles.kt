@@ -185,8 +185,9 @@ void main() {
   vec4 q = texture2D(u_field, v_uv);
   float c = (q.r + q.g / 255.0) * 2.0 - 1.0;
   float sn = (q.b + q.a / 255.0) * 2.0 - 1.0;
-  // ψ／2π×3 ＝ t 除以 3 的餘數（−1.5～1.5，加 3 變正的）
-  float t = atan(sn, c) * 0.47746483 + 3.0;
+  // ψ／2π×3 ＝ t 除以 3 的餘數。反向量再取 atan（＋1.5 補回來）：atan 在 ±π 那條接縫（Mali 半精度在那裡偶爾算錯，
+  // 會冒出一串虛線點）就落在 ψ＝0，也就是瓣與瓣的交界上，被柔邊蓋掉；直接取的話接縫在焦糖色那瓣正中間
+  float t = atan(-sn, -c) * 0.47746483 + 4.5;
   float w = min(fwidth(t), fwidth(fract(t + 0.5))) * 1.2 + 0.03;
   float fr = fract(t);
   float k = mod(floor(t), 3.0);
