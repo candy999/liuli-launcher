@@ -404,6 +404,66 @@ object GlBackground {
     }
 
     private var dropProg: Program? = null
+
+    // ── 扭曲色帶的輕微高斯模糊：先畫進一張同樣大小的貼圖，再用 3×3 高斯（1-2-1）輸出到畫面 ──
+    // 細的深色帶在低解析度下只有一兩個像素寬，放大後是階梯；柔化交界（fwidth）不夠，要真的模糊一層。
+    // 四次雙線性取樣（各偏半個像素）＝剛好是 [1 2 1]⊗[1 2 1]／16，多一次全畫面的貼圖（海信 640×360 約 1～2ms）
+    private var blurFbo = 0
+    private var blurTex = 0
+    private var blurW = 0
+    private var blurH = 0
+    private var blurProg: Program? = null
+    private var blurFailed = false
+
+    private fun passBlurred(prog: Program, w: Int, h: Int) {
+        if (blurTex == 0) {
+            val ids = IntArray(1)
+            GLES20.glGenTextures(1, ids, 0); blurTex = ids[0]
+            GLES20.glGenFramebuffers(1, ids, 0); blurFbo = ids[0]
+            blurW = 0; blurH = 0
+        }
+        if (blurW != w || blurH != h) {
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, blurTex)
+            GLES20.glTexImage2D(GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, w, h, 0, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, null)
+            for (pn in intArrayOf(GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_TEXTURE_MAG_FILTER)) GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, pn, GLES20.GL_LINEAR)
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
+            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, blurFbo)
+            GLES20.glFramebufferTexture2D(GLES20.GL_FRAMEBUFFER, GLES20.GL_COLOR_ATTACHMENT0, GLES20.GL_TEXTURE_2D, blurTex, 0)
+            val st = GLES20.glCheckFramebufferStatus(GLES20.GL_FRAMEBUFFER)
+            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
+            if (st != GLES20.GL_FRAMEBUFFER_COMPLETE) {
+                Log.w(TAG, "模糊用的離屏緩衝不完整 0x${Integer.toHexString(st)}，扭曲色帶不模糊")
+                blurFailed = true
+                pass(prog, w, h, flipY = true)
+                return
+            }
+            blurW = w; blurH = h
+        }
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, blurFbo)
+        pass(prog, w, h, flipY = false)
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
+        val bp = blurProg ?: Program(VERTEX, BLUR, 1, 1).also { blurProg = it }
+        GLES20.glViewport(0, 0, w, h)
+        GLES20.glUseProgram(bp.id)
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, blurTex)
+        bp.bind(w, h, work, bp.grid, flipY = true)
+        GLES20.glDrawElements(GLES20.GL_TRIANGLES, bp.gridN, GLES20.GL_UNSIGNED_SHORT, bp.gridIdx)
+    }
+
+    /** 3×3 高斯（1-2-1）：四次雙線性取樣，各往對角偏半個像素。u_noise 這裡是要模糊的那張圖（第 0 個貼圖單元）。 */
+    private const val BLUR = """
+precision mediump float;
+uniform sampler2D u_noise;
+uniform vec2 u_res;
+varying vec2 v_uv;
+void main() {
+  vec2 d = 0.5 / u_res;
+  gl_FragColor = 0.25 * (texture2D(u_noise, v_uv - d) + texture2D(u_noise, v_uv + d)
+    + texture2D(u_noise, v_uv + vec2(d.x, -d.y)) + texture2D(u_noise, v_uv + vec2(-d.x, d.y)));
+}
+"""
     private var dropLoc = IntArray(3)
 
     /** 水彩：每一滴顏料各畫一塊只蓋住自己的網格，乘法混色疊在紙上（見 [Watercolor]）。 */
@@ -486,7 +546,7 @@ object GlBackground {
                 val n = frameNo++
                 val timed = workStable && n % 3 == 0L
                 val t0 = SystemClock.elapsedRealtimeNanos()
-                pass(prog, w, h, flipY = true)
+                if (style == BgStyle.WARP && !blurFailed) passBlurred(prog, w, h) else pass(prog, w, h, flipY = true)
                 if (timed) GLES20.glFinish()
                 val tg = SystemClock.elapsedRealtimeNanos()
                 if (!EGL14.eglSwapBuffers(dpy, win)) {
@@ -698,6 +758,7 @@ object GlBackground {
         destroyWindow()
         programs.clear()
         dropProg = null
+        blurProg = null; blurTex = 0; blurFbo = 0; blurW = 0; blurH = 0
         noiseTex = 0
         noiseTexL = 0
         noiseTexQ = 0
