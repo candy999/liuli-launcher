@@ -11,7 +11,7 @@ import kotlin.math.min
  * 毛玻璃每秒更新幾次：依實測負載自動調整，讓「玻璃」總共最多用掉一個 CPU 核心的 [BUDGET]（80%）。
  * 玻璃的負載＝背景小圖（畫樣式＋模糊）＋每一片玻璃重新取色，都在背景執行緒，用執行緒 CPU 時間量。
  * - 每約 1 秒算一次：超過預算立刻照比例降；有餘裕慢慢升（每秒最多多 3 次）；操作中只降不升（主執行緒留給按鍵）。
- * - 只有背景真的照這個頻率在更新時才算（靜止的背景沒有負載，不能拿來當「付得起」）。
+ * - 用每次的成本推估（趕不上時次數會變少，直接看用了多少會誤判成付得起）；背景靜止、一秒不到 3 次的那一窗不算。
  * - 範圍每秒 [MIN]～[MAX] 次；頻率不必是背景格數的整數分之一：玻璃在兩次之間交叉淡化（[GlassBake]），任何頻率看起來都連續。
  */
 object GlassRate {
@@ -47,10 +47,12 @@ object GlassRate {
         since = now
         val n = updates.getAndSet(0)
         val c = cpuNs.getAndSet(0)
-        // 背景沒有照目前的頻率更新（停下來、轉場剛結束）：這一窗不算
-        if (n < perSec * el / 1000f * .7f) return
-        val load = c / 1e6f / el   // 幾個核心
-        val target = (perSec * BUDGET / max(load, .01f)).coerceIn(MIN, MAX)
+        // 用「每次的成本」推估目前頻率下的負載（不直接看這一秒用了多少：趕不上時次數變少，負載看起來反而低；
+        // 背景停下來時也一樣）。太少次（靜止）不算
+        if (n < 3) return
+        val costMs = c / 1e6f / n
+        val load = costMs * perSec / 1000f   // 照目前頻率要幾個核心
+        val target = (BUDGET * 1000f / max(costMs, .1f)).coerceIn(MIN, MAX)
         val old = perSec
         perSec = when {
             target < perSec -> target
