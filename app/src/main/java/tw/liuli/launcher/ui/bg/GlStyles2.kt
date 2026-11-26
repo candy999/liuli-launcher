@@ -135,8 +135,11 @@ void main() {
         }
 
         /**
-         * 扭曲的座標整個在頂點著色器算（全精度，網格 96×54），片段著色器只拿內插好的座標畫棋盤圖樣。
-         * 以前在片段著色器算：漩渦迭代裡 cos 的參數到 20～30，半精度只剩 1／64 弧度，七次迭代累積起來，色帶的邊緣一階一階的。
+         * 只有半精度的 GPU（Mali-470）：扭曲分兩段。雜訊位移與前三輪（幅度大、比較平緩）在頂點著色器算（全精度，網格 96×54），
+         * 後四輪（頻率高、幅度小）在片段著色器逐像素算。
+         * - 全部在片段算：前幾輪幅度大，cos 的參數到 20～30、半精度只剩 1／64 弧度，誤差累積起來色帶的邊緣一階一階的。
+         * - 全部在頂點算：高頻的幾輪在一格（約 20 像素）裡彎很多，直線內插在色帶對折的地方變成鋸齒（網格加密到 160 也一樣，而且 GPU 付不起）。
+         * 後四輪的幅度是 0.8／4 以下，參數的半精度誤差只造成約半個像素的位移，看不出來。
          */
         const val VERTEX = """
 attribute vec2 a_pos;
@@ -156,12 +159,12 @@ void main() {
   uv += 4.0 * u_v1.z * n2 * vec2(cos(a), sin(a));
   float tt = u_v1.y;
   float sw = u_v1.w;
-  for (int i = 1; i < 8; i++) {
+  for (int i = 1; i < 4; i++) {
     float fi = float(i);
     uv.x += sw / fi * cos(tt + fi * 1.5 * uv.y);
     uv.y += sw / fi * cos(tt + fi * uv.x);
   }
-  v_cs = uv * 0.85;
+  v_cs = uv;
   gl_Position = vec4(a_pos.x, a_pos.y * u_fy, 0.0, 1.0);
 }
 """
@@ -208,7 +211,18 @@ void main() {
         const val SHADER = HEAD + """
 varying vec2 v_cs;
 void main() {
-  vec2 cs = v_cs;
+  vec2 uv = v_cs;
+  float tt = u_p[1].y;
+  float sw = u_p[1].w;
+  uv.x += sw * 0.25 * cos(tt + 6.0 * uv.y);
+  uv.y += sw * 0.25 * cos(tt + 4.0 * uv.x);
+  uv.x += sw * 0.2 * cos(tt + 7.5 * uv.y);
+  uv.y += sw * 0.2 * cos(tt + 5.0 * uv.x);
+  uv.x += sw * 0.16666667 * cos(tt + 9.0 * uv.y);
+  uv.y += sw * 0.16666667 * cos(tt + 6.0 * uv.x);
+  uv.x += sw * 0.14285714 * cos(tt + 10.5 * uv.y);
+  uv.y += sw * 0.14285714 * cos(tt + 7.0 * uv.x);
+  vec2 cs = uv * 0.85;
   float shape = 0.5 + 0.5 * sin(cs.x) * cos(cs.y) - 0.1073;
   float mixer = shape * 3.0;
   vec3 col = u_p[2].rgb;

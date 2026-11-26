@@ -396,8 +396,10 @@ object GlBackground {
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, noiseTexL)
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, noiseTex)
-        prog.bind(w, h, work, prog.grid, flipY)
-        GLES20.glDrawElements(GLES20.GL_TRIANGLES, prog.gridN, GLES20.GL_UNSIGNED_SHORT, prog.gridIdx)
+        // 玻璃小圖（120×68）用粗網格：密網格的頂點計算跟畫面大小無關，小圖照樣要算一整張（扭曲色帶 96×54 光這一步就 7ms）
+        val g = if (w * h <= 200 * 120) prog.small else prog.full
+        prog.bind(w, h, work, g.grid, flipY)
+        GLES20.glDrawElements(GLES20.GL_TRIANGLES, g.n, GLES20.GL_UNSIGNED_SHORT, g.idx)
         if (workStyle == BgStyle.WATERCOLOR) drawDrops(w, h, flipY)
     }
 
@@ -727,15 +729,14 @@ object GlBackground {
      * u_p[0..PARAMS／4)（片段著色器用的樣式參數，vec4 陣列）、u_w／u_v1（頂點著色器用，＝u_p[0]／u_p[1]；分開宣告，兩邊的精度才不會衝突）、
      * u_noiseL（線性內插的雜訊貼圖，第 1 個貼圖單元）。
      */
-    private class Program(vert: String, frag: String, gx: Int, gy: Int) {
-        constructor(style: BgStyle) : this(style.glVertex(), style.glShader(), gridSize(style).first, gridSize(style).second)
-        val id: Int
+    /** 全螢幕網格：(gx+1)×(gy+1) 個頂點、gx×gy 格，每格兩個三角形。 */
+    private class Grid(gx: Int, gy: Int) {
         val grid: FloatBuffer = ByteBuffer.allocateDirect((gx + 1) * (gy + 1) * 2 * 4).order(ByteOrder.nativeOrder()).asFloatBuffer().also { g ->
             for (j in 0..gy) for (i in 0..gx) { g.put(i * 2f / gx - 1f); g.put(j * 2f / gy - 1f) }
             g.position(0)
         }
-        val gridN = gx * gy * 6
-        val gridIdx: java.nio.ShortBuffer = ByteBuffer.allocateDirect(gridN * 2).order(ByteOrder.nativeOrder()).asShortBuffer().also { ix ->
+        val n = gx * gy * 6
+        val idx: java.nio.ShortBuffer = ByteBuffer.allocateDirect(n * 2).order(ByteOrder.nativeOrder()).asShortBuffer().also { ix ->
             for (j in 0 until gy) for (i in 0 until gx) {
                 val a = (j * (gx + 1) + i).toShort()
                 val b = (a + 1).toShort()
@@ -745,6 +746,17 @@ object GlBackground {
             }
             ix.position(0)
         }
+    }
+
+    private class Program(vert: String, frag: String, gx: Int, gy: Int) {
+        constructor(style: BgStyle) : this(style.glVertex(), style.glShader(), gridSize(style).first, gridSize(style).second)
+        val id: Int
+        val full = Grid(gx, gy)
+        /** 玻璃小圖用的粗網格（最多 32×18）。 */
+        val small = if (gx <= 32) full else Grid(32, 18)
+        val grid get() = full.grid
+        val gridN get() = full.n
+        val gridIdx get() = full.idx
         private val aPos: Int
         private val uRes: Int
         private val uNoise: Int
