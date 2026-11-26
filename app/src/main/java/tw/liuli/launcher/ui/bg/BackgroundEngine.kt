@@ -571,6 +571,11 @@ class BackgroundEngine {
             moving = true
             val si = style.ordinal
             var div = learnedDiv[si]
+            // 著色器樣式：解析度與格數都歸 GlBackground 的控制器（依 GPU 時間升降解析度、每秒 30 格不變）。
+            // 引擎這邊固定每秒 30 格送畫面、不做自己的升降檔——引擎量的是主執行緒的成本，跟 GPU 無關，
+            // 以前照樣會判成「卡在 CPU、改降更新率」，把著色器樣式降到每秒 20 格（海信上特魯謝緞帶一頓一頓）
+            val glOwned = style.gl && !GlBackground.failedFor(style)
+            if (glOwned) learnedIv[si] = 0
             var iv = learnedIv[si]
             var interval = INTERVALS[iv]
             val forced = debugDiv in 1..MAX_DIV
@@ -722,6 +727,7 @@ class BackgroundEngine {
                 }
                 drainLatency()
                 if (android.os.SystemClock.uptimeMillis() < evalFrom) { winSum = 0f; winN = 0; latN = 0 }
+                else if (glOwned) { winSum = 0f; winN = 0; latN = 0 }
                 else if (!forced && !blurOn && !ramping && renderDiv == div && (latN >= LAT_WINDOW || winN >= ADAPT_WINDOW * 2)) {
                     // 總耗時（中位數）：沒有排隊時就是這一幀真正的成本；超過更新間隔＝開始排隊
                     val lat = if (latN > 0) median(latBuf, latN) else -1f
