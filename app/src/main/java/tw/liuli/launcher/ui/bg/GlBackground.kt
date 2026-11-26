@@ -839,6 +839,7 @@ void main() {
         BgStyle.WARP -> if (debugGrid > 0) debugGrid to debugGrid * 9 / 16 else if (fragHighp) 32 to 18 else 96 to 54
         // 相位在頂點算成單位向量再內插的樣式：每格相位轉的角度要小，內插才準（見 GlStyles2.Spiral、GlStyles.Sauce）
         BgStyle.SPIRAL -> 64 to 36
+        BgStyle.CURTAIN -> 128 to 2     // 頂點算的量只跟 x 有關：橫向密、縱向 2 格就好
         BgStyle.SAUCE -> 96 to 54
         BgStyle.SIMPLEX -> 64 to 36
         else -> 32 to 18
@@ -1025,6 +1026,7 @@ void main() { v_uv = a_pos * 0.5 + 0.5; gl_Position = vec4(a_pos.x, a_pos.y * u_
 internal fun BgStyle.glVertex(): String = when (this) {
     BgStyle.SAUCE -> GlStyles.Sauce.VERTEX
     BgStyle.SPIRAL -> GlStyles2.Spiral.VERTEX
+    BgStyle.CURTAIN -> GlStyles2.Curtain.VERTEX
     BgStyle.SIMPLEX -> GlStyles2.Simplex.VERTEX
     BgStyle.WARP -> if (GlBackground.fragHighp) GlBackground.VERTEX else GlStyles2.Warp.VERTEX
     BgStyle.SOFTAURORA -> GlStyles2.SoftAurora.VERTEX

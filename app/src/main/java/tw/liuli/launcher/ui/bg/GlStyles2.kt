@@ -455,6 +455,7 @@ void main() {
             out[4] = wrap(t * .25, TAU); out[5] = wrap(t * .6, TAU)
             GlBackground.putTimes(out, t * .35, t * .2, t * .4, t * .13)
             out[10] = act.toFloat(); out[11] = 0f
+            out[6] = act.toFloat()                // 頂點著色器也要（u_v1.z）
             put(out, 12, c(st, 0f, .9f, .45f))    // 光幕亮色（原版 0.10,0.84,0.40）
             put(out, 16, c(st, 20f, .85f, .16f))  // 光幕高處（0.025,0.28,0.32）
             put(out, 20, c(st, -5f, .8f, .85f))   // 亮邊（0.46,1.0,0.70）
@@ -462,30 +463,71 @@ void main() {
             put(out, 28, c(st, 25f, .7f, .04f))   // 天空上
         }
 
+        /**
+         * 只跟橫向位置 x 有關的量（每層簾腳的高度、飄移、亮斑、往上延伸多高：四次雜訊＋兩次 sin）在頂點著色器用全精度算，
+         * 網格橫向 128 格、縱向 2 格（這些量跟 y 無關，頂點很少）；片段只剩細絲的雜訊與幾個指數衰減——
+         * 以前每個像素三層各算一遍，海信上 384×216 就要 30ms。頂點不能讀貼圖，雜訊改用雜湊的 value noise（gv）。
+         */
+        const val VERTEX = """
+attribute vec2 a_pos;
+uniform float u_fy;
+uniform vec4 u_w;
+uniform vec4 u_v1;
+varying vec2 v_uv;
+varying vec3 v_hem;
+varying vec3 v_dr;
+varying vec3 v_pa;
+varying vec3 v_re;
+""" + GlBackground.VNOISE + """
+vec4 lay(float i, float px, float act, vec4 tt) {
+  float x = px + i * 0.42;
+  float bend = 0.15 * sin(x * 2.2 + u_v1.x) + (0.03 + act * 0.08) * sin(x * 4.8 - u_v1.y + i);
+  float hem = -0.10 - i * 0.13 + bend + (0.012 + act * 0.028) * (gv(vec2(x * 15.0, tt.x + i)) - 0.5);
+  float dr = x + (0.017 + act * 0.015) * gv(vec2(x * 8.0, tt.y + i));
+  float pa = 0.48 + 0.8 * gv(vec2(x * 8.0 + i, tt.w));
+  float re = 5.5 + gv(vec2(x * 11.0, i + 4.0)) * 5.0 - act * 1.5;
+  return vec4(hem, dr, pa, re);
+}
+void main() {
+  v_uv = a_pos * 0.5 + 0.5;
+  float px = (v_uv.x - 0.5) * u_w.x;
+  float act = u_v1.z;
+  vec4 tt = u_vt + u_vf;
+  vec4 a = lay(0.0, px, act, tt);
+  vec4 b = lay(1.0, px, act, tt);
+  vec4 c = lay(2.0, px, act, tt);
+  v_hem = vec3(a.x, b.x, c.x);
+  v_dr = vec3(a.y, b.y, c.y);
+  v_pa = vec3(a.z, b.z, c.z);
+  v_re = vec3(a.w, b.w, c.w);
+  gl_Position = vec4(a_pos.x, a_pos.y * u_fy, 0.0, 1.0);
+}
+"""
+
         const val SHADER = HEAD + """
+varying vec3 v_hem;
+varying vec3 v_dr;
+varying vec3 v_pa;
+varying vec3 v_re;
+vec3 layerCol(float py, float hem, float dr, float pa, float re, float layer, float amt, float act) {
+  float rise = py - hem;
+  float drift = dr + rise * 0.1;
+  float grain = gt(vec2(drift * 60.0, u_p[15].z), vec2(0.0, u_p[14].z + layer * 4.0));
+  float threads = 0.36 + 0.64 * sqrt(grain) + 0.085;
+  float veil = smoothstep(-0.012, 0.022, rise) * exp(-max(rise, 0.0) * re);
+  float lip = exp(-abs(rise) / (0.012 + grain * 0.013));
+  float halo = exp(-abs(rise) * 16.0) * 0.12;
+  vec3 tint = mix(u_p[3].rgb, u_p[4].rgb, smoothstep(0.02, 0.38, max(0.0, rise)));
+  return amt * pa * (tint * (veil * threads * (0.5 + act * 0.52) + halo) + u_p[5].rgb * lip * threads * (0.55 + act * 0.4));
+}
 void main() {
   vec2 uv = v_uv;
   vec2 p = vec2((uv.x - 0.5) * u_p[0].x, 0.5 - uv.y);
   float act = u_p[2].z;
   vec3 color = mix(u_p[6].rgb, u_p[7].rgb, 1.0 - uv.y);
-  for (int i = 0; i < 3; i++) {
-    float layer = float(i);
-    float x = p.x + layer * 0.42;
-    float bend = 0.15 * sin(x * 2.2 + u_p[1].x) + (0.03 + act * 0.08) * sin(x * 4.8 - u_p[1].y + layer);
-    float hem = -0.10 - layer * 0.13 + bend + (0.012 + act * 0.028) * (gt(vec2(x * 15.0, u_p[15].x), vec2(0.0, u_p[14].x + layer)) - 0.5);
-    float rise = p.y - hem;
-    float drift = x + rise * 0.1 + (0.017 + act * 0.015) * gt(vec2(x * 8.0, u_p[15].y), vec2(0.0, u_p[14].y + layer));
-    float grain = gt(vec2(drift * 60.0, u_p[15].z), vec2(0.0, u_p[14].z + layer * 4.0));
-    float threads = 0.36 + 0.64 * sqrt(grain) + 0.085;
-    float patches = 0.48 + 0.8 * gt(vec2(x * 8.0, u_p[15].w), vec2(layer, u_p[14].w));
-    float reach = 5.5 + g(vec2(x * 11.0, layer + 4.0)) * 5.0 - act * 1.5;
-    float veil = smoothstep(-0.012, 0.022, rise) * exp(-max(rise, 0.0) * reach);
-    float lip = exp(-abs(rise) / (0.012 + grain * 0.013));
-    float halo = exp(-abs(rise) * 16.0) * 0.12;
-    float amount = pow(0.32, layer) * patches;
-    vec3 tint = mix(u_p[3].rgb, u_p[4].rgb, smoothstep(0.02, 0.38, max(0.0, rise)));
-    color += amount * (tint * (veil * threads * (0.5 + act * 0.52) + halo) + u_p[5].rgb * lip * threads * (0.55 + act * 0.4));
-  }
+  color += layerCol(p.y, v_hem.x, v_dr.x, v_pa.x, v_re.x, 0.0, 1.0, act);
+  color += layerCol(p.y, v_hem.y, v_dr.y, v_pa.y, v_re.y, 1.0, 0.32, act);
+  color += layerCol(p.y, v_hem.z, v_dr.z, v_pa.z, v_re.z, 2.0, 0.1024, act);
   color *= 0.88 + 0.12 * pow(max(0.0, 1.0 - length(p) * 0.6), 0.6);
   vec3 col = 1.0 - exp(-color * 1.4);
   """ + DITHER + """
