@@ -1288,7 +1288,7 @@ fun HomeScreen(
         engine.covered = overlay && !previewing
         tw.liuli.launcher.geek.WeakGpu.init()
         // 設定面板開著：背景壓暗（以前是全螢幕疊一層半透明黑，每格多混一整個螢幕）
-        engine.dim = if (sheet != null && !previewing) 0.22f else 0f
+        engine.dim = 0f   // 面板開著的壓暗改由主畫面上的那層黑（scrim）負責
         if (overlaySeen || overlay) engine.holdForUi(UI_SLIDE_HOLD_MS)
         overlaySeen = true
     }
@@ -1340,8 +1340,10 @@ fun HomeScreen(
     val glassHidden: () -> Boolean = remember { { homeGlassHidden.value } }
     // 主畫面完全不透明時玻璃才交叉淡化（半透明時淡化的兩層各乘一次透明度，背景透出來、亮度跟著淡化進度抖）
     val glassFade: () -> Boolean = remember {
-        { recede.value < .001f && homeHide.value < .001f && minimalT.value < .001f && visNow.value() > .999f }
+        { homeHide.value < .001f && minimalT.value < .001f && visNow.value() > .999f }
     }
+    // 面板開著時主畫面上那層黑：挑背景樣式（預覽）時不蓋
+    val scrimOn = animateFloatAsState(if (sheet?.spec?.id == STYLE_SHEET_KEY) 0f else 1f, tween(200), label = "scrim")
     CompositionLocalProvider(
         LocalBringIntoViewSpec provides keepVisible,
         tw.liuli.launcher.ui.components.LocalTileShadow provides tileShadow,
@@ -1418,7 +1420,9 @@ fun HomeScreen(
                 .graphicsLayer {
                     compositingStrategy = CompositingStrategy.ModulateAlpha
                     val m = minimalT.value
-                    alpha = (1f - 0.4f * recede.value) * (1f - m) * (1f - homeHide.value)
+                    // 面板開著時主畫面「退後」改成蓋一層黑（見下面的 scrim），不再整層變半透明：
+                    // 半透明時毛玻璃也跟著變成 60%，後面清楚的背景透過來，看起來像玻璃失效
+                    alpha = (1f - m) * (1f - homeHide.value)
                     // 簡潔模式：整片往下收、淡出（只動圖層位置，不重新排版）
                     translationY = m * 46.dp.toPx()
                 }
@@ -1586,6 +1590,13 @@ fun HomeScreen(
                     GText("所有 App", size = 13.sp, color = Ink.Tertiary)
                 }
             }
+
+            // 面板打開時主畫面退後：蓋一層 35% 的黑（主畫面與背景一起變暗，玻璃仍然是不透明的毛玻璃）。
+            // 背景原本另外壓暗 22%（engine.dim）改由這一層負責；挑背景樣式的預覽時不蓋，背景才看得清楚
+            Box(Modifier.fillMaxSize().drawBehind {
+                val a = .35f * recede.value * (1f - homeHide.value) * scrimOn.value
+                if (a > .002f) drawRect(Color.Black, alpha = a)
+            })
 
             // 抽屜、面板、色盤打開時：游標經過空白處不會穿到後面的主畫面、把焦點帶過去
             if (drawerOpen || sheet != null || picking) Box(Modifier.fillMaxSize().blockPointer())
