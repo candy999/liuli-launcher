@@ -89,7 +89,7 @@ object GlBackground {
     fun debugWarp(grid: Int = debugGrid, noHighp: Boolean = debugNoHighp) {
         debugGrid = grid; debugNoHighp = noHighp
         handler?.post {
-            if (noHighp && fragHighp) fragHighp = false
+            if (noHighp && fragHighp) { fragHighp = false; programs.clear(); dropProg = null }
             programs.remove(BgStyle.WARP)
         }
     }
@@ -688,7 +688,7 @@ object GlBackground {
         val rg = IntArray(2); val pr = IntArray(1)
         GLES20.glGetShaderPrecisionFormat(GLES20.GL_FRAGMENT_SHADER, GLES20.GL_HIGH_FLOAT, rg, 0, pr, 0)
         val hp = pr[0] >= 20 && !debugNoHighp
-        if (hp != fragHighp) { fragHighp = hp; programs.remove(BgStyle.WARP) }
+        if (hp != fragHighp) { fragHighp = hp; programs.clear(); dropProg = null }
         Log.i(TAG, "fragment highp precision ${pr[0]} bits → ${if (fragHighp) "扭曲色帶逐像素算" else "扭曲色帶頂點算"}")
         val ext = GLES20.glGetString(GLES20.GL_EXTENSIONS) ?: ""
         Log.i(TAG, "GL ${GLES20.glGetString(GLES20.GL_RENDERER)} / ${GLES20.glGetString(GLES20.GL_VERSION)}, derivatives=${ext.contains("GL_OES_standard_derivatives")}")
@@ -772,7 +772,9 @@ object GlBackground {
 
         init {
             val vs = compile(GLES20.GL_VERTEX_SHADER, vert)
-            val fs = compile(GLES20.GL_FRAGMENT_SHADER, frag)
+            // 片段著色器支援全精度的 GPU（PowerVR 等）全部用全精度：半精度是為了 Mali-470 寫的，
+            // 在這些 GPU 上反而讓色帶邊緣起毛（150 的漩渦）。Mali 只有半精度，照原樣
+            val fs = compile(GLES20.GL_FRAGMENT_SHADER, if (fragHighp) frag.replace("precision mediump float;", "precision highp float;") else frag)
             id = GLES20.glCreateProgram()
             GLES20.glAttachShader(id, vs)
             GLES20.glAttachShader(id, fs)
