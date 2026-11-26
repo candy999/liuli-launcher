@@ -8,6 +8,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.asAndroidPath
 import androidx.compose.ui.graphics.asComposePath
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -31,7 +35,7 @@ import kotlin.math.sqrt
  *
  * 成本的做法：
  * - 螺旋：整條螺旋是一個固定的填色外框（描邊只做一次），只有平移（中心）與旋轉（相位），路徑本身不重建。
- * - 特魯謝緞帶：所有圓弧合成四個填色外框（底、亮面、兩條細線），只有捲過一整格或寬度換檔才重建，其餘只平移。
+ * - 特魯謝緞帶：整片畫成三張遮罩（背景執行緒），每格只平移疊上；寬度不跟脈動變。
  * - 漸層百葉：每片一個帶漸層的矩形，約三十片。
  */
 internal object CpuLines {
@@ -46,6 +50,9 @@ internal object CpuLines {
         // 特魯謝緞帶描邊後的填色外框（捲過一格或寬度換檔才重建）
         var tRibbonFill: Path? = null; var tInnerFill: Path? = null; var tFineAFill: Path? = null; var tFineBFill: Path? = null
         val strokePaint = android.graphics.Paint().apply { style = android.graphics.Paint.Style.STROKE; strokeCap = android.graphics.Paint.Cap.BUTT }
+        /** 緞帶整片畫好的遮罩（見 [TMask]）；背景執行緒畫好才換上。 */
+        @Volatile var tMask: TMask? = null
+        @Volatile var tBuilding = false
         val tmp = FloatArray(64)
         val swirlPaths = arrayOf(Path(), Path(), Path())
         val curve = FloatArray(GlStyles.Sauce.WEDGES * SW_PTS * 2)
@@ -141,56 +148,120 @@ internal object CpuLines {
         return (n xor (n ushr 16)) and 1 == 1
     }
 
+    /**
+     * 緞帶整片畫成遮罩（只有透明度），之後每格只平移：緞帶整片只是往旁邊捲，形狀不變。
+     * 以前每格把兩百段圓弧的外框重新塗一次（畫布的工作執行緒每秒忙 1.2 秒）；現在每格只是疊三張圖。
+     * 三張：緞帶外緣、緞帶本體、兩條細線（顏色在畫的時候才上，主色變了不用重畫）。左右各多留 [T_MARGIN] 格，
+     * 捲超過一半就在背景執行緒畫下一份，畫好才換上，主執行緒不等。
+     */
+    private class TMask(val iStart: Int, val cols: Int, val scale: Float, val cell: Float, val masks: Array<ImageBitmap>)
+
+    private const val T_MARGIN = 4
+    /** CPU 版的緞帶半寬（格子單位）：不跟焦點脈動變粗（一變遮罩就要重畫）。 */
+    private const val T_WIDTH = .085f + .35f * .19f
+    private val maskExec = java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "liuli-mask").apply { isDaemon = true } }
+
+    /** 緞帶的圓弧：iStart 那一格的左邊是 x＝0、畫面正中是 y＝0，cols 格寬、上下 half 格。回傳四條中心線（緞帶、細線內、細線外）。 */
+    private fun truchetArcs(iStart: Int, cols: Int, half: Int, cell: Float, width: Float): Array<Path> {
+        val rib = Path(); val fa = Path(); val fb = Path()
+        for (i in iStart until iStart + cols) for (j in -half - 1..half) {
+            val fl = flip(i, j)
+            // 兩個四分之一圓（半徑 0.5 格）：不翻＝圓心在左上、右下角；翻＝右上、左下角
+            val cx1 = if (fl) i + 1 else i; val cy1 = j
+            val cx2 = if (fl) i else i + 1; val cy2 = j + 1
+            val s1 = if (fl) 90f else 0f; val s2 = if (fl) 270f else 180f
+            for ((cx, cy, st) in arrayOf(Triple(cx1, cy1, s1), Triple(cx2, cy2, s2))) {
+                fun arc(p: Path, r: Float) {
+                    val x = (cx - iStart) * cell; val y = cy * cell
+                    p.arcTo(Rect(x - r * cell, y - r * cell, x + r * cell, y + r * cell), st, 90f, true)
+                }
+                arc(rib, .5f); arc(fa, .5f - .68f * width); arc(fb, .5f + .68f * width)
+            }
+        }
+        return arrayOf(rib, fa, fb)
+    }
+
+    /** 在背景執行緒畫遮罩（ALPHA_8）。寬度上限 4000 像素（Mali-400 的貼圖最大 4096）。 */
+    private fun buildMask(sc: Scratch, iStart: Int, cols: Int, half: Int, cell: Float, h: Float, scale0: Float) {
+        sc.tBuilding = true
+        maskExec.execute {
+            try {
+                val scale = min(scale0, 4000f / (cols * cell))
+                val bw = kotlin.math.ceil(cols * cell * scale).toInt(); val bh = kotlin.math.ceil(h * scale).toInt()
+                val arcs = truchetArcs(iStart, cols, half, cell, T_WIDTH)
+                val fineW = max(.012f, 1.5f * 7f / 1080f) * cell * 2f
+                val stroke = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                    style = android.graphics.Paint.Style.STROKE; strokeCap = android.graphics.Paint.Cap.BUTT
+                }
+                fun mask(vararg lines: Pair<Path, Float>): ImageBitmap {
+                    val b = android.graphics.Bitmap.createBitmap(bw, bh, android.graphics.Bitmap.Config.ALPHA_8)
+                    val c = android.graphics.Canvas(b)
+                    c.scale(scale, scale); c.translate(0f, h / 2)
+                    for ((line, wd) in lines) { stroke.strokeWidth = wd; c.drawPath(line.asAndroidPath(), stroke) }
+                    return b.asImageBitmap()
+                }
+                val m = TMask(iStart, cols, scale, cell, arrayOf(
+                    mask(arcs[0] to 2f * T_WIDTH * cell),
+                    mask(arcs[0] to 2f * .655f * T_WIDTH * cell),
+                    mask(arcs[1] to fineW, arcs[2] to fineW),
+                ))
+                sc.tMask = m
+            } catch (_: Throwable) {
+            } finally { sc.tBuilding = false }
+        }
+    }
+
     fun DrawScope.truchet(st: BgState, w: Float, h: Float) {
         val sc = scratch.get()!!
         val tRibbon = sc.tRibbon; val tFineA = sc.tFineA; val tFineB = sc.tFineB
         val cell = h / 7f
         val t = (st.at * .055).toDouble()
-        // 緞帶半寬（格子單位）：分成 0.005 一檔（1080p 約 0.8 像素，看不出跳），焦點脈動時才不用每格重建外框
-        val width = kotlin.math.round((.085f + (.35f + .4f * st.pulse) * .19f) * 200f) / 200f
+        val width = T_WIDTH
         val bg = col(st, 0f, .75f, .13f); val rib = col(st, 40f, .85f, .48f)
         val edge = col(st, 20f, .8f, .38f); val fine = col(st, 0f, .8f, .24f)
         drawRect(bg, size = Size(w, h))
         val i0 = floor(t - w / 2 / cell).toInt() - 1
         val half = (h / 2 / cell).toInt() + 1
-        // 路徑以「格子單位 × cell」畫，捲到下一格（i0 變）或緞帶寬度換檔才重建；細線的半徑跟著寬度。
-        // 建好就轉成填色外框，之後每格只平移
+        val visCols = (w / cell).toInt() + 4
+        val fc = lerp(rib, fine, .42f)
+        if (!forGlass()) {
+            // 遮罩：涵蓋畫面就直接平移疊上；捲超過一半、解析度變了就在背景畫下一份
+            val scale = size.width / w
+            val m = sc.tMask
+            val off = if (m == null) -1 else i0 - m.iStart
+            val stale = m == null || m.cell != cell || kotlin.math.abs(m.scale - min(scale, 4000f / (m.cols * cell))) > m.scale * .05f ||
+                off < T_MARGIN / 2 || off > T_MARGIN + T_MARGIN / 2
+            if (stale && !sc.tBuilding) buildMask(sc, i0 - T_MARGIN, visCols + 2 * T_MARGIN, half, cell, h, scale)
+            if (m != null && m.cell == cell && off >= 0 && off + visCols <= m.cols) {
+                val ox = w / 2 + ((m.iStart - t) * cell).toFloat()
+                withTransform({ translate(ox, 0f); scale(1f / m.scale, 1f / m.scale, Offset.Zero) }) {
+                    drawImage(m.masks[0], colorFilter = ColorFilter.tint(lerp(rib, edge, .38f), BlendMode.SrcIn))
+                    drawImage(m.masks[1], colorFilter = ColorFilter.tint(rib, BlendMode.SrcIn))
+                    drawImage(m.masks[2], colorFilter = ColorFilter.tint(fc, BlendMode.SrcIn))
+                }
+                return
+            }
+        }
+        // 還沒有遮罩（剛切過來）或玻璃小圖：直接畫外框（捲到下一格才重建）
         val fineW = max(.012f, 1.5f * 7f / 1080f) * cell * 2f
         val key = i0.toLong() * 4096 + (width * 4000).toInt()
         if (key != sc.tKey || sc.tRibbonFill == null) {
             sc.tKey = key
+            val arcs = truchetArcs(i0, visCols, half, cell, width)
             tRibbon.reset(); tFineA.reset(); tFineB.reset()
-            val cols = (w / cell).toInt() + 4
-            for (i in i0 until i0 + cols) for (j in -half - 1..half) {
-                val fl = flip(i, j)
-                // 兩個四分之一圓（半徑 0.5 格）：不翻＝圓心在左上、右下角；翻＝右上、左下角
-                val cx1 = if (fl) i + 1 else i; val cy1 = j
-                val cx2 = if (fl) i else i + 1; val cy2 = j + 1
-                val s1 = if (fl) 90f else 0f; val s2 = if (fl) 270f else 180f
-                for ((cx, cy, s) in arrayOf(Triple(cx1, cy1, s1), Triple(cx2, cy2, s2))) {
-                    fun arc(p: Path, r: Float) {
-                        val x = (cx - i0) * cell; val y = cy * cell
-                        p.arcTo(Rect(x - r * cell, y - r * cell, x + r * cell, y + r * cell), s, 90f, true)
-                    }
-                    arc(tRibbon, .5f); arc(tFineA, .5f - .68f * width); arc(tFineB, .5f + .68f * width)
-                }
-            }
+            tRibbon.addPath(arcs[0]); tFineA.addPath(arcs[1]); tFineB.addPath(arcs[2])
             sc.tRibbonFill = sc.toFill(tRibbon, 2f * width * cell)
             sc.tInnerFill = sc.toFill(tRibbon, 2f * .655f * width * cell)
             sc.tFineAFill = sc.toFill(tFineA, fineW)
             sc.tFineBFill = sc.toFill(tFineB, fineW)
         }
-        // 捲動的位移對齊到整數個繪製像素（捲得很慢，約每 7 格才跨一個像素）：位移沒變的格子，畫布可以沿用上一格切好的三角形
-        val pxScale = size.width / w
-        val sx = kotlin.math.round((w / 2 - ((t - i0) * cell).toFloat()) * pxScale) / pxScale
-        withTransform({ translate(sx, h / 2) }) {
+        withTransform({ translate(w / 2 - ((t - i0) * cell).toFloat(), h / 2) }) {
             // 玻璃小圖：只畫緞帶本體（亮面與細線在 120×68 上看不到，模糊後更看不出來）
             if (forGlass()) { drawPath(sc.tRibbonFill!!, lerp(rib, edge, .2f)); return@withTransform }
             // 緞帶：外緣帶一點外緣色（GPU 版的 ridge 以外 ×0.38），中間是緞帶色
             drawPath(sc.tRibbonFill!!, lerp(rib, edge, .38f))
             drawPath(sc.tInnerFill!!, rib)
             // 兩條細線（離中心 0.68 個半寬）
-            val fc = lerp(rib, fine, .42f)
             drawPath(sc.tFineAFill!!, fc)
             drawPath(sc.tFineBFill!!, fc)
         }
