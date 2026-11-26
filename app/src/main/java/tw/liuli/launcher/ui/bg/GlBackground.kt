@@ -538,7 +538,7 @@ void main() {
 
     /** 液態以太：CPU 模擬的結果（80×45 RGBA）上傳到第 2 個貼圖單元。 */
     private fun uploadData(style: BgStyle) {
-        if (style != BgStyle.LIQUID) return
+        if (style != BgStyle.LIQUID && style != BgStyle.CURTAIN) return
         if (dataTex == 0) {
             val ids = IntArray(1)
             GLES20.glGenTextures(1, ids, 0)
@@ -552,8 +552,14 @@ void main() {
         }
         GLES20.glActiveTexture(GLES20.GL_TEXTURE2)
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, dataTex)
-        LiquidEther.glData.position(0)
-        GLES20.glTexImage2D(GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, LiquidEther.W, LiquidEther.H, 0, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, LiquidEther.glData)
+        if (style == BgStyle.CURTAIN) {
+            // 極光簾：只跟 x 有關的量在 CPU 算好（見 GlStyles2.Curtain.fillData）
+            GlStyles2.Curtain.fillData(work)
+            GLES20.glTexImage2D(GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, GlStyles2.Curtain.DATA_W, GlStyles2.Curtain.DATA_H, 0, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, GlStyles2.Curtain.data)
+        } else {
+            LiquidEther.glData.position(0)
+            GLES20.glTexImage2D(GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, LiquidEther.W, LiquidEther.H, 0, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, LiquidEther.glData)
+        }
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
     }
 
@@ -839,7 +845,6 @@ void main() {
         BgStyle.WARP -> if (debugGrid > 0) debugGrid to debugGrid * 9 / 16 else if (fragHighp) 32 to 18 else 96 to 54
         // 相位在頂點算成單位向量再內插的樣式：每格相位轉的角度要小，內插才準（見 GlStyles2.Spiral、GlStyles.Sauce）
         BgStyle.SPIRAL -> 64 to 36
-        BgStyle.CURTAIN -> 128 to 2     // 頂點算的量只跟 x 有關：橫向密、縱向 2 格就好
         BgStyle.SAUCE -> 96 to 54
         BgStyle.SIMPLEX -> 64 to 36
         else -> 32 to 18
@@ -1026,7 +1031,6 @@ void main() { v_uv = a_pos * 0.5 + 0.5; gl_Position = vec4(a_pos.x, a_pos.y * u_
 internal fun BgStyle.glVertex(): String = when (this) {
     BgStyle.SAUCE -> GlStyles.Sauce.VERTEX
     BgStyle.SPIRAL -> GlStyles2.Spiral.VERTEX
-    BgStyle.CURTAIN -> GlStyles2.Curtain.VERTEX
     BgStyle.SIMPLEX -> GlStyles2.Simplex.VERTEX
     BgStyle.WARP -> if (GlBackground.fragHighp) GlBackground.VERTEX else GlStyles2.Warp.VERTEX
     BgStyle.SOFTAURORA -> GlStyles2.SoftAurora.VERTEX

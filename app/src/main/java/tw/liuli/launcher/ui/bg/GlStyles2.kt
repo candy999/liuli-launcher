@@ -464,51 +464,62 @@ void main() {
         }
 
         /**
-         * 只跟橫向位置 x 有關的量（每層簾腳的高度、飄移、亮斑、往上延伸多高：四次雜訊＋兩次 sin）在頂點著色器用全精度算，
-         * 網格橫向 128 格、縱向 2 格（這些量跟 y 無關，頂點很少）；片段只剩細絲的雜訊與幾個指數衰減——
-         * 以前每個像素三層各算一遍，海信上 384×216 就要 30ms。頂點不能讀貼圖，雜訊改用雜湊的 value noise（gv）。
+         * 只跟橫向位置 x 有關的量（每層簾腳的高度、飄移、亮斑、往上延伸多高：四次雜訊＋兩次 sin）每格在 CPU 上算好
+         * （128 欄 × 3 層），存成一張 128×6 的小貼圖（u_data，第 2 個貼圖單元），片段每層只讀兩個像素——
+         * 以前每個像素三層各算一遍，海信上 384×216 就要 30ms。（試過搬到頂點著色器：超過 Mali-400 頂點單元 512 條指令的上限，編譯失敗。）
+         * 每層兩列：(簾腳高度高位, 低位, 飄移, 亮斑)、(往上延伸, -, -, -)；簾腳要精確（下緣那道亮邊），用 16 位元。
          */
-        const val VERTEX = """
-attribute vec2 a_pos;
-uniform float u_fy;
-uniform vec4 u_w;
-uniform vec4 u_v1;
-varying vec2 v_uv;
-varying vec3 v_hem;
-varying vec3 v_dr;
-varying vec3 v_pa;
-varying vec3 v_re;
-""" + GlBackground.VNOISE + """
-vec4 lay(float i, float px, float act, vec4 tt) {
-  float x = px + i * 0.42;
-  float bend = 0.15 * sin(x * 2.2 + u_v1.x) + (0.03 + act * 0.08) * sin(x * 4.8 - u_v1.y + i);
-  float hem = -0.10 - i * 0.13 + bend + (0.012 + act * 0.028) * (gv(vec2(x * 15.0, tt.x + i)) - 0.5);
-  float dr = x + (0.017 + act * 0.015) * gv(vec2(x * 8.0, tt.y + i));
-  float pa = 0.48 + 0.8 * gv(vec2(x * 8.0 + i, tt.w));
-  float re = 5.5 + gv(vec2(x * 11.0, i + 4.0)) * 5.0 - act * 1.5;
-  return vec4(hem, dr, pa, re);
-}
-void main() {
-  v_uv = a_pos * 0.5 + 0.5;
-  float px = (v_uv.x - 0.5) * u_w.x;
-  float act = u_v1.z;
-  vec4 tt = u_vt + u_vf;
-  vec4 a = lay(0.0, px, act, tt);
-  vec4 b = lay(1.0, px, act, tt);
-  vec4 c = lay(2.0, px, act, tt);
-  v_hem = vec3(a.x, b.x, c.x);
-  v_dr = vec3(a.y, b.y, c.y);
-  v_pa = vec3(a.z, b.z, c.z);
-  v_re = vec3(a.w, b.w, c.w);
-  gl_Position = vec4(a_pos.x, a_pos.y * u_fy, 0.0, 1.0);
-}
-"""
+        const val DATA_W = 128
+        const val DATA_H = 6
+        val data: java.nio.ByteBuffer = java.nio.ByteBuffer.allocateDirect(DATA_W * DATA_H * 4)
+
+        private fun hash(x: Int, y: Int): Float {
+            var n = x * 374761393 + y * 668265263
+            n = (n xor (n ushr 13)) * 1274126177
+            return ((n xor (n ushr 16)) and 0xffff) / 65535f
+        }
+
+        /** 平滑的 value noise（0～1）。 */
+        private fun vn(x: Double, y: Double): Float {
+            val ix = kotlin.math.floor(x); val iy = kotlin.math.floor(y)
+            var fx = (x - ix).toFloat(); var fy = (y - iy).toFloat()
+            fx = fx * fx * (3 - 2 * fx); fy = fy * fy * (3 - 2 * fy)
+            val i = ix.toInt(); val j = iy.toInt()
+            val a = hash(i, j); val b = hash(i + 1, j); val c = hash(i, j + 1); val d = hash(i + 1, j + 1)
+            return (a + (b - a) * fx) + ((c + (d - c) * fx) - (a + (b - a) * fx)) * fy
+        }
+
+        private fun b(v: Float) = (v.coerceIn(0f, 1f) * 255f + .5f).toInt().toByte()
+
+        /** 照這一格的參數（[params] 寫的 work）算出 [data]（GL 執行緒呼叫）。 */
+        fun fillData(p: FloatArray) {
+            val asp = p[0]; val ph1 = p[4]; val ph2 = p[5]; val act = p[6]
+            val tx = (p[56] + p[60]).toDouble(); val ty = (p[57] + p[61]).toDouble(); val tw = (p[59] + p[63]).toDouble()
+            data.position(0)
+            for (row in 0 until DATA_H) {
+                val i = row / 2
+                val second = row % 2 == 1
+                for (cIdx in 0 until DATA_W) {
+                    val x = ((cIdx + .5f) / DATA_W - .5f) * asp + i * .42f
+                    if (!second) {
+                        val bend = .15f * kotlin.math.sin(x * 2.2f + ph1) + (.03f + act * .08f) * kotlin.math.sin(x * 4.8f - ph2 + i)
+                        val hem = -.10f - i * .13f + bend + (.012f + act * .028f) * (vn(x * 15.0, tx + i) - .5f)
+                        val hv = ((hem + .7f) / 1.0f).coerceIn(0f, .9999f) * 255f
+                        val hi = kotlin.math.floor(hv)
+                        val dr = (.017f + act * .015f) * vn(x * 8.0, ty + i)
+                        val pa = .48f + .8f * vn(x * 8.0 + i, tw)
+                        data.put((hi + .5f).toInt().toByte()); data.put(b(hv - hi)); data.put(b(dr / .04f)); data.put(b((pa - .48f) / .8f))
+                    } else {
+                        val re = 5.5f + vn(x * 11.0, i + 4.0) * 5f - act * 1.5f
+                        data.put(b((re - 4f) / 6.5f)); data.put(0); data.put(0); data.put(0)
+                    }
+                }
+            }
+            data.position(0)
+        }
 
         const val SHADER = HEAD + """
-varying vec3 v_hem;
-varying vec3 v_dr;
-varying vec3 v_pa;
-varying vec3 v_re;
+uniform sampler2D u_data;
 vec3 layerCol(float py, float hem, float dr, float pa, float re, float layer, float amt, float act) {
   float rise = py - hem;
   float drift = dr + rise * 0.1;
@@ -525,9 +536,14 @@ void main() {
   vec2 p = vec2((uv.x - 0.5) * u_p[0].x, 0.5 - uv.y);
   float act = u_p[2].z;
   vec3 color = mix(u_p[6].rgb, u_p[7].rgb, 1.0 - uv.y);
-  color += layerCol(p.y, v_hem.x, v_dr.x, v_pa.x, v_re.x, 0.0, 1.0, act);
-  color += layerCol(p.y, v_hem.y, v_dr.y, v_pa.y, v_re.y, 1.0, 0.32, act);
-  color += layerCol(p.y, v_hem.z, v_dr.z, v_pa.z, v_re.z, 2.0, 0.1024, act);
+  for (int i = 0; i < 3; i++) {
+    float layer = float(i);
+    vec4 a = texture2D(u_data, vec2(v_uv.x, (layer * 2.0 + 0.5) / 6.0));
+    vec4 b = texture2D(u_data, vec2(v_uv.x, (layer * 2.0 + 1.5) / 6.0));
+    float hem = a.r + a.g / 255.0 - 0.7;
+    float dr = p.x + layer * 0.42 + a.b * 0.04;
+    color += layerCol(p.y, hem, dr, 0.48 + a.a * 0.8, 4.0 + b.r * 6.5, layer, layer < 0.5 ? 1.0 : (layer < 1.5 ? 0.32 : 0.1024), act);
+  }
   color *= 0.88 + 0.12 * pow(max(0.0, 1.0 - length(p) * 0.6), 0.6);
   vec3 col = 1.0 - exp(-color * 1.4);
   """ + DITHER + """
