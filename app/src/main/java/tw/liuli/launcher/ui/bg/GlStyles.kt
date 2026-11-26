@@ -213,21 +213,40 @@ void main() {
             put(out, 16, st.col(14f, .6f, .86f))     // 最亮處
         }
 
+        /** 旋轉座標（線性）與沿葉片方向的衰減（平滑）在頂點算，片段只切葉片、算橫向明暗（以前每個像素都算 sin、cos、exp）。 */
+        const val VERTEX = """
+attribute vec2 a_pos;
+uniform float u_fy;
+uniform vec4 u_w;
+uniform vec4 u_v1;
+varying vec2 v_uv;
+varying float v_rx;
+varying float v_along;
+void main() {
+  v_uv = a_pos * 0.5 + 0.5;
+  vec2 p = (v_uv - u_w.xy) * vec2(u_w.z, 1.0);
+  float sa = sin(u_v1.z);
+  float ca = cos(u_v1.z);
+  vec2 r = vec2(ca * p.x - sa * p.y, sa * p.x + ca * p.y);
+  v_rx = r.x;
+  v_along = exp(-r.y * r.y * 1.4);
+  gl_Position = vec4(a_pos.x, a_pos.y * u_fy, 0.0, 1.0);
+}
+"""
+
         const val SHADER = """
 precision mediump float;
 uniform sampler2D u_noise;
 uniform vec4 u_p[16];
 varying vec2 v_uv;
+varying float v_rx;
+varying float v_along;
 void main() {
-  vec2 p = (v_uv - u_p[0].xy) * vec2(u_p[0].z, 1.0);
-  float sa = sin(u_p[1].z);
-  float ca = cos(u_p[1].z);
-  vec2 r = vec2(ca * p.x - sa * p.y, sa * p.x + ca * p.y);
-  float x = r.x * u_p[1].x + u_p[1].y;
+  float x = v_rx * u_p[1].x + u_p[1].y;
   float fx = fract(x);
   float cx = (floor(x) + 0.5 - u_p[1].y) / u_p[1].x;
   float across = exp(-cx * cx * (2.2 - 0.8 * u_p[0].w));
-  float along = exp(-r.y * r.y * 1.4);
+  float along = v_along;
   float prof = smoothstep(0.0, 0.8, fx) * (1.0 - smoothstep(0.86, 1.0, fx));
   float lum = prof * across * along;
   lum *= 0.8 + 0.4 * texture2D(u_noise, gl_FragCoord.xy / 64.0).g;

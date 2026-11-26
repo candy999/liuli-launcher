@@ -102,12 +102,17 @@ internal object MeshGradient {
     }
 
     // 色點權重＝1／(距離^3.5＋0.001)（同 Paper）。距離用平方算：pow(d², 1.75)；d² 設下限，避免 pow(0, y)（有些 GPU 回傳 NaN）
-    const val SHADER = """
-precision mediump float;
-uniform sampler2D u_noise;
+    /**
+     * 整個顏色在頂點著色器用全精度算（扭曲、旋轉、五個色點的權重都是很平滑的量），網格 96×54（每格約 20 像素），
+     * 片段只做內插＋高光壓縮＋抖色——以前每個像素算一遍（五次 pow、六次三角函數），海信上 960×540 要 34ms，是最重的樣式。
+     * 頂點著色器用全精度，也順便避開了片段半精度的誤差。片段不宣告 u_p，頂點的 u_p 才不會跟片段的精度衝突。
+     */
+    const val VERTEX = """
+attribute vec2 a_pos;
+uniform float u_fy;
 uniform vec4 u_p[16];
 varying vec2 v_uv;
-
+varying vec3 v_col;
 vec2 rot(vec2 v, float a) {
   float s = sin(a);
   float c = cos(a);
@@ -119,7 +124,8 @@ float wt(vec2 d) {
 }
 
 void main() {
-  vec2 uv = v_uv;
+  vec2 uv = a_pos * 0.5 + 0.5;
+  v_uv = uv;
   float t = u_p[0].x;
   float t5 = u_p[0].y;
   float dist = u_p[0].w;
@@ -142,8 +148,19 @@ void main() {
   float w2 = wt(r - u_p[2].xy);
   float w3 = wt(r - u_p[2].zw);
   float w4 = wt(r - u_p[3].xy);
-  vec3 col = (u_p[4].rgb * w0 + u_p[5].rgb * w1 + u_p[6].rgb * w2 + u_p[7].rgb * w3 + u_p[8].rgb * w4) / (w0 + w1 + w2 + w3 + w4);
+  v_col = (u_p[4].rgb * w0 + u_p[5].rgb * w1 + u_p[6].rgb * w2 + u_p[7].rgb * w3 + u_p[8].rgb * w4) / (w0 + w1 + w2 + w3 + w4);
 
+  gl_Position = vec4(a_pos.x, a_pos.y * u_fy, 0.0, 1.0);
+}
+"""
+
+    const val SHADER = """
+precision mediump float;
+uniform sampler2D u_noise;
+varying vec2 v_uv;
+varying vec3 v_col;
+void main() {
+  vec3 col = v_col;
   // 抖色：加上 ±½ 階的雜訊再寫入 8 bit，暗色的大面積漸層不會斷成一圈一圈
   """ + GlBackground.TONE + """  col += (texture2D(u_noise, gl_FragCoord.xy / 64.0).rgb - 0.5) / 255.0;
   gl_FragColor = vec4(col, 1.0);

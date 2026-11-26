@@ -109,13 +109,14 @@ float ss(float m) {
 void main() {
   float shape = 0.5 + 0.5 * v_n;
   float mixer = (shape - 0.1) * 5.0;
-  vec3 col = u_p[2].rgb;
-  col = mix(col, u_p[3].rgb, ss(clamp(mixer, 0.0, 1.0)));
-  col = mix(col, u_p[4].rgb, ss(clamp(mixer - 1.0, 0.0, 1.0)));
-  col = mix(col, u_p[5].rgb, ss(clamp(mixer - 2.0, 0.0, 1.0)));
-  col = mix(col, u_p[6].rgb, ss(clamp(mixer - 3.0, 0.0, 1.0)));
-  if (mixer < 0.0) col = mix(u_p[6].rgb, u_p[2].rgb, ss(clamp(mixer + 1.0, 0.0, 1.0)));
-  if (mixer > 4.0) col = mix(u_p[6].rgb, u_p[2].rgb, ss(clamp(mixer - 4.0, 0.0, 1.0)));
+  // 先判斷落在哪一段，只做一次分色階（以前五段各做一次 floor／fract／smoothstep，結果相同）
+  float k = clamp(floor(mixer), -1.0, 4.0);
+  vec3 ca = u_p[6].rgb; vec3 cb = u_p[2].rgb;
+  if (k > -0.5 && k < 0.5) { ca = u_p[2].rgb; cb = u_p[3].rgb; }
+  else if (k > 0.5 && k < 1.5) { ca = u_p[3].rgb; cb = u_p[4].rgb; }
+  else if (k > 1.5 && k < 2.5) { ca = u_p[4].rgb; cb = u_p[5].rgb; }
+  else if (k > 2.5 && k < 3.5) { ca = u_p[5].rgb; cb = u_p[6].rgb; }
+  vec3 col = mix(ca, cb, ss(clamp(mixer - k, 0.0, 1.0)));
   """ + DITHER + """
   gl_FragColor = vec4(col, 1.0);
 }
@@ -141,13 +142,14 @@ void main() {
   // f＝(形狀−0.1)×10 的小數：每個像素變 10·fwidth(形狀)；半寬取 0.75 個像素
   hw = clamp(7.5 * fwidth(shape), 0.002, 0.25);
   float mixer = (shape - 0.1) * 5.0;
-  vec3 col = u_p[2].rgb;
-  col = mix(col, u_p[3].rgb, ss(clamp(mixer, 0.0, 1.0)));
-  col = mix(col, u_p[4].rgb, ss(clamp(mixer - 1.0, 0.0, 1.0)));
-  col = mix(col, u_p[5].rgb, ss(clamp(mixer - 2.0, 0.0, 1.0)));
-  col = mix(col, u_p[6].rgb, ss(clamp(mixer - 3.0, 0.0, 1.0)));
-  if (mixer < 0.0) col = mix(u_p[6].rgb, u_p[2].rgb, ss(clamp(mixer + 1.0, 0.0, 1.0)));
-  if (mixer > 4.0) col = mix(u_p[6].rgb, u_p[2].rgb, ss(clamp(mixer - 4.0, 0.0, 1.0)));
+  // 先判斷落在哪一段，只做一次分色階（以前五段各做一次 floor／fract／smoothstep，結果相同）
+  float k = clamp(floor(mixer), -1.0, 4.0);
+  vec3 ca = u_p[6].rgb; vec3 cb = u_p[2].rgb;
+  if (k > -0.5 && k < 0.5) { ca = u_p[2].rgb; cb = u_p[3].rgb; }
+  else if (k > 0.5 && k < 1.5) { ca = u_p[3].rgb; cb = u_p[4].rgb; }
+  else if (k > 1.5 && k < 2.5) { ca = u_p[4].rgb; cb = u_p[5].rgb; }
+  else if (k > 2.5 && k < 3.5) { ca = u_p[5].rgb; cb = u_p[6].rgb; }
+  vec3 col = mix(ca, cb, ss(clamp(mixer - k, 0.0, 1.0)));
   """ + DITHER + """
   gl_FragColor = vec4(col, 1.0);
 }
