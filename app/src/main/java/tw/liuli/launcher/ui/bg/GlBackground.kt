@@ -66,11 +66,11 @@ object GlBackground {
 
     /**
      * 動態解析度（規則和 CPU 樣式的背景引擎一樣，見 BackgroundEngine.run 的排程原則）：
-     * - 每個樣式記住一個「學到的檔位」（[SIZES] 的索引，0＝原生（背景實際的畫面大小）… 最後＝320×180），起點見 [startLevel]
+     * - 每個樣式記住一個「學到的檔位」（[SIZES] 的索引＝原生 ÷1～÷5 的除數−1，和 CPU 樣式一樣），起點見 [startLevel]
      * - 每約 1 秒一窗（每 3 張量一次 GPU 時間、取 10 次的中位數）：超過 [SLOW_MS] 連續兩窗（或超過 [VERY_SLOW_MS] 一窗）降一檔；
      *   升檔前先推估上一檔的成本（約 70% 跟像素數成正比），推估在 [UP_MS] 以內、連續兩窗才升；剛升就變慢＝試探失敗，退避時間加倍。
      *   上限是原生解析度（電視實際的畫面大小）：GPU 夠強的電視會一路升到原生
-     * - 操作中、面板／抽屜開著：降到 640×360（[BUSY_LEVEL]），每秒 30 格不變；便宜的樣式（一張 [CHEAP_MS] 以內）不降。
+     * - 操作中、面板／抽屜開著：降到原生 ÷3（[BUSY_LEVEL]，1080p＝640×360），每秒 30 格不變；便宜的樣式（一張 [CHEAP_MS] 以內）不降。
      *   操作結束每 [RAMP_STEP_MS] 拉回一檔
      * - 只在轉場時動的樣式（漸層百葉）停下來、遙控器閒置一下之後，補畫一張原生解析度（[request] 的 still）
      * [debugLevel]（adb ACTION=glres:N）強制檔位，-1＝自動。
@@ -95,8 +95,8 @@ object GlBackground {
     }
     /** 每個樣式最近在學到的檔位量到的 GPU 時間（毫秒；-1＝還沒量）：判斷「便宜的樣式不降」。 */
     private val lastCost = FloatArray(BgStyle.entries.size) { -1f }
-    /** 操作中降到的檔位：640×360 */
-    private val BUSY_LEVEL get() = lvFor(640)
+    /** 操作中、面板／抽屜開著降到的檔位：原生 ÷3（和 CPU 樣式的 BackgroundEngine.BUSY_DIV 一樣；1080p＝640×360） */
+    private const val BUSY_LEVEL = 2
     private const val CHEAP_MS = 12f
     private const val UP_MS = 16f
     private const val VERY_SLOW_MS = 36f
@@ -119,18 +119,17 @@ object GlBackground {
     private var lastLevelLog = 0L
 
     /**
-     * 起始檔位（用寬度指定，換成 [SIZES] 的索引；原生比較小的機器會落在不超過那個寬度的第一檔）。
+     * 起始檔位（原生 ÷ 幾，換成 [SIZES] 的索引＝除數−1）。
      * 全部每秒 30 格（以前有些樣式每秒 15 格換解析度，流動看得出卡），解析度照 30 格的 GPU 預算（一張 20ms 以內）挑。
      * 海信 Mali-470 實測（一張的 GPU 時間）：螺旋 960 約 9ms、特魯謝緞帶 14ms、液態以太 13ms、漩渦 960 要 21ms → 800；
      * 色塊雜訊、扭曲色帶、水彩（每滴只畫自己的範圍）、柔極光（帶子的形狀在頂點算）640 約 14～16ms；極光簾 320 約 18ms。
      */
-    private fun startLevel(style: BgStyle) = lvFor(when (style) {
-        BgStyle.SPIRAL, BgStyle.TRUCHET, BgStyle.BLINDS, BgStyle.LIQUID -> 960
-        BgStyle.SWIRL -> 800
-        BgStyle.SIMPLEX, BgStyle.WARP, BgStyle.SOFTAURORA, BgStyle.WATERCOLOR -> 640
-        BgStyle.CURTAIN -> 320
-        else -> 480
-    })
+    private fun startLevel(style: BgStyle) = when (style) {
+        BgStyle.SPIRAL, BgStyle.TRUCHET, BgStyle.BLINDS, BgStyle.LIQUID -> 2
+        BgStyle.SWIRL, BgStyle.SIMPLEX, BgStyle.WARP, BgStyle.SOFTAURORA, BgStyle.WATERCOLOR -> 3
+        BgStyle.CURTAIN -> 5
+        else -> 4
+    } - 1
 
     /** 每幾次要求才真的畫一張：現在全部每秒 30 格（保留這個介面給量測與儀表）。 */
     @Suppress("UNUSED_PARAMETER")
@@ -139,28 +138,22 @@ object GlBackground {
     private var reqN = 0
     private var measuredStyle: BgStyle? = null
     private var slowWins = 0
-    /** 原生以下的固定檔位（16:9）。放大到 1080p 時，畫面上有銳利邊緣的樣式（色帶、線條）要 960×540 以上才不糊。 */
-    private val BASE = arrayOf(intArrayOf(1920, 1080), intArrayOf(1280, 720), intArrayOf(960, 540), intArrayOf(800, 450), intArrayOf(640, 360), intArrayOf(480, 270), intArrayOf(320, 180))
     /**
-     * 解析度檔位：0＝原生（背景實際的畫面大小，TextureView 一好就換成它），接著是比原生小的 [BASE]，越後面越小。
-     * 1080p 的電視＝1920×1080 … 320×180；介面只有 720p 的機上盒最高就是 1280×720（不畫比螢幕還大的圖）；
-     * 介面是 4K 的電視最高 3840×2160（GPU 付得起才會升上去）。
+     * 解析度檔位＝原生 ÷1～÷5（索引＝除數−1），和 CPU 樣式的動態解析度（BackgroundEngine.renderDiv，1～MAX_DIV）同一套：
+     * 面板狀態（操作中、抽屜開著降到 ÷3）兩邊對得上；整數倍放大，每個低解析度像素剛好對齊 d×d 個實體像素。
+     * 原生＝背景實際的畫面大小（TextureView 一好就換成它；1080p＝1920／960／640／480／384，介面 720p 的機上盒＝1280／640／427／320／256）。
      */
-    @Volatile private var SIZES = BASE
-
-    /** 第一個寬度不超過 [width] 的檔位（操作中的 640×360、讀回模式的 480×270、各樣式的起點都用寬度指定，不受原生大小影響）。 */
-    private fun lvFor(width: Int, sz: Array<IntArray> = SIZES): Int {
-        for (i in sz.indices) if (sz[i][0] <= width) return i
-        return sz.size - 1
-    }
+    private const val MAX_DIV = 5
+    private fun sizesFor(w: Int, h: Int) = Array(MAX_DIV) { i -> val d = i + 1; intArrayOf((w + d - 1) / d, (h + d - 1) / d) }
+    @Volatile private var SIZES = sizesFor(1920, 1080)
 
     /** 背景實際的畫面大小（主執行緒）：和目前的原生不同就重建檔位，各樣式重新從起點學。 */
     private fun setNative(w: Int, h: Int) {
         if (w < 320 || h < 180) return
         if (SIZES[0][0] == w && SIZES[0][1] == h) return
-        SIZES = arrayOf(intArrayOf(w, h)) + BASE.filter { it[0] < w && it[1] < h }
+        SIZES = sizesFor(w, h)
         levels.fill(-1); lastCost.fill(-1f); shownLevel = -1
-        Log.i(TAG, "原生 ${w}x$h，檔位 ${SIZES.joinToString(" ") { "${it[0]}" }}")
+        Log.i(TAG, "原生 ${w}x$h，檔位 ÷1～÷$MAX_DIV")
     }
     private const val SLOW_MS = 24f
 
@@ -569,7 +562,7 @@ void main() {
             }
         }
         // 讀回模式（沒有 TextureView）：大圖讀回付不起，最多 480×270
-        val rb = lvFor(480, sz)
+        val rb = minOf(3, sz.size - 1)   // ÷4
         if (lv < rb) { w = sz[rb][0]; h = sz[rb][1] }
         if (!ensureGl(w, h)) return null
         if (!EGL14.eglMakeCurrent(dpy, surf, surf, ctx)) throw IllegalStateException("eglMakeCurrent")
