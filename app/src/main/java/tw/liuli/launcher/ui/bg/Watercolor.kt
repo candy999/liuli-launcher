@@ -94,6 +94,9 @@ internal object Watercolor {
         lastSpawnAt = at
     }
 
+    /** 重整（主畫面看不到時）：下一張當成第一次，整張紙清掉、在焦點滴第一滴。 */
+    fun reset() { lastRipple = Int.MIN_VALUE }
+
     fun params(st: BgState, out: FloatArray) {
         val d = Loop.diff(st.at, lastAt)
         if (lastAt.isNaN() || d > 0f) { clk += d.coerceIn(0f, .25f); lastAt = st.at }

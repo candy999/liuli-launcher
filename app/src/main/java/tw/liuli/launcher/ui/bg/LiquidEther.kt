@@ -38,6 +38,10 @@ internal object LiquidEther {
     private var inAt = 0f; private var inFx = .5f; private var inFy = .5f
     private var glAt = 0f; private var glFx = .5f; private var glFy = .5f
 
+    /** 重整（主畫面看不到時；主執行緒）：下一次模擬前在 GL 執行緒把流體清空。 */
+    @Volatile private var resetPending = false
+    fun reset() { resetPending = true }
+
     /** 在 GlBackground 的鎖裡呼叫：把最新的輸入交給 GL 執行緒。 */
     fun snapshot() {
         glAt = inAt; glFx = inFx; glFy = inFy
@@ -116,6 +120,11 @@ internal object LiquidEther {
 
     /** GL 執行緒：用最新的輸入推進流體、寫出小圖（主執行緒完全不用算）。 */
     fun simulate() {
+        if (resetPending) {
+            resetPending = false
+            u.fill(0f); v.fill(0f); u0.fill(0f); v0.fill(0f); d.fill(0f); d0.fill(0f); p.fill(0f); div.fill(0f)
+            lastAt = -1f; lastFx = Float.NaN; lastFy = Float.NaN
+        }
         val at = glAt; val fx = glFx; val fy = glFy
         val dt = if (lastAt < 0f) 1f / 30f else Loop.diff(at, lastAt).let { if (it < 0f) 1f / 30f else min(.1f, it) }
         lastAt = at

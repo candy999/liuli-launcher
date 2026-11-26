@@ -61,6 +61,11 @@ internal object GlStyles {
         const val WEDGES = 9
         const val WAVE = 1.5f
 
+        /** 重整（主畫面看不到時）：攪拌中心、捲緊程度從頭開始。 */
+        fun reset() {
+            cx = Float.NaN; vx = 0f; vy = 0f; wind = 0f; breath = 0.0; lastAt = Float.NaN; settling = true
+        }
+
         fun params(st: BgState, out: FloatArray) {
             // 時鐘只往前走：玻璃小圖用的是稍早的狀態快照，拿它來算不能把時鐘往回撥
             val d = Loop.diff(st.at, lastAt)

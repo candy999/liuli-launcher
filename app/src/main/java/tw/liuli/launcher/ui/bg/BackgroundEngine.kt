@@ -301,10 +301,25 @@ class BackgroundEngine {
     @Volatile var debugAtJump = -1.0
 
     /**
-     * 開了別的 App（主畫面看不到）：動畫時鐘歸零，回來時從頭開始。看不到的時候撥，不會看到跳；
-     * 主畫面一直開著（好幾天）也沒關係，時鐘本來就每 [Loop.P] 秒無縫循環。
+     * 開了別的 App、螢幕關掉（主畫面看不到）：背景整個重整，回來時從頭開始，主畫面不會因為一直開著而累積狀態。
+     * - 動畫時鐘歸零（主畫面一直開著好幾天也沒關係，時鐘本來就每 [Loop.P] 秒無縫循環）
+     * - 逐格累積的樣式清掉重來：水彩的顏料（回來時在焦點滴第一滴）、液態以太的流體、三色濃醬的攪拌
+     * - 著色器背景的 GL（環境、緩衝、程式）原本就在系統通知「介面看不到」時整個釋放（[trimMemory]），回來重建
+     * 看不到的時候做，不會看到跳。
      */
-    fun restartClock() { debugAtJump = 0.0 }
+    fun refreshHidden() {
+        debugAtJump = 0.0
+        Watercolor.reset()
+        LiquidEther.reset()
+        GlStyles.Sauce.reset()
+        Log.i(TAG, "主畫面看不到：背景重整")
+    }
+
+    /** 回到主畫面：毛玻璃馬上照目前的背景重取一張（不沿用離開前的）。 */
+    fun onReturn() {
+        requestGlass()
+        frame++
+    }
     private var coldStart = true
     fun startPaceLog() { paceN = 0; paceLastNs = 0L; paceLeft = paceBuf.size }
     private fun pace(ns: Long) {
