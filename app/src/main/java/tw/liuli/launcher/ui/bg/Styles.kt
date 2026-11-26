@@ -533,8 +533,8 @@ fun DrawScope.galaxyNet(st: BgState) {
     val ppu = pixelsPerUnit()
     val nx = sc.netX; val ny = sc.netY
     for (i in 0 until NET_N) {
-        nx[i] = (hash01(i, 41) * 1.2f - .1f) * W + 22f * sin(t * (.05f + .07f * hash01(i, 43)) + i * 1.7f)
-        ny[i] = hash01(i, 42) * H + 16f * sin(t * (.04f + .06f * hash01(i, 44)) + i * 2.3f)
+        nx[i] = (hash01(i, 41) * 1.2f - .1f) * W + 22f * sin(t * Loop.w(.05f + .07f * hash01(i, 43)) + i * 1.7f)
+        ny[i] = hash01(i, 42) * H + 16f * sin(t * Loop.w(.04f + .06f * hash01(i, 44)) + i * 2.3f)
     }
     val maxD = W * .17f
     for (i in 0 until NET_N) {
@@ -543,14 +543,14 @@ fun DrawScope.galaxyNet(st: BgState) {
             if (abs(dx) > maxD || abs(dy) > maxD) continue
             val dist = sqrt(dx * dx + dy * dy)
             if (dist > maxD) continue
-            val wave = .5f + .5f * sin(t * .3f + (i * 7 + j * 13) * .37f)
+            val wave = .5f + .5f * sin(t * Loop.w(.3f) + (i * 7 + j * 13) * .37f)
             val a = (1f - dist / maxD).pow(1.6f) * .2f * wave
             if (a < .015f) continue
             drawLine(st.c(-6f, .35f, .8f, a), Offset(nx[i], ny[i]), Offset(nx[j], ny[j]), 1f / ppu, blendMode = BlendMode.Plus)
         }
     }
     for (i in 0 until NET_N) {
-        val tw = .6f + .4f * sin(t * (.8f + hash01(i, 45)) + i)
+        val tw = .6f + .4f * sin(t * Loop.w(.8f + hash01(i, 45)) + i)
         drawCircle(st.c(-6f, .25f, .9f, .6f * tw), .9f / ppu, Offset(nx[i], ny[i]), blendMode = BlendMode.Plus)
     }
 }
@@ -605,7 +605,7 @@ fun DrawScope.galaxyBrightStars(st: BgState) {
     for (i in 0 until 14) {
         val x = hash01(i, 121) * W + par * W * .04f
         val y = hash01(i, 122) * H + parY * H * .02f
-        val tw = .6f + .4f * sin(t * (.7f + 1.5f * hash01(i, 123)) + i * 2.3f)
+        val tw = .6f + .4f * sin(t * Loop.w(.7f + 1.5f * hash01(i, 123)) + i * 2.3f)
         val warm = if (hash01(i, 124) > .6f) 30f else 215f
         drawCircle(Color.hsl(warm, .2f, .95f, .9f * tw), 1.4f / ppu, Offset(x, y), blendMode = BlendMode.Plus)
     }
@@ -630,10 +630,10 @@ private fun DrawScope.deepsea(st: BgState) {
     for (i in 0 until 16) {
         val h1 = hash01(i, 11); val h2 = hash01(i, 12); val h3 = hash01(i, 13); val h4 = hash01(i, 14)
         // 角度：以畫面中央為主散開，再隨水面緩慢搖擺
-        val deg = (-26f + 52f * (i + h1) / 16f) + 2.2f * sin(t * (.07f + .06f * h2) + i * 1.3f)
+        val deg = (-26f + 52f * (i + h1) / 16f) + 2.2f * sin(t * Loop.w(.07f + .06f * h2) + i * 1.3f)
         // 寬度差很多：大多是寬而淡的光帶，少數窄而亮
         val w = 18f + 110f * h2 * h2
-        val flicker = .55f + .45f * sin(t * (.25f + .45f * h3) + i * 2.7f) * sin(t * (.11f + .2f * h4) + i)
+        val flicker = .55f + .45f * sin(t * Loop.w(.25f + .45f * h3) + i * 2.7f) * sin(t * Loop.w(.11f + .2f * h4) + i)
         val near = exp(-((sx + (H * .5f - sy) * kotlin.math.tan(deg * PI.toFloat() / 180f) - st.fx * W) / (W * .4f)).pow(2))
         val a = (.07f + .17f * (1f - h2) * h3 + .07f * near) * flicker
         if (a < .012f) continue
@@ -645,10 +645,10 @@ private fun DrawScope.deepsea(st: BgState) {
     }
     // 水面附近晃動的光：幾團很大、高斯暈開的柔光各自漂移、明暗起伏（水面起伏把光聚散），融在水裡、看不出形狀
     for (i in 0 until 7) {
-        val cx = (hash01(i, 21) * 1.3f - .15f) * W + 30f * sin(t * (.11f + .08f * hash01(i, 22)) + i) + par * W * .06f
-        val cy = H * (.0f + .14f * hash01(i, 23)) + 5f * sin(t * (.17f + .1f * hash01(i, 24)) + i * 1.3f)
+        val cx = (hash01(i, 21) * 1.3f - .15f) * W + 30f * sin(t * Loop.w(.11f + .08f * hash01(i, 22)) + i) + par * W * .06f
+        val cy = H * (.0f + .14f * hash01(i, 23)) + 5f * sin(t * Loop.w(.17f + .1f * hash01(i, 24)) + i * 1.3f)
         val r = 70f + 70f * hash01(i, 25)
-        val a = .09f * (.45f + .55f * sin(t * (.35f + .4f * hash01(i, 26)) + i * 2f))
+        val a = .09f * (.45f + .55f * sin(t * Loop.w(.35f + .4f * hash01(i, 26)) + i * 2f))
         if (a < .01f) continue
         withTransform({ scale(1f, .45f, pivot = Offset(cx, cy)) }) {
             drawRect(gaussBrush(st.c(-12f, .35f, .82f, a), Offset(cx, cy), r), Offset(cx - r, cy - r), Size(r * 2, r * 2), blendMode = BlendMode.Plus)
@@ -656,7 +656,7 @@ private fun DrawScope.deepsea(st: BgState) {
     }
     // 緩慢飄過的陰影（水面的起伏遮住一部分光）
     for (i in 0 until 4) {
-        val cx = frac(hash01(i, 31) + t * .006f * (1f + hash01(i, 32))) * W * 1.6f - W * .3f
+        val cx = frac(hash01(i, 31) + t * Loop.v(.006f * (1f + hash01(i, 32)), 1f)) * W * 1.6f - W * .3f
         val cy = H * (.15f + .35f * hash01(i, 33))
         val r = W * (.18f + .12f * hash01(i, 34))
         drawRect(gaussBrush(Color.Black.copy(alpha = .18f), Offset(cx, cy), r), size = FULL)
@@ -664,8 +664,8 @@ private fun DrawScope.deepsea(st: BgState) {
     // 懸浮微粒（海雪）：慢慢往下飄；近的大、亮、飄得快、視差大；落在光束裡的更亮
     for (p in 0 until 46) {
         val d = .2f + .8f * hash01(p, 5)
-        val x = frac(hash01(p, 1) + t * .004f * (hash01(p, 6) - .5f)) * W * 1.2f - W * .1f + par * W * .12f * d
-        val y = frac(hash01(p, 2) + t * (.006f + .014f * d)) * (H + 10f) - 5f
+        val x = frac(hash01(p, 1) + t * Loop.v(.004f * (hash01(p, 6) - .5f), 1f)) * W * 1.2f - W * .1f + par * W * .12f * d
+        val y = frac(hash01(p, 2) + t * Loop.v(.006f + .014f * d, 1f)) * (H + 10f) - 5f
         val a = .1f + .28f * d * (1f - y / H * .6f)
         drawCircle(st.c(-8f, .3f, .8f, a), .4f + 1.1f * d, Offset(x, y))
     }
@@ -814,7 +814,7 @@ private fun DrawScope.fogBand(
     if (alpha <= .005f) return
     // 一個矩形＋水平重複的貼圖著色器：貼圖本身首尾相接，取樣時自然接起來，沒有拼接的接縫
     val tw = W * (1.5f + .25f * variant)
-    val off = ((t * spd + par * W * dk + variant * 97f) % tw + tw) % tw
+    val off = ((t * Loop.v(spd, tw) + par * W * dk + variant * 97f) % tw + tw) % tw
     val paint = scratch.get()!!.fogPaint
     var sh = YushanRidge.fogShader(variant, off, cy - h / 2f, tw, h)
     if (mask != null) {
@@ -892,7 +892,7 @@ private fun DrawScope.ridge(st: BgState, skipFront: Boolean = false) {
             canvas.save()
             canvas.clipRect(0f, 0f, W, YushanRidge.skyBottom)   // 再往下一定是山，不用畫
             canvas.translate(par * W * .004f, 0f)
-            canvas.rotate(t * YushanRidge.TRAIL_DEG_PER_SEC, YushanRidge.POLE_X, YushanRidge.POLE_Y)
+            canvas.rotate(t * Loop.v(YushanRidge.TRAIL_DEG_PER_SEC, 360f), YushanRidge.POLE_X, YushanRidge.POLE_Y)
             YushanRidge.trailRect(sc.ridgeRect)
             canvas.drawBitmap(tr, null, sc.ridgeRect, tp)
             canvas.restore()
@@ -992,7 +992,7 @@ internal fun DrawScope.ridgeTrails(st: BgState, dimK: Float) {
     tp.colorFilter = null; tp.alpha = (a * 255).toInt()
     YushanRidge.trailRect(sc.ridgeRect)
     val strips = YushanRidge.skyStrips
-    val deg = st.at * YushanRidge.TRAIL_DEG_PER_SEC
+    val deg = st.at * Loop.v(YushanRidge.TRAIL_DEG_PER_SEC, 360f)
     var i = 0
     while (i < strips.size) {
         // 相鄰、天空最低點差不多的直條合成一段，少幾次繪製
@@ -1133,12 +1133,12 @@ private fun DrawScope.beams(st: BgState) {
         val w = .5f + 10f * h2.pow(3.2f)
         // 往焦點聚攏一些（越近聚得越多），再加上緩慢的左右飄移
         val pull = .22f * exp(-((base - lx) / (W * .3f)).pow(2))
-        val x = base + (lx - base) * pull + 7f * sin(t * (.12f + .22f * h3) + i * 1.9f) - (st.fx - .5f) * W * .08f * (1f - h2)
+        val x = base + (lx - base) * pull + 7f * sin(t * Loop.w(.12f + .22f * h3) + i * 1.9f) - (st.fx - .5f) * W * .08f * (1f - h2)
         // 亮度：各自緩慢呼吸；焦點附近整體亮一些
-        val breathe = .5f + .5f * sin(t * (.25f + .55f * h4) + i * 2.1f)
+        val breathe = .5f + .5f * sin(t * Loop.w(.25f + .55f * h4) + i * 2.1f)
         val a = (.12f + .55f * breathe * breathe) * (.45f + .7f * exp(-((x - lx) / (W * .28f)).pow(2))) * (.6f + .4f * (1f - h2))
         // 每條光束最亮的位置上下緩慢游移，兩端淡出
-        val yc = H * (.5f + .22f * sin(t * (.1f + .15f * h3) + i))
+        val yc = H * (.5f + .22f * sin(t * Loop.w(.1f + .15f * h3) + i))
         val span = H * (.55f + .45f * h4)
         val hOff = (h3 - .5f) * 80f
         // 同一張明暗輪廓貼圖、加法混合；顏色（含亮度）由畫筆給

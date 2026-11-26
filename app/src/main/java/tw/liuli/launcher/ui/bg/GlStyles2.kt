@@ -54,8 +54,9 @@ varying vec2 v_uv;
     object Simplex {
         fun params(st: BgState, out: FloatArray) {
             head(st, out)
-            val t = st.at * .1                          // Paper：0.2 × u_time × speed 0.5
-            out[4] = wrap(.3 * t, 64.0); out[5] = wrap(.32 * t, 64.0)
+            // Paper：0.2 × u_time × speed 0.5；兩層雜訊的平移對齊循環（雜訊每 64 格重複）
+            val at = st.at.toDouble()
+            out[4] = wrap(at * Loop.v(.03, 64.0), 64.0); out[5] = wrap(at * Loop.v(.032, 64.0), 64.0)
             put(out, 8, c(st, -150f, .6f, .45f))
             put(out, 12, c(st, 10f, .9f, .78f))
             put(out, 16, c(st, 0f, .95f, .58f))
@@ -167,8 +168,9 @@ void main() {
     object Warp {
         fun params(st: BgState, out: FloatArray) {
             head(st, out)
-            val t = .0625 * (st.at * .5 + 118.0)
-            out[4] = wrap(t, 64.0); out[5] = wrap(t, TAU)
+            // 雜訊的平移（每 64 格重複）和漩渦的相位（2π）分開對齊循環
+            val at = st.at.toDouble()
+            out[4] = wrap(7.375 + at * Loop.v(.03125, 64.0), 64.0); out[5] = wrap(7.375 + at * Loop.w(.03125), TAU)
             out[6] = .25f + .15f * st.pulse; out[7] = .8f
             // 深色帶有色相（以前是飽和度 .25 的近黑灰，和亮色混出來的過渡是灰濁的，看起來髒）；
             // 第三段改成較深的同色系（以前又是近黑，畫面上大塊黑斑）
@@ -297,8 +299,11 @@ void main() {
     object SoftAurora {
         fun params(st: BgState, out: FloatArray) {
             head(st, out)
+            // 各相位對齊循環；著色器裡不再把相位乘倍數（取模 2π 之後再乘 1.3、1.4，每轉一圈就跳一下），要的倍數在這裡算好
             val t = st.at.toDouble()
-            out[4] = wrap(t * .21, TAU); out[5] = wrap(t * .13, TAU); out[6] = wrap(t * .035, TAU); out[7] = wrap(t * .09, TAU); GlBackground.putTimes(out, t * .05)
+            out[4] = wrap(t * Loop.w(.21), TAU); out[5] = wrap(t * Loop.w(.13 * 1.3), TAU)
+            out[6] = wrap(t * Loop.w(.035), TAU); out[7] = wrap(t * Loop.w(.09), TAU)
+            GlBackground.putTimes(out, t * Loop.v(.05, 64.0), wrap(t * Loop.w(.035 * 1.4), TAU).toDouble())
             put(out, 8, c(st, 20f, .6f, .025f))
             put(out, 12, c(st, 30f, .5f, .09f))
             put(out, 16, c(st, 0f, .95f, .42f))
@@ -324,10 +329,10 @@ void main() {
   float x = v_uv.x * u_w.x;
   float t = u_vt.x + u_vf.x;
   vec3 k = vec3(0.0, 1.0, 2.0);
-  v_wv = 0.06 * sin(x * 2.1 + u_v1.x + k * 1.7) + 0.035 * sin(x * 4.3 - u_v1.y * 1.3 + k * 2.9)
+  v_wv = 0.06 * sin(x * 2.1 + u_v1.x + k * 1.7) + 0.035 * sin(x * 4.3 - u_v1.y + k * 2.9)
        + 0.1 * (vec3(gv(vec2(x * 1.1, t)), gv(vec2(x * 1.1 + 7.0, t)), gv(vec2(x * 1.1 + 14.0, t))) - 0.5);
   // 厚薄用兩個 sin（Mali-400 的頂點著色器最多 512 個指令，六次雜訊放不下）
-  v_th = 0.03 + 0.03 * (0.5 + 0.3 * sin(x * 1.9 + k * 5.0 + u_v1.z) + 0.2 * sin(x * 3.7 - k * 2.3 - u_v1.z * 1.4));
+  v_th = 0.03 + 0.03 * (0.5 + 0.3 * sin(x * 1.9 + k * 5.0 + u_v1.z) + 0.2 * sin(x * 3.7 - k * 2.3 - (u_vt.y + u_vf.y)));
   v_m = 0.5 + 0.5 * sin(x * 1.3 + k * 2.0 + u_v1.w);
   gl_Position = vec4(a_pos.x, a_pos.y * u_fy, 0.0, 1.0);
 }
@@ -382,7 +387,7 @@ void main() {
         fun params(st: BgState, out: FloatArray) {
             head(st, out)
             val act = (.35f + .65f * st.pulse).toDouble()
-            val dt = if (lastAt.isNaN()) 0.0 else (st.at - lastAt).toDouble().coerceIn(0.0, .25)
+            val dt = Loop.dt(st.at, lastAt).toDouble()
             lastAt = st.at
             phase += dt * (.09 + act * .07)   // 雙精度，不取模（各相位的週期沒有公倍數，取模會跳）
             val t = phase

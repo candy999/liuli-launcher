@@ -297,6 +297,8 @@ class BackgroundEngine {
     private var paceN = 0
     private var paceLastNs = 0L
     private var atD = 0.0
+    /** 量測用（adb ACTION=bgat:秒）：把動畫時鐘撥到某一秒（例如 3590，十秒後跨過循環的接縫），不存。 */
+    @Volatile var debugAtJump = -1.0
     private var coldStart = true
     fun startPaceLog() { paceN = 0; paceLastNs = 0L; paceLeft = paceBuf.size }
     private fun pace(ns: Long) {
@@ -666,7 +668,8 @@ class BackgroundEngine {
                     if (done) snapToTarget()
                     // 累加用雙精度（單精度一路加上去，幾個小時後每一格加的量會被捨入吃掉一部分，流動就不均勻）
                     // 持續流動也跟著播放速度（跟不上每秒 30 格時放慢，每格的變化量不變大）
-                    if (lastAmbT != 0L) { atD += min(t - lastAmbT, 100L) / 1000.0 * speed; st.at = atD.toFloat() }
+                    if (debugAtJump >= 0.0) { atD = debugAtJump % Loop.P; debugAtJump = -1.0 }
+                    if (lastAmbT != 0L) { atD = (atD + min(t - lastAmbT, 100L) / 1000.0 * speed) % Loop.P; st.at = atD.toFloat() }
                     lastAmbT = t
                     st.nowMs = t
                     st.record(t)

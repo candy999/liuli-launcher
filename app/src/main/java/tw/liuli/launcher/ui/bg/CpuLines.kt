@@ -149,7 +149,7 @@ internal object CpuLines {
         val sc = scratch.get()!!
         val u = h / 5.6f   // 一圈的間距＝畫面高度 ÷ 5.6，和 GPU 版一樣
         drawRect(col(st, 0f, .85f, .09f), size = Size(w, h))
-        val phase0 = ((st.at * .2 + st.ripple * .8) % (2 * PI)) / (2 * PI)
+        val phase0 = ((st.at * Loop.w(.2) + st.ripple * .8) % (2 * PI)) / (2 * PI)
         if (!forGlass()) {
             val scale = min(size.width / w, 2.5f)
             val m = sc.sMask
@@ -180,7 +180,7 @@ internal object CpuLines {
         // 遮罩還沒畫好（剛切過來）：直接填條紋的形狀
         val path = sc.spiralPath.takeIf { sc.spiralUnit == u }
             ?: spiralBand(u, kotlin.math.hypot(w, h), 3.0).asComposePath().also { sc.spiralPath = it; sc.spiralUnit = u }
-        val phase = ((st.at * .2 + st.ripple * .8) % (2 * PI)) / (2 * PI)
+        val phase = ((st.at * Loop.w(.2) + st.ripple * .8) % (2 * PI)) / (2 * PI)
         withTransform({
             translate(st.fx * w, st.fy * h)
             rotate((phase * 360.0).toFloat(), Offset.Zero)
@@ -266,7 +266,8 @@ internal object CpuLines {
         val sc = scratch.get()!!
         val tRibbon = sc.tRibbon; val tFineA = sc.tFineA; val tFineB = sc.tFineB
         val cell = h / 7f
-        val t = (st.at * .055).toDouble()
+        // 每秒捲 0.055 格，對齊成一個循環剛好捲過 64 的整數倍格（[flip] 每 64 格重複），歸零時接得上
+        val t = st.at * Loop.v(.055, 64.0)
         val width = T_WIDTH
         val bg = col(st, 0f, .75f, .13f); val rib = col(st, 40f, .85f, .48f)
         val edge = col(st, 20f, .8f, .38f); val fine = col(st, 0f, .8f, .24f)

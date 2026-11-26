@@ -33,12 +33,11 @@ internal object MeshGradient {
 
     /** u_p[0]＝(相位 t、相位 0.2t、漩渦、扭曲)；u_p[1..3]＝五個色點位置；u_p[4..8]＝五個色點顏色（rgb）。 */
     fun params(st: BgState, out: FloatArray) {
-        val t = 0.5 * (st.at * SPEED + 41.5)
-        out[0] = (t % TAU).toFloat()
-        out[1] = ((0.2 * t) % TAU).toFloat()
+        out[0] = ph(st, 1.0).toFloat()
+        out[1] = ph(st, 0.2).toFloat()
         out[2] = SWIRL + 0.25f * st.pulse
         out[3] = DISTORTION
-        val pos = positions(st, t)
+        val pos = positions(st)
         for (i in 0 until 10) out[4 + i] = pos[i]
         val cols = colors(st)
         for (i in 0 until N) {
@@ -49,15 +48,21 @@ internal object MeshGradient {
 
     private const val N = 5
 
+    /**
+     * 相位 k·t（t＝0.5·(at·SPEED＋41.5)，Paper 的時間），對齊循環：每個倍數 k 各自在一個循環裡轉整數圈，
+     * at 歸零時接得上（以前 t 一直加上去、取模 2π 再在著色器乘 0.2，每轉一圈 0.2 倍的那個就跳一下）。
+     */
+    private fun ph(st: BgState, k: Double) = (0.5 * 41.5 * k + st.at * Loop.w(0.5 * SPEED * k)) % TAU
+
     /** 五個色點的位置（0～1，y 往下）：Paper 的軌跡；第一團被焦點吸過去。 */
-    private fun positions(st: BgState, t: Double): FloatArray {
+    private fun positions(st: BgState): FloatArray {
         val p = FloatArray(10)
         for (i in 0 until N) {
             val a = i * .37
             val b = .6 + ((i / 3.0) % 1.0) * .9
             val c = .8 + (((i + 1) / 4.0) % 1.0)
-            p[i * 2] = (.5 + .5 * sin(t * b + a)).toFloat()
-            p[i * 2 + 1] = (.5 + .5 * cos(t * c + a * 1.5)).toFloat()
+            p[i * 2] = (.5 + .5 * sin(ph(st, b) + a)).toFloat()
+            p[i * 2 + 1] = (.5 + .5 * cos(ph(st, c) + a * 1.5)).toFloat()
         }
         p[0] += (st.fx - p[0]) * FOCUS_PULL
         p[1] += (st.fy - p[1]) * FOCUS_PULL
@@ -78,8 +83,7 @@ internal object MeshGradient {
 
     /** 著色器沒辦法用（GL 失敗）或第一張圖還沒好：CPU 用幾個柔邊的放射漸層近似。 */
     fun DrawScope.fallback(st: BgState, w: Float, h: Float) {
-        val t = 0.5 * (st.at * SPEED + 41.5)
-        val pos = positions(st, t)
+        val pos = positions(st)
         val cols = colors(st)
         drawRect(cols[4], size = Size(w, h))
         for (i in N - 2 downTo 0) {

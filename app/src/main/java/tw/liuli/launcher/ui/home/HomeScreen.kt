@@ -1144,6 +1144,8 @@ fun HomeScreen(
                 // 量測用（adb）：bgpace＝記錄接下來 300 格背景的間隔、印到 logcat（LiuliBg pace）；bgcap:30＝背景不升到每秒 60 格（比較用），bgcap:0 恢復；
                 // keylat:1＝每次按鍵印出「按下 → 下一格畫面畫完」的延遲（LiuliBg keylat）
                 "bgpace" -> engine.startPaceLog()
+                // bgat:3590＝把背景的動畫時鐘撥到第 3590 秒（循環 3600 秒，十秒後跨過接縫；檢查接縫用，不存）
+                "bgat" -> engine.debugAtJump = arg.toDoubleOrNull() ?: -1.0
                 // 量測用（adb）：bgstyle:mesh＝這次執行先換成某個背景樣式（不存設定）；glres:0～5＝著色器背景強制 1920×1080／1280×720／960×540／640×360／480×270／320×180，glres:-1 自動
                 "bgstyle" -> engine.applyStyle(BgStyle.byId(arg))
                 "glgrid" -> tw.liuli.launcher.ui.bg.GlBackground.debugWarp(grid = arg.toIntOrNull() ?: 0)

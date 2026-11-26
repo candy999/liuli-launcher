@@ -117,7 +117,7 @@ internal object LiquidEther {
     /** GL 執行緒：用最新的輸入推進流體、寫出小圖（主執行緒完全不用算）。 */
     fun simulate() {
         val at = glAt; val fx = glFx; val fy = glFy
-        val dt = if (lastAt < 0f || at < lastAt) 1f / 30f else min(.1f, at - lastAt)
+        val dt = if (lastAt < 0f) 1f / 30f else Loop.diff(at, lastAt).let { if (it < 0f) 1f / 30f else min(.1f, it) }
         lastAt = at
         if (dt > 0f) {
             val gx = fx * (W - 1); val gy = fy * (H - 1)
@@ -129,7 +129,7 @@ internal object LiquidEther {
             }
             lastFx = fx; lastFy = fy
             // 閒置時的指標：繞著焦點慢慢畫 8 字，一直輕輕攪動
-            val a = at * .45f
+            val a = at * Loop.w(.45f)   // 對齊循環：at 歸零時攪拌的指標接得上
             val ax = (fx + .22f * sin(a)).coerceIn(.05f, .95f) * (W - 1)
             val ay = (fy + .16f * sin(a * 2f)).coerceIn(.05f, .95f) * (H - 1)
             splat(ax, ay, cos(a) * 12f, cos(a * 2f) * 8f, dt * 1.4f, 3.4f, .18f)

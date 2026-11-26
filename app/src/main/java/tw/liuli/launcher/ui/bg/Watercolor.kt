@@ -50,6 +50,13 @@ internal object Watercolor {
     private var lastSpawnAt = -1e6f
     private var nextAmbient = 0f
     private val rnd = java.util.Random(0x5EED)
+    /**
+     * 自己的時鐘（秒）：只用背景動畫時鐘兩格之間的差往前走。動畫時鐘每個循環會歸零（[Loop]），
+     * 顏料的出生、壽命不能跟著歸零（以前歸零時會當成「時鐘重來」，整張紙清掉重滴）；走到 [REBASE] 就整批往回挪，單精度才夠用。
+     */
+    private var clk = 0f
+    private var lastAt = Float.NaN
+    private const val REBASE = 4096f
 
     /** 這一滴目前的濃度（0＝看不到）：淡入 × 稀釋 × 壽命尾聲的淡出 × 被擠掉時的快速淡出。 */
     private fun density(i: Int, at: Float): Float {
@@ -88,7 +95,13 @@ internal object Watercolor {
     }
 
     fun params(st: BgState, out: FloatArray) {
-        val at = st.at
+        val d = Loop.diff(st.at, lastAt)
+        if (lastAt.isNaN() || d > 0f) { clk += d.coerceIn(0f, .25f); lastAt = st.at }
+        if (clk > REBASE) {
+            clk -= REBASE; lastSpawnAt -= REBASE; nextAmbient -= REBASE
+            for (i in 0 until N) { birth[i] -= REBASE; if (retireAt[i] < 1e8f) retireAt[i] -= REBASE }
+        }
+        val at = clk
         val rip = st.ripple.roundToInt()
         if (lastRipple == Int.MIN_VALUE || at < lastSpawnAt - 1f) {
             // 第一次（或時鐘重來）：在焦點滴一滴大的，之後才開始自己滴
@@ -129,8 +142,9 @@ internal object Watercolor {
             out[o + 4] = c.red; out[o + 5] = c.green; out[o + 6] = c.blue; out[o + 7] = seed[i]
         }
         // 水流的時間相位（雙精度算、取模 64）
-        val t = at.toDouble()
-        GlBackground.putTimes(out, t * .05, t * .043, t * .03, t * .02)
+        // 水流的平移跟著動畫時鐘（循環），速度對齊成一個循環剛好走完雜訊的整數個週期（64 格）
+        val t = st.at.toDouble()
+        GlBackground.putTimes(out, t * Loop.v(.05, 64.0), t * Loop.v(.043, 64.0), t * Loop.v(.03, 64.0), t * Loop.v(.02, 64.0))
     }
 
     /** 紙的亮度：水彩是畫在淺色的紙上，但主畫面上有白字，所以紙調暗到中間調。 */

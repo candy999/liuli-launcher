@@ -63,8 +63,9 @@ internal object GlStyles {
 
         fun params(st: BgState, out: FloatArray) {
             // 時鐘只往前走：玻璃小圖用的是稍早的狀態快照，拿它來算不能把時鐘往回撥
-            val dt = if (lastAt.isNaN()) 0f else (st.at - lastAt).coerceIn(0f, .25f)
-            if (lastAt.isNaN() || st.at > lastAt) lastAt = st.at
+            val d = Loop.diff(st.at, lastAt)
+            val dt = d.coerceIn(0f, .25f)
+            if (lastAt.isNaN() || d > 0f) lastAt = st.at
             val tx = st.fx * 16f / 9f * .8f; val ty = st.fy * .8f
             if (cx.isNaN()) { cx = tx; cy = ty; ox = tx; oy = ty }
             // 攪拌中心：阻尼彈簧（ω＝5、ζ＝0.55，約 0.6 秒到、稍微超過一點再回來）；拆小步才穩
