@@ -166,6 +166,45 @@ void main() {
 }
 """
 
+        /**
+         * 片段著色器有全精度（highp）的 GPU（例如 PowerVR）：扭曲整個在片段著色器逐像素算，色帶邊緣沒有網格內插的折角
+         * （頂點版的網格 96×54，每格約 20 像素；扭曲很彎的地方色帶的邊會變成一格一格的階梯）。
+         * 座標用 gl_FragCoord 換算（全精度），時間與比例用和頂點著色器同名、同為全精度的 u_w／u_v1。
+         */
+        const val SHADER_HP = HEAD + """
+precision highp float;
+uniform vec4 u_w;
+uniform vec4 u_v1;
+uniform float u_fy;
+""" + GlBackground.VNOISE + """
+void main() {
+  vec2 q = gl_FragCoord.xy / u_res;
+  if (u_fy < 0.0) q.y = 1.0 - q.y;
+  vec2 uv = (q - 0.5) * vec2(u_w.x, 1.0) * 2.2;
+  float t = u_v1.x;
+  float n1 = gv(uv + t);
+  float n2 = gv(uv * 2.0 - t);
+  float a = n1 * 6.2831853;
+  uv += 4.0 * u_v1.z * n2 * vec2(cos(a), sin(a));
+  float tt = u_v1.y;
+  float sw = u_v1.w;
+  for (int i = 1; i < 8; i++) {
+    float fi = float(i);
+    uv.x += sw / fi * cos(tt + fi * 1.5 * uv.y);
+    uv.y += sw / fi * cos(tt + fi * uv.x);
+  }
+  vec2 cs = uv * 0.85;
+  float shape = 0.5 + 0.5 * sin(cs.x) * cos(cs.y) - 0.1073;
+  float mixer = shape * 3.0;
+  vec3 col = u_p[2].rgb;
+  col = mix(col, u_p[3].rgb, clamp(mixer, 0.0, 1.0));
+  col = mix(col, u_p[4].rgb, clamp(mixer - 1.0, 0.0, 1.0));
+  col = mix(col, u_p[5].rgb, clamp(mixer - 2.0, 0.0, 1.0));
+  """ + DITHER + """
+  gl_FragColor = vec4(col, 1.0);
+}
+"""
+
         const val SHADER = HEAD + """
 varying vec2 v_cs;
 void main() {

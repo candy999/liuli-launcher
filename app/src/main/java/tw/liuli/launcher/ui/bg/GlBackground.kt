@@ -77,6 +77,22 @@ object GlBackground {
      */
     private val levels = IntArray(BgStyle.entries.size) { -1 }
     @Volatile var debugLevel = -1
+    /**
+     * 片段著色器支援全精度（highp，例如 PowerVR）：扭曲色帶改成逐像素算（[GlStyles2.Warp.SHADER_HP]），沒有網格折角。
+     * Mali-470 只有半精度，照舊在頂點算。GL 執行緒初始化時設定。
+     */
+    @Volatile var fragHighp = false
+        private set
+    /** 量測用：adb ACTION=glgrid:N 把扭曲色帶（頂點版）的網格改成 N×(N·9／16)；0＝預設。glhp:0 強制用頂點版。 */
+    @Volatile var debugGrid = 0
+    @Volatile var debugNoHighp = false
+    fun debugWarp(grid: Int = debugGrid, noHighp: Boolean = debugNoHighp) {
+        debugGrid = grid; debugNoHighp = noHighp
+        handler?.post {
+            if (noHighp && fragHighp) fragHighp = false
+            programs.remove(BgStyle.WARP)
+        }
+    }
     /** 每個樣式最近在學到的檔位量到的 GPU 時間（毫秒；-1＝還沒量）：判斷「便宜的樣式不降」。 */
     private val lastCost = FloatArray(BgStyle.entries.size) { -1f }
     /** 操作中降到的檔位：640×360 */
@@ -667,6 +683,11 @@ object GlBackground {
         val mv = IntArray(1)
         GLES20.glGetIntegerv(GLES20.GL_MAX_FRAGMENT_UNIFORM_VECTORS, mv, 0)
         Log.i(TAG, "max fragment uniform vectors ${mv[0]}")
+        val rg = IntArray(2); val pr = IntArray(1)
+        GLES20.glGetShaderPrecisionFormat(GLES20.GL_FRAGMENT_SHADER, GLES20.GL_HIGH_FLOAT, rg, 0, pr, 0)
+        val hp = pr[0] >= 20 && !debugNoHighp
+        if (hp != fragHighp) { fragHighp = hp; programs.remove(BgStyle.WARP) }
+        Log.i(TAG, "fragment highp precision ${pr[0]} bits → ${if (fragHighp) "扭曲色帶逐像素算" else "扭曲色帶頂點算"}")
         val ext = GLES20.glGetString(GLES20.GL_EXTENSIONS) ?: ""
         Log.i(TAG, "GL ${GLES20.glGetString(GLES20.GL_RENDERER)} / ${GLES20.glGetString(GLES20.GL_VERSION)}, derivatives=${ext.contains("GL_OES_standard_derivatives")}")
     }
@@ -696,7 +717,7 @@ object GlBackground {
      * 但網格太密，三角形只剩幾個像素，Mali-470 的片段處理效率會掉很多（極光簾 320×180 配 96×54 從 15ms 變 35ms），其他樣式用 32×18。
      */
     private fun gridSize(style: BgStyle) = when (style) {
-        BgStyle.WARP -> 96 to 54
+        BgStyle.WARP -> if (debugGrid > 0) debugGrid to debugGrid * 9 / 16 else if (fragHighp) 32 to 18 else 96 to 54
         BgStyle.SIMPLEX -> 64 to 36
         else -> 32 to 18
     }
@@ -867,7 +888,7 @@ void main() { v_uv = a_pos * 0.5 + 0.5; gl_Position = vec4(a_pos.x, a_pos.y * u_
 internal fun BgStyle.glVertex(): String = when (this) {
     BgStyle.SWIRL -> GlStyles.Swirl.VERTEX
     BgStyle.SIMPLEX -> GlStyles2.Simplex.VERTEX
-    BgStyle.WARP -> GlStyles2.Warp.VERTEX
+    BgStyle.WARP -> if (GlBackground.fragHighp) GlBackground.VERTEX else GlStyles2.Warp.VERTEX
     BgStyle.SOFTAURORA -> GlStyles2.SoftAurora.VERTEX
     else -> GlBackground.VERTEX
 }
@@ -878,7 +899,7 @@ internal fun BgStyle.glShader(): String = when (this) {
     BgStyle.SWIRL -> GlStyles.Swirl.SHADER
     BgStyle.WATERCOLOR -> Watercolor.SHADER
     BgStyle.SIMPLEX -> GlStyles2.Simplex.SHADER
-    BgStyle.WARP -> GlStyles2.Warp.SHADER
+    BgStyle.WARP -> if (GlBackground.fragHighp) GlStyles2.Warp.SHADER_HP else GlStyles2.Warp.SHADER
     BgStyle.SOFTAURORA -> GlStyles2.SoftAurora.SHADER
     BgStyle.CURTAIN -> GlStyles2.Curtain.SHADER
     BgStyle.LIQUID -> LiquidEther.SHADER

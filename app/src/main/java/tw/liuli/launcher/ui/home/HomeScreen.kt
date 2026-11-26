@@ -1146,6 +1146,8 @@ fun HomeScreen(
                 "bgpace" -> engine.startPaceLog()
                 // 量測用（adb）：bgstyle:mesh＝這次執行先換成某個背景樣式（不存設定）；glres:0～5＝著色器背景強制 1920×1080／1280×720／960×540／640×360／480×270／320×180，glres:-1 自動
                 "bgstyle" -> engine.applyStyle(BgStyle.byId(arg))
+                "glgrid" -> tw.liuli.launcher.ui.bg.GlBackground.debugWarp(grid = arg.toIntOrNull() ?: 0)
+                "glhp" -> tw.liuli.launcher.ui.bg.GlBackground.debugWarp(noHighp = arg == "0")
                 "glres" -> tw.liuli.launcher.ui.bg.GlBackground.debugLevel = arg.toIntOrNull() ?: -1
                 "glbench" -> tw.liuli.launcher.ui.bg.GlBackground.bench()
                 // gllog:1＝一直印著色器背景的 GPU 耗時（LiuliGl）與玻璃小圖的 CPU 成本（LiuliBg glass）
